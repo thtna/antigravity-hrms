@@ -104,7 +104,9 @@ export function LeaveProcessModal({ isOpen, onClose, onSuccess, request }: Leave
     }
   }
 
-  const fullName = `${request.employee.lastName} ${request.employee.firstName}`;
+  const fullName = request.employee
+    ? `${request.employee.lastName || ''} ${request.employee.firstName || ''}`.trim() || 'Nhân viên'
+    : 'Nhân viên';
   const dateLabel =
     request.startDate === request.endDate
       ? request.startDate

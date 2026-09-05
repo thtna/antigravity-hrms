@@ -83,8 +83,10 @@ const STATUS_BADGE_CLASSES: Record<string, string> = {
 };
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
-function formatDate(str: string) {
-  return new Date(str).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+function formatDate(str?: string | null) {
+  if (!str) return 'N/A';
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? str : d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
@@ -126,10 +128,17 @@ function LeavesContent() {
       const res = await fetch(`/api/v1/leaves?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error?.message || 'Không tải được danh sách đơn.');
-      setItems(data.data.items);
-      setMeta(data.data.meta);
+      
+      const itemsList = Array.isArray(data.data)
+        ? data.data
+        : Array.isArray(data.data?.items)
+          ? data.data.items
+          : [];
+      setItems(itemsList);
+      setMeta(data.meta || data.data?.meta || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Lỗi không xác định');
+      setItems([]);
     } finally {
       setLoading(false);
     }
@@ -259,7 +268,7 @@ function LeavesContent() {
         {/* List */}
         {loading ? (
           <SkeletonTable rows={6} cols={6} />
-        ) : items.length === 0 ? (
+        ) : !items || items.length === 0 ? (
           <EmptyState
             icon="inbox"
             title="Không có đơn nào"
@@ -280,11 +289,13 @@ function LeavesContent() {
                 <span>Hành động</span>
               </div>
 
-              {items.map((item) => {
+              {(items || []).map((item) => {
                 const typeCfg = TYPE_CONFIG[item.requestType];
                 const statusCfg = STATUS_CONFIG[item.status];
                 const TypeIcon = typeCfg?.Icon ?? CalendarDays;
-                const fullName = `${item.employee.lastName} ${item.employee.firstName}`;
+                const fullName = item.employee 
+                  ? `${item.employee.lastName || ''} ${item.employee.firstName || ''}`.trim() || 'Nhân viên'
+                  : 'Nhân viên';
                 const dateStr =
                   item.startDate === item.endDate
                     ? formatDate(item.startDate)
@@ -303,8 +314,8 @@ function LeavesContent() {
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-white truncate">{fullName}</p>
                         <p className="text-xs text-slate-500 truncate">
-                          {item.employee.employeeCode}
-                          {item.employee.department ? ` · ${item.employee.department.name}` : ''}
+                          {item.employee?.employeeCode || 'N/A'}
+                          {item.employee?.department ? ` · ${item.employee.department.name}` : ''}
                         </p>
                       </div>
                     </div>
