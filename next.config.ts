@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // [PHASE 26] Standalone output for optimized Docker image (~3x smaller)
-  output: 'standalone',
+  // [PHASE 26] Standalone output for Docker, disabled on Vercel (Vercel manages serverless packaging)
+  output: process.env.VERCEL ? undefined : 'standalone',
 
   // [PHASE 26] Exclude Windows system font paths from standalone trace.
   // pdfkit traces C:\Windows\Fonts on Windows builders — irrelevant in Linux containers.
