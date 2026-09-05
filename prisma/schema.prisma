@@ -1,0 +1,685 @@
+// ==============================================================================
+// ANTIGRAVITY MASTER PROJECT — PRODUCTION PRISMA SCHEMA
+// ==============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------------------------
+// 1. IAM & RBAC
+// ------------------------------------------------------------------------------
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  employee      Employee?
+  userRoles     UserRole[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+  qrTokensCreated QrAttendanceToken[] @relation("QrTokenCreatedBy")
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  module      String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String @map("user_id")
+  roleId String @map("role_id")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// ------------------------------------------------------------------------------
+// 2. ORGANIZATION & HR CORE
+// ------------------------------------------------------------------------------
+
+model Department {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  name        String
+  description String?
+  parentId    String?   @map("parent_id")
+  managerId   String?   @map("manager_id")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  parentDepartment Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  subDepartments   Department[] @relation("DepartmentHierarchy")
+  manager          Employee?    @relation("DepartmentManager", fields: [managerId], references: [id], onDelete: SetNull)
+  employees        Employee[]   @relation("DepartmentEmployees")
+  kpis             Kpi[]
+
+  @@map("departments")
+}
+
+model Position {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  title           String
+  description     String?
+  baseSalaryGrade Decimal   @default(0.00) @map("base_salary_grade") @db.Decimal(14, 2)
+  minSalary       Decimal   @default(0.00) @map("min_salary") @db.Decimal(14, 2)
+  maxSalary       Decimal   @default(0.00) @map("max_salary") @db.Decimal(14, 2)
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  employees Employee[]
+
+  @@map("positions")
+}
+
+model Worksite {
+  id           String   @id @default(uuid())
+  name         String
+  address      String
+  latitude     Decimal  @db.Decimal(10, 8)
+  longitude    Decimal  @db.Decimal(11, 8)
+  radiusMeters Int      @default(100) @map("radius_meters")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  employees Employee[]
+
+  @@map("worksites")
+}
+
+model Employee {
+  id              String    @id @default(uuid())
+  userId          String    @unique @map("user_id")
+  employeeCode    String    @unique @map("employee_code")
+  firstName       String    @map("first_name")
+  lastName        String    @map("last_name")
+  avatarUrl       String?   @map("avatar_url")
+  gender          String    @default("MALE")
+  dob             DateTime  @default(now()) @db.Date
+  identityCard    String?   @unique @map("identity_card")
+  phoneNumber     String    @map("phone_number")
+  departmentId    String    @map("department_id")
+  positionId      String    @map("position_id")
+  worksiteId      String?   @map("worksite_id")
+  hireDate        DateTime  @default(now()) @map("hire_date") @db.Date
+  contractType    String    @default("PROBATION") @map("contract_type")
+  contractSalary  Decimal   @default(0.00) @map("contract_salary") @db.Decimal(14, 2)
+  hourlyRate      Decimal   @default(0.00) @map("hourly_rate") @db.Decimal(10, 2)
+  insuranceSalary Decimal   @default(0.00) @map("insurance_salary") @db.Decimal(14, 2)
+  taxCode         String?   @map("tax_code")
+  dependentsCount Int       @default(0) @map("dependents_count")
+  bankAccountNo   String?   @map("bank_account_no")
+  bankName        String?   @map("bank_name")
+  documents       Json?     @default("[]")
+  status          String    @default("ACTIVE")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  user                 User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  department           Department               @relation("DepartmentEmployees", fields: [departmentId], references: [id], onDelete: Restrict)
+  managedDepartments   Department[]             @relation("DepartmentManager")
+  position             Position                 @relation(fields: [positionId], references: [id], onDelete: Restrict)
+  worksite             Worksite?                @relation(fields: [worksiteId], references: [id], onDelete: SetNull)
+  schedules            EmployeeSchedule[]
+  recurringSchedules   RecurringSchedule[]
+  attendances          Attendance[]
+  adjustmentsRequested AttendanceAdjustment[]   @relation("EmployeeAdjustments")
+  adjustmentsApproved  AttendanceAdjustment[]   @relation("ApproverAdjustments")
+  leaveRequests        LeaveRequest[]           @relation("EmployeeLeaves")
+  leaveApproved        LeaveRequest[]           @relation("ApproverLeaves")
+  kpiResults           EmployeeKpiResult[]      @relation("EmployeeKpiResults")
+  evaluatedKpis        EmployeeKpiResult[]      @relation("EvaluatedKpiResults")
+  bonusesPenalties     EmployeeBonusPenalty[]   @relation("EmployeeBonusesPenalties")
+  bonusesApproved      EmployeeBonusPenalty[]   @relation("ApprovedBonusesPenalties")
+  payrolls             Payroll[]
+  payrollApprovals     PayrollApproval[]
+  payrollAdjustments   PayrollAdjustment[]      @relation("EmployeePayrollAdjustments")
+  requestedAdjustments PayrollAdjustment[]      @relation("RequesterPayrollAdjustments")
+  approvedAdjustments  PayrollAdjustment[]      @relation("ApproverPayrollAdjustments")
+  qrTokensUsed         QrAttendanceToken[]      @relation("QrTokenUsedBy")
+
+  @@index([departmentId])
+  @@index([positionId])
+  @@index([worksiteId])
+  @@index([status, deletedAt])
+  @@map("employees")
+}
+
+// ------------------------------------------------------------------------------
+// 3. WORK SHIFTS, ROSTER & ATTENDANCE
+// ------------------------------------------------------------------------------
+
+model WorkShift {
+  id                 String    @id @default(uuid())
+  code               String    @unique
+  name               String
+  description        String?
+  shiftType          String    @default("FIXED") @map("shift_type") // FIXED | FLEXIBLE
+  startTime          String    @map("start_time") // Format "HH:mm:ss" or "HH:mm"
+  endTime            String    @map("end_time")   // Format "HH:mm:ss" or "HH:mm"
+  breakMinutes       Int       @default(60) @map("break_minutes")
+  isOvernight        Boolean   @default(false) @map("is_overnight")
+  gracePeriodLate    Int       @default(15) @map("grace_period_late")
+  gracePeriodEarly   Int       @default(15) @map("grace_period_early")
+  standardWorkHours  Decimal   @default(8.00) @map("standard_work_hours") @db.Decimal(4, 2)
+  isActive           Boolean   @default(true) @map("is_active")
+  effectiveFrom      DateTime  @default(now()) @map("effective_from") @db.Date
+  effectiveTo        DateTime? @map("effective_to") @db.Date
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt          DateTime? @map("deleted_at")
+
+  schedules          EmployeeSchedule[]
+  recurringSchedules RecurringSchedule[]
+
+  @@map("work_shifts")
+}
+
+model EmployeeSchedule {
+  id             String   @id @default(uuid())
+  employeeId     String   @map("employee_id")
+  shiftId        String   @map("shift_id")
+  workDate       DateTime @map("work_date") @db.Date
+  status         String   @default("SCHEDULED") // SCHEDULED | COMPLETED | ABSENT | LEAVE
+  isTemporary    Boolean  @default(false) @map("is_temporary") // Temporary schedule override
+  overrideReason String?  @map("override_reason")
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+
+  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  shift      WorkShift   @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  attendance Attendance?
+
+  @@unique([employeeId, workDate])
+  @@index([employeeId, workDate])
+  @@index([shiftId])
+  @@index([workDate])
+  @@map("employee_schedules")
+}
+
+model RecurringSchedule {
+  id            String    @id @default(uuid())
+  employeeId    String    @map("employee_id")
+  shiftId       String    @map("shift_id")
+  dayOfWeek     Int       @map("day_of_week") // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  effectiveFrom DateTime  @default(now()) @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shift    WorkShift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, dayOfWeek])
+  @@map("recurring_schedules")
+}
+
+model Attendance {
+  id               String    @id @default(uuid())
+  scheduleId       String?   @unique @map("schedule_id")
+  employeeId       String    @map("employee_id")
+  workDate         DateTime  @map("work_date") @db.Date
+  checkInTime      DateTime? @map("check_in_time")
+  checkOutTime     DateTime? @map("check_out_time")
+  checkInMethod    String?   @map("check_in_method")
+  checkOutMethod   String?   @map("check_out_method")
+  checkInLat       Decimal?  @map("check_in_lat") @db.Decimal(10, 8)
+  checkInLng       Decimal?  @map("check_in_lng") @db.Decimal(11, 8)
+  checkOutLat      Decimal?  @map("check_out_lat") @db.Decimal(10, 8)
+  checkOutLng      Decimal?  @map("check_out_lng") @db.Decimal(11, 8)
+  lateMinutes      Int       @default(0) @map("late_minutes")
+  earlyMinutes     Int       @default(0) @map("early_minutes")
+  actualWorkHours  Decimal   @default(0.00) @map("actual_work_hours") @db.Decimal(5, 2)
+  otHours          Decimal   @default(0.00) @map("ot_hours") @db.Decimal(5, 2)
+  status           String    @default("PENDING")
+  notes            String?
+
+  schedule         EmployeeSchedule?      @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  employee         Employee               @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  adjustments      AttendanceAdjustment[]
+
+  @@unique([employeeId, workDate])
+  @@index([employeeId, workDate])
+  @@index([status, workDate])
+  @@index([workDate])
+  @@index([employeeId])
+  @@map("attendance")
+}
+
+model AttendanceAdjustment {
+  id                String    @id @default(uuid())
+  attendanceId      String?   @map("attendance_id")
+  employeeId        String    @map("employee_id")
+  workDate          DateTime  @map("work_date") @db.Date
+  correctionType    String    @default("FULL_CORRECTION") @map("correction_type")
+  requestedCheckIn  DateTime? @map("requested_check_in")
+  requestedCheckOut DateTime? @map("requested_check_out")
+  overtimeMinutes   Int?      @map("overtime_minutes")
+  reason            String
+  evidenceUrl       String?   @map("evidence_url")
+  approverId        String?   @map("approver_id")
+  status            String    @default("PENDING")
+  approvalNotes     String?   @map("approval_notes")
+  overrideCheckIn   DateTime? @map("override_check_in")
+  overrideCheckOut  DateTime? @map("override_check_out")
+  processedAt       DateTime? @map("processed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  attendance Attendance? @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
+  employee   Employee    @relation("EmployeeAdjustments", fields: [employeeId], references: [id], onDelete: Restrict)
+  approver   Employee?   @relation("ApproverAdjustments", fields: [approverId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, workDate, status])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("attendance_adjustments")
+}
+
+model QrAttendanceToken {
+  id               String    @id @default(uuid())
+  code             String    @unique
+  tokenType        String    @default("ANY") @map("token_type") // CHECK_IN, CHECK_OUT, ANY
+  signature        String
+  location         String?
+  expiresAt        DateTime  @map("expires_at")
+  isUsed           Boolean   @default(false) @map("is_used")
+  usedAt           DateTime? @map("used_at")
+  usedByEmployeeId String?   @map("used_by_employee_id")
+  createdByUserId  String?   @map("created_by_user_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  usedByEmployee   Employee? @relation("QrTokenUsedBy", fields: [usedByEmployeeId], references: [id], onDelete: SetNull)
+  createdByUser    User?     @relation("QrTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([code])
+  @@index([expiresAt, isUsed])
+  @@map("qr_attendance_tokens")
+}
+
+// ------------------------------------------------------------------------------
+// 4. LEAVES & HOLIDAYS
+// ------------------------------------------------------------------------------
+
+model LeaveType {
+  id                  String   @id @default(uuid())
+  code                String   @unique
+  name                String
+  isPaid              Boolean  @default(true) @map("is_paid")
+  deductFromAllowance Boolean  @default(true) @map("deduct_from_allowance")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  leaveRequests LeaveRequest[]
+
+  @@map("leave_types")
+}
+
+model LeaveRequest {
+  id            String    @id @default(uuid())
+  employeeId    String    @map("employee_id")
+  leaveTypeId   String?   @map("leave_type_id")
+  requestType   String    @default("LEAVE") @map("request_type") // LEAVE, LATE_REQUEST, EARLY_LEAVE
+  startDate     DateTime  @map("start_date") @db.Date
+  endDate       DateTime  @map("end_date") @db.Date
+  expectedTime  String?   @map("expected_time")
+  durationDays  Decimal   @default(1.0) @map("duration_days") @db.Decimal(4, 1)
+  reason        String
+  status        String    @default("PENDING")
+  approverId    String?   @map("approver_id")
+  approvalNotes String?   @map("approval_notes")
+  approvedAt    DateTime? @map("approved_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  employee  Employee   @relation("EmployeeLeaves", fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveType LeaveType? @relation(fields: [leaveTypeId], references: [id], onDelete: SetNull)
+  approver  Employee?  @relation("ApproverLeaves", fields: [approverId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, startDate, endDate])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("leave_requests")
+}
+
+model Holiday {
+  id          String   @id @default(uuid())
+  name        String
+  date        DateTime @unique @db.Date
+  isRecurring Boolean  @default(false) @map("is_recurring")
+
+  @@map("holidays")
+}
+
+// ------------------------------------------------------------------------------
+// 5. KPI, PERFORMANCE & REWARDS/PENALTIES
+// ------------------------------------------------------------------------------
+
+model Kpi {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  title           String
+  description     String?
+  metricType      String    @default("NUMERIC") @map("metric_type")
+  targetValue     Decimal   @map("target_value") @db.Decimal(14, 2)
+  unit            String    @default("PERCENT") // PERCENT, VND, TASKS, HOURS, POINTS, CONTRACTS
+  period          String    @default("MONTHLY") // MONTHLY, QUARTERLY, YEARLY
+  departmentId    String?   @map("department_id")
+  calculationType String    @default("HIGHER_IS_BETTER") @map("calculation_type") // HIGHER_IS_BETTER, LOWER_IS_BETTER, MILESTONE
+  baseBonusAmount Decimal   @default(0.00) @map("base_bonus_amount") @db.Decimal(14, 2)
+  bonusFormula    String    @default("TIERED") @map("bonus_formula") // LINEAR, TIERED, ACCELERATOR, THRESHOLD_ONLY
+  weight          Decimal   @default(100.00) @db.Decimal(5, 2)
+  status          String    @default("ACTIVE")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  department      Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  results         EmployeeKpiResult[]
+
+  @@index([departmentId])
+  @@map("kpis")
+}
+
+model EmployeeKpiResult {
+  id             String    @id @default(uuid())
+  employeeId     String    @map("employee_id")
+  kpiId          String    @map("kpi_id")
+  period         String    // YYYY-MM, YYYY-QX, YYYY
+  targetValue    Decimal?  @map("target_value") @db.Decimal(14, 2)
+  actualValue    Decimal   @map("actual_value") @db.Decimal(14, 2)
+  completionRate Decimal   @map("completion_rate") @db.Decimal(7, 2)
+  score          Decimal   @db.Decimal(7, 2)
+  weightedScore  Decimal   @map("weighted_score") @db.Decimal(7, 2)
+  bonusAmount    Decimal   @default(0.00) @map("bonus_amount") @db.Decimal(14, 2)
+  managerComment String?   @map("manager_comment")
+  status         String    @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, REJECTED
+  evaluatorId    String?   @map("evaluator_id")
+  evaluatedAt    DateTime? @map("evaluated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  employee       Employee  @relation("EmployeeKpiResults", fields: [employeeId], references: [id], onDelete: Restrict)
+  evaluator      Employee? @relation("EvaluatedKpiResults", fields: [evaluatorId], references: [id], onDelete: SetNull)
+  kpi            Kpi       @relation(fields: [kpiId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, kpiId, period])
+  @@index([employeeId, period])
+  @@index([kpiId])
+  @@map("employee_kpi_results")
+}
+
+model EmployeeBonusPenalty {
+  id            String    @id @default(uuid())
+  employeeId    String    @map("employee_id")
+  type          String    @default("BONUS") // 'BONUS' or 'PENALTY'
+  category      String    // 'KPI', 'OVERTIME', 'PROJECT', 'TIME', 'OTHER'
+  amount        Decimal   @db.Decimal(14, 2)
+  effectiveDate DateTime  @map("effective_date") @db.Date
+  period        String    // YYYY-MM
+  reason        String
+  notes         String?
+  status        String    @default("PENDING") // PENDING, APPROVED, REJECTED, CANCELLED
+  approvedBy    String?   @map("approved_by")
+  approvedAt    DateTime? @map("approved_at")
+  approvalNotes String?   @map("approval_notes")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  employee Employee  @relation("EmployeeBonusesPenalties", fields: [employeeId], references: [id], onDelete: Restrict)
+  approver Employee? @relation("ApprovedBonusesPenalties", fields: [approvedBy], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, period, status])
+  @@index([category, status])
+  @@map("employee_bonuses_penalties")
+}
+
+// ------------------------------------------------------------------------------
+// 6. PAYROLL ENGINE & PAYSLIP
+// ------------------------------------------------------------------------------
+
+model PayrollRule {
+  id                String    @id @default(uuid())
+  code              String    @unique
+  name              String
+  description       String?
+  isDefault         Boolean   @default(false) @map("is_default")
+  isActive          Boolean   @default(true) @map("is_active")
+  version           Int       @default(1)
+  salaryBasisConfig Json      @map("salary_basis_config")
+  overtimeConfig    Json      @map("overtime_config")
+  insuranceConfig   Json      @map("insurance_config")
+  taxConfig         Json      @map("tax_config")
+  deductionConfig   Json      @map("deduction_config")
+  roundingConfig    Json      @map("rounding_config")
+  effectiveFrom     DateTime  @map("effective_from") @db.Date
+  effectiveTo       DateTime? @map("effective_to") @db.Date
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  payrollPeriods PayrollPeriod[]
+
+  @@map("payroll_rules")
+}
+
+model PayrollPeriod {
+  id               String    @id @default(uuid())
+  code             String    @unique
+  name             String
+  payrollRuleId    String?   @map("payroll_rule_id")
+  startDate        DateTime  @map("start_date") @db.Date
+  endDate          DateTime  @map("end_date") @db.Date
+  standardWorkDays Int       @default(22) @map("standard_work_days")
+  status           String    @default("DRAFT")
+  totalGrossPayout Decimal   @default(0.00) @map("total_gross_payout") @db.Decimal(16, 2)
+  totalNetPayout   Decimal   @default(0.00) @map("total_net_payout") @db.Decimal(16, 2)
+  closedAt         DateTime? @map("closed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  payrollRule PayrollRule?      @relation(fields: [payrollRuleId], references: [id], onDelete: SetNull)
+  payrolls    Payroll[]
+  approvals   PayrollApproval[]
+  adjustments PayrollAdjustment[]
+
+  @@index([status])
+  @@index([startDate, endDate])
+  @@map("payroll_periods")
+}
+
+model Payroll {
+  id                    String   @id @default(uuid())
+  periodId              String   @map("period_id")
+  employeeId            String   @map("employee_id")
+  contractSalary        Decimal  @map("contract_salary") @db.Decimal(14, 2)
+  actualWorkDays        Decimal  @map("actual_work_days") @db.Decimal(4, 2)
+  paidLeaveDays         Decimal  @map("paid_leave_days") @db.Decimal(4, 2)
+  proratedSalary        Decimal  @map("prorated_salary") @db.Decimal(14, 2)
+  otPay                 Decimal  @default(0.00) @map("ot_pay") @db.Decimal(14, 2)
+  kpiBonus              Decimal  @default(0.00) @map("kpi_bonus") @db.Decimal(14, 2)
+  allowances            Decimal  @default(0.00) @db.Decimal(14, 2)
+  otherBonuses          Decimal  @default(0.00) @map("other_bonuses") @db.Decimal(14, 2)
+  totalPenalties        Decimal  @default(0.00) @map("total_penalties") @db.Decimal(14, 2)
+  grossIncome           Decimal  @map("gross_income") @db.Decimal(14, 2)
+  socialInsurance       Decimal  @map("social_insurance") @db.Decimal(14, 2)
+  healthInsurance       Decimal  @map("health_insurance") @db.Decimal(14, 2)
+  unemploymentInsurance Decimal  @map("unemployment_insurance") @db.Decimal(14, 2)
+  taxableIncome         Decimal  @map("taxable_income") @db.Decimal(14, 2)
+  personalRelief        Decimal  @default(11000000.00) @map("personal_relief") @db.Decimal(14, 2)
+  dependentsRelief      Decimal  @map("dependents_relief") @db.Decimal(14, 2)
+  assessableIncome      Decimal  @map("assessable_income") @db.Decimal(14, 2)
+  pitTax                Decimal  @map("pit_tax") @db.Decimal(14, 2)
+  netSalary             Decimal  @map("net_salary") @db.Decimal(14, 2)
+  paymentStatus         String   @default("UNPAID") @map("payment_status")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  period      PayrollPeriod       @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  employee    Employee            @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  details     PayrollDetail[]
+  adjustments PayrollAdjustment[]
+
+  @@unique([periodId, employeeId])
+  @@index([periodId, employeeId])
+  @@index([employeeId])
+  @@map("payroll")
+}
+
+model PayrollDetail {
+  id          String  @id @default(uuid())
+  payrollId   String  @map("payroll_id")
+  itemType    String  @map("item_type")
+  itemCode    String  @map("item_code")
+  description String
+  amount      Decimal @db.Decimal(14, 2)
+
+  payroll Payroll @relation(fields: [payrollId], references: [id], onDelete: Cascade)
+
+  @@index([payrollId])
+  @@map("payroll_details")
+}
+
+model PayrollApproval {
+  id         String   @id @default(uuid())
+  periodId   String   @map("period_id")
+  stage      String
+  reviewerId String?  @map("reviewer_id")
+  actorEmail String?  @map("actor_email")
+  decision   String
+  comments   String?
+  actionAt   DateTime @default(now()) @map("action_at")
+
+  period   PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  reviewer Employee?     @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([periodId, actionAt(sort: Desc)])
+  @@map("payroll_approvals")
+}
+
+model PayrollAdjustment {
+  id              String    @id @default(uuid())
+  periodId        String    @map("period_id")
+  payrollId       String?   @map("payroll_id")
+  employeeId      String    @map("employee_id")
+  requesterId     String    @map("requester_id")
+  approverId      String?   @map("approver_id")
+  adjustmentType  String    @map("adjustment_type")
+  direction       String    @default("ADDITION")
+  amount          Decimal   @db.Decimal(14, 2)
+  reason          String
+  status          String    @default("PENDING")
+  approvalNotes   String?   @map("approval_notes")
+  approvedAt      DateTime? @map("approved_at")
+  appliedPeriodId String?   @map("applied_period_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  period    PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  payroll   Payroll?      @relation(fields: [payrollId], references: [id], onDelete: SetNull)
+  employee  Employee      @relation("EmployeePayrollAdjustments", fields: [employeeId], references: [id], onDelete: Restrict)
+  requester Employee      @relation("RequesterPayrollAdjustments", fields: [requesterId], references: [id], onDelete: Restrict)
+  approver  Employee?     @relation("ApproverPayrollAdjustments", fields: [approverId], references: [id], onDelete: SetNull)
+
+  @@index([periodId, status])
+  @@index([employeeId, status])
+  @@map("payroll_adjustments")
+}
+
+// ------------------------------------------------------------------------------
+// 7. AUDIT LOGS, NOTIFICATIONS & SETTINGS
+// ------------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?  @map("actor_id")
+  action    String
+  entity    String
+  entityId  String   @map("entity_id")
+  oldValues Json?    @map("old_values")
+  newValues Json?    @map("new_values")
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId, createdAt(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  title     String
+  message   String
+  type      String
+  actionUrl String?  @map("action_url")
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model CompanySetting {
+  key         String   @id @unique
+  value       String
+  description String?
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("company_settings")
+}

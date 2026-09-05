@@ -1,0 +1,46 @@
+# ==============================================================================
+# ANTIGRAVITY HRMS — DOCKER COMPOSE PRODUCTION OVERRIDE
+# ==============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Differences from base:
+#   - DB & Redis ports NOT exposed (internal network only)
+#   - Resource limits (memory + CPU)
+#   - JSON log driver for structured log collection
+#   - App restart policy: always (harder than unless-stopped)
+# ==============================================================================
+
+services:
+  db:
+    # In production: do NOT expose PostgreSQL port publicly
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
+
+  redis:
+    # In production: do NOT expose Redis port publicly
+    ports: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+  app:
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: '50m'
+        max-file: '5'
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '2.0'
+        reservations:
+          memory: 512m
+          cpus: '0.5'

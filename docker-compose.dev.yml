@@ -1,0 +1,42 @@
+# ==============================================================================
+# ANTIGRAVITY HRMS — DOCKER COMPOSE DEV OVERRIDE
+# ==============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Differences from base:
+#   - App runs in dev mode with hot reload (mounts source code)
+#   - DB & Redis ports exposed for local tools (TablePlus, Redis Insight)
+#   - Seed is automatically run on start
+#   - No resource limits (use full dev machine capacity)
+# ==============================================================================
+
+services:
+  db:
+    ports:
+      - '5432:5432'
+
+  redis:
+    ports:
+      - '6379:6379'
+
+  app:
+    # Override to use dev server with hot reload
+    build:
+      target: deps  # Only need deps stage for dev
+    command: ['npm', 'run', 'dev']
+    environment:
+      NODE_ENV: development
+      SEED_ON_START: 'true'
+    volumes:
+      # Mount source code for hot reload (excludes node_modules + .next)
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - '3000:3000'
+    # Dev doesn't need the migrate service to complete first
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
