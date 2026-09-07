@@ -126,9 +126,9 @@ export class AttendanceService {
     if (explicitEmpId && isPrivileged) {
       const emp = await prisma.employee.findUnique({
         where: { id: explicitEmpId },
-        select: { id: true, status: true, deletedAt: true },
+        select: { id: true, status: true, deletedAt: true, organizationId: true },
       });
-      if (!emp || emp.deletedAt || emp.status === 'TERMINATED') {
+      if (!emp || emp.deletedAt || emp.status === 'TERMINATED' || (session.organizationId && emp.organizationId !== session.organizationId)) {
         throw ApiError.badRequest('Nhân viên không tồn tại hoặc đã nghỉ việc.');
       }
       return emp.id;
@@ -583,14 +583,17 @@ export class AttendanceService {
       targetEmployeeId = selfEmp.id;
     }
 
-    const where: Prisma.AttendanceWhereInput = {};
+    const where: Prisma.AttendanceWhereInput = {
+      // PHASE 5: Tenant isolation via employee relation
+      employee: { organizationId: session.organizationId ?? '__no_org__' },
+    };
 
     if (targetEmployeeId) {
       where.employeeId = targetEmployeeId;
     }
 
     if (params.departmentId) {
-      where.employee = { departmentId: params.departmentId };
+      where.employee = { ...((where.employee as any) || {}), departmentId: params.departmentId };
     }
 
     if (params.startDate || params.endDate) {
@@ -678,6 +681,15 @@ export class AttendanceService {
     });
 
     if (!record) {
+      throw ApiError.notFound(`Không tìm thấy bản ghi chấm công có ID: ${id}`);
+    }
+
+    // PHASE 5: Tenant isolation check — fetch org from employee
+    const empOrg = await prisma.employee.findUnique({
+      where: { id: record.employeeId },
+      select: { organizationId: true },
+    });
+    if (!empOrg || empOrg.organizationId !== session.organizationId) {
       throw ApiError.notFound(`Không tìm thấy bản ghi chấm công có ID: ${id}`);
     }
 

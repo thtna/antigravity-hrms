@@ -8,11 +8,13 @@ export class DepartmentService {
   /**
    * List all departments with manager details and count of employees
    */
-  static async listDepartments(includeInactive = false) {
+  static async listDepartments(includeInactive = false, session?: UserSession) {
     const departments = await prisma.department.findMany({
       where: {
         deletedAt: null,
         ...(includeInactive ? {} : { isActive: true }),
+        // PHASE 5: Tenant isolation
+        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
       },
       include: {
         manager: {
@@ -55,9 +57,14 @@ export class DepartmentService {
   /**
    * Get single department by ID with manager, sub-departments and employee list
    */
-  static async getDepartmentById(id: string) {
-    const department = await prisma.department.findUnique({
-      where: { id },
+  static async getDepartmentById(id: string, session?: UserSession) {
+    // PHASE 6: findFirst with organizationId enforces tenant isolation at DB level (IDOR fix)
+    const department = await prisma.department.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+      },
       include: {
         manager: {
           select: {
@@ -97,7 +104,7 @@ export class DepartmentService {
       },
     });
 
-    if (!department || department.deletedAt) {
+    if (!department) {
       throw ApiError.notFound(`Không tìm thấy phòng ban với ID: ${id}`);
     }
 
@@ -128,12 +135,12 @@ export class DepartmentService {
 
     const upperCode = input.code.toUpperCase().trim();
 
-    // 1. Check duplicate code
-    const existing = await prisma.department.findUnique({
-      where: { code: upperCode },
+    // 1. Check duplicate code scoped to the organization
+    const existing = await prisma.department.findFirst({
+      where: { code: upperCode, organizationId: session.organizationId },
     });
     if (existing && !existing.deletedAt) {
-      throw ApiError.conflict(`Mã phòng ban [${upperCode}] đã tồn tại trong hệ thống.`);
+      throw ApiError.conflict(`Mã phòng ban [${upperCode}] đã tồn tại trong tổ chức.`);
     }
 
     // 2. If parentId provided, verify parent exists
@@ -165,6 +172,7 @@ export class DepartmentService {
           parentId: input.parentId || null,
           managerId: input.managerId || null,
           isActive: input.isActive ?? true,
+          organizationId: session.organizationId!, // PHASE 5: tenant binding
         },
         include: {
           manager: {
@@ -207,18 +215,19 @@ export class DepartmentService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền cập nhật phòng ban.');
     }
 
-    const currentDept = await prisma.department.findUnique({
-      where: { id },
+    // PHASE 6: IDOR fix — organizationId in where clause prevents cross-tenant update
+    const currentDept = await prisma.department.findFirst({
+      where: { id, deletedAt: null, organizationId: session.organizationId ?? '__no_org__' },
     });
 
-    if (!currentDept || currentDept.deletedAt) {
+    if (!currentDept) {
       throw ApiError.notFound(`Không tìm thấy phòng ban với ID: ${id}`);
     }
 
     // Check duplicate code if changed
     if (input.code && input.code.toUpperCase().trim() !== currentDept.code) {
       const upperCode = input.code.toUpperCase().trim();
-      const codeTaken = await prisma.department.findUnique({
+      const codeTaken = await prisma.department.findFirst({
         where: { code: upperCode },
       });
       if (codeTaken && codeTaken.id !== id) {
@@ -297,11 +306,12 @@ export class DepartmentService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền bật/tắt trạng thái phòng ban.');
     }
 
-    const department = await prisma.department.findUnique({
-      where: { id },
+    // PHASE 6: IDOR fix — organizationId in where clause prevents cross-tenant mutation
+    const department = await prisma.department.findFirst({
+      where: { id, deletedAt: null, organizationId: session.organizationId ?? '__no_org__' },
     });
 
-    if (!department || department.deletedAt) {
+    if (!department) {
       throw ApiError.notFound(`Không tìm thấy phòng ban với ID: ${id}`);
     }
 
@@ -338,11 +348,12 @@ export class DepartmentService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền xóa phòng ban.');
     }
 
-    const department = await prisma.department.findUnique({
-      where: { id },
+    // PHASE 6: IDOR fix — organizationId in where clause prevents cross-tenant delete
+    const department = await prisma.department.findFirst({
+      where: { id, deletedAt: null, organizationId: session.organizationId ?? '__no_org__' },
     });
 
-    if (!department || department.deletedAt) {
+    if (!department) {
       throw ApiError.notFound(`Không tìm thấy phòng ban với ID: ${id}`);
     }
 

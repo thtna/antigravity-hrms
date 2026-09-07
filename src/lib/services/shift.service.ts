@@ -74,11 +74,12 @@ export class ShiftService {
   /**
    * List all work shifts
    */
-  static async listShifts(includeInactive = false) {
+  static async listShifts(includeInactive = false, session?: UserSession) {
     const shifts = await prisma.workShift.findMany({
       where: {
         deletedAt: null,
         ...(includeInactive ? {} : { isActive: true }),
+        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
       },
       include: {
         _count: {
@@ -103,7 +104,7 @@ export class ShiftService {
   /**
    * Get single shift by ID
    */
-  static async getShiftById(id: string) {
+  static async getShiftById(id: string, session?: UserSession) {
     const shift = await prisma.workShift.findUnique({
       where: { id },
       include: {
@@ -116,7 +117,7 @@ export class ShiftService {
       },
     });
 
-    if (!shift || shift.deletedAt) {
+    if (!shift || shift.deletedAt || (session?.organizationId && (shift as any).organizationId && (shift as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy ca làm việc với ID: ${id}`);
     }
 
@@ -139,8 +140,11 @@ export class ShiftService {
 
     const upperCode = input.code.toUpperCase().trim();
 
-    const existing = await prisma.workShift.findUnique({
-      where: { code: upperCode },
+    const existing = await prisma.workShift.findFirst({
+      where: {
+        code: upperCode,
+        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+      },
     });
     if (existing && !existing.deletedAt) {
       throw ApiError.conflict(`Mã ca làm việc [${upperCode}] đã tồn tại trong hệ thống.`);
@@ -173,6 +177,7 @@ export class ShiftService {
           isActive: input.isActive ?? true,
           effectiveFrom: new Date(input.effectiveFrom),
           effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
+          ...(session.organizationId ? { organizationId: session.organizationId } : {}),
         },
       });
 
@@ -219,15 +224,18 @@ export class ShiftService {
       where: { id },
     });
 
-    if (!currentShift || currentShift.deletedAt) {
+    if (!currentShift || currentShift.deletedAt || (session?.organizationId && (currentShift as any).organizationId && (currentShift as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy ca làm việc với ID: ${id}`);
     }
 
     // Check duplicate code
     if (input.code && input.code.toUpperCase().trim() !== currentShift.code) {
       const upperCode = input.code.toUpperCase().trim();
-      const codeTaken = await prisma.workShift.findUnique({
-        where: { code: upperCode },
+      const codeTaken = await prisma.workShift.findFirst({
+        where: {
+          code: upperCode,
+          ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+        },
       });
       if (codeTaken && codeTaken.id !== id) {
         throw ApiError.conflict(`Mã ca làm việc [${upperCode}] đã được sử dụng.`);
@@ -318,7 +326,7 @@ export class ShiftService {
       where: { id },
     });
 
-    if (!shift || shift.deletedAt) {
+    if (!shift || shift.deletedAt || (session?.organizationId && (shift as any).organizationId && (shift as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy ca làm việc với ID: ${id}`);
     }
 
@@ -357,7 +365,7 @@ export class ShiftService {
       where: { id },
     });
 
-    if (!shift || shift.deletedAt) {
+    if (!shift || shift.deletedAt || (session?.organizationId && (shift as any).organizationId && (shift as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy ca làm việc với ID: ${id}`);
     }
 

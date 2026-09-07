@@ -30,12 +30,15 @@ export class WorksiteService {
   /**
    * Retrieve list of worksites with search, status filtering, and assigned employee counts.
    */
-  static async getWorksites(query: WorksiteQueryParams) {
+  static async getWorksites(query: WorksiteQueryParams, session?: UserSession) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 50;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.WorksiteWhereInput = {};
+    const where: Prisma.WorksiteWhereInput = {
+      // PHASE 5: Tenant isolation
+      ...(session ? { organizationId: session.organizationId ?? '__no_org__' } : {}),
+    };
 
     if (query.search) {
       const search = query.search.trim();
@@ -92,7 +95,7 @@ export class WorksiteService {
   /**
    * Get single worksite by ID.
    */
-  static async getWorksiteById(id: string) {
+  static async getWorksiteById(id: string, session?: UserSession) {
     const worksite = await prisma.worksite.findUnique({
       where: { id },
       include: {
@@ -106,7 +109,7 @@ export class WorksiteService {
       },
     });
 
-    if (!worksite) {
+    if (!worksite || (session?.organizationId && (worksite as any).organizationId && (worksite as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Địa điểm làm việc không tồn tại.');
     }
 
@@ -129,9 +132,12 @@ export class WorksiteService {
   static async createWorksite(input: CreateWorksiteInput, session: UserSession) {
     this.ensurePrivileged(session);
 
-    // Check duplicate name
+    // Check duplicate name scoped to organization
     const existing = await prisma.worksite.findFirst({
-      where: { name: { equals: input.name.trim(), mode: 'insensitive' } },
+      where: {
+        name: { equals: input.name.trim(), mode: 'insensitive' },
+        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+      },
     });
 
     if (existing) {
@@ -146,6 +152,7 @@ export class WorksiteService {
         longitude: new Prisma.Decimal(input.longitude),
         radiusMeters: input.radiusMeters,
         isActive: input.isActive ?? true,
+        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
       },
     });
 
@@ -195,7 +202,7 @@ export class WorksiteService {
       where: { id },
     });
 
-    if (!worksite) {
+    if (!worksite || (session?.organizationId && (worksite as any).organizationId && (worksite as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Địa điểm làm việc không tồn tại.');
     }
 
@@ -205,6 +212,7 @@ export class WorksiteService {
         where: {
           name: { equals: input.name.trim(), mode: 'insensitive' },
           id: { not: id },
+          ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
         },
       });
       if (duplicate) {
@@ -297,7 +305,7 @@ export class WorksiteService {
       },
     });
 
-    if (!worksite) {
+    if (!worksite || (session?.organizationId && (worksite as any).organizationId && (worksite as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Địa điểm làm việc không tồn tại.');
     }
 
@@ -339,7 +347,7 @@ export class WorksiteService {
       where: { id },
     });
 
-    if (!worksite) {
+    if (!worksite || (session?.organizationId && (worksite as any).organizationId && (worksite as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Địa điểm làm việc không tồn tại.');
     }
 

@@ -4,14 +4,71 @@ import { VIETNAM_STATUTORY_RULE_2026 } from '../src/lib/payroll/default-rules';
 
 const prisma = new PrismaClient();
 
-async function main() {
+/**
+ * Phase 8: Essential System Seeding for Production
+ * Guaranteed: Zero demo organizations, zero demo branches, zero demo users, zero fake business data.
+ */
+export async function seedSystemEssentials(p = prisma) {
+  console.log('🛡️ [SEED-ESSENTIALS] Khởi tạo 4 vai trò RBAC hệ thống (admin, hr, manager, employee)...');
+  const roleDefinitions = [
+    { code: 'admin', name: 'Quản Trị Viên', description: 'Toàn quyền cấu hình và quản trị hệ thống' },
+    { code: 'hr', name: 'Chuyên Viên Nhân Sự', description: 'Quản lý nhân viên, hồ sơ, ca làm việc, duyệt phép, bảng lương' },
+    { code: 'manager', name: 'Quản Lý Bộ Phận', description: 'Quản lý nhân sự phòng ban, duyệt giải trình, KPI, phê duyệt sơ bộ' },
+    { code: 'employee', name: 'Nhân Viên', description: 'Chấm công, xin nghỉ phép, xem bảng lương và KPI cá nhân' },
+  ];
+
+  for (const r of roleDefinitions) {
+    await p.role.upsert({
+      where: { code: r.code },
+      update: { name: r.name, description: r.description },
+      create: r,
+    });
+  }
+  console.log('✅ [SEED-ESSENTIALS] 4 vai trò RBAC hệ thống đã sẵn sàng.');
+  console.log('🛡️ [SEED-ESSENTIALS] Production demo seed = NONE.');
+}
+
+export async function seedDevelopmentDemo() {
   console.log('🚀 ==============================================================================');
-  console.log('🚀 ANTIGRAVITY HRMS — ENTERPRISE SEEDING (PHASE 27 REAL-WORLD SIMULATION)');
+  console.log('🚀 ANTIGRAVITY HRMS — DEVELOPMENT DEMO SIMULATION (SANDBOX ONLY)');
   console.log('🚀 Công ty Cổ phần Công nghệ & Dịch vụ Số Tân Phong (Tan Phong Digital JSC)');
   console.log('🚀 ==============================================================================\n');
 
-  const defaultPassword = 'Antigravity@2026';
+  const defaultPassword = process.env.DEMO_USER_PASSWORD || 'DevDemo@2026!';
   const passwordHash = await bcrypt.hash(defaultPassword, 10);
+
+  // ----------------------------------------------------------------------------
+  // 0. Default Multi-Tenant Organization & Headquarters Branch
+  // ----------------------------------------------------------------------------
+  const defaultOrg = await prisma.organization.upsert({
+    where: { slug: 'tan-phong' },
+    update: {},
+    create: {
+      id: 'org_default_tanphong',
+      name: 'Công ty Cổ phần Công nghệ & Dịch vụ Số Tân Phong',
+      slug: 'tan-phong',
+      status: 'ACTIVE',
+      email: 'contact@tanphong.vn',
+      phone: '02438889999',
+      address: 'Tầng 18, Tòa nhà Discovery Complex, 302 Cầu Giấy, Hà Nội',
+      approvedAt: new Date(),
+    },
+  });
+
+  const defaultBranch = await prisma.branch.upsert({
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'HQ-HN' } },
+    update: {},
+    create: {
+      id: 'branch_default_headquarters',
+      organizationId: defaultOrg.id,
+      name: 'Trụ sở chính Hà Nội',
+      code: 'HQ-HN',
+      address: 'Tầng 18, Tòa nhà Discovery Complex, 302 Cầu Giấy, Hà Nội',
+      phone: '02438889999',
+      isActive: true,
+    },
+  });
+  console.log('✅ 0. Khởi tạo Organization mặc định (Tân Phong Digital) & Chi nhánh Trụ Sở Chính');
 
   // ----------------------------------------------------------------------------
   // 1. RBAC Roles
@@ -56,9 +113,10 @@ async function main() {
   // 3. Departments (5 Functional Departments)
   // ----------------------------------------------------------------------------
   const deptBod = await prisma.department.upsert({
-    where: { code: 'BOD' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'BOD' } },
     update: { name: 'Ban Tổng Giám Đốc' },
     create: {
+      organizationId: defaultOrg.id,
       code: 'BOD',
       name: 'Ban Tổng Giám Đốc',
       description: 'Điều hành chiến lược, phê duyệt kế hoạch kinh doanh và chính sách toàn công ty.',
@@ -67,9 +125,10 @@ async function main() {
   });
 
   const deptHr = await prisma.department.upsert({
-    where: { code: 'HR' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'HR' } },
     update: { name: 'Phòng Nhân Sự & Văn Hóa Doanh Nghiệp' },
     create: {
+      organizationId: defaultOrg.id,
       code: 'HR',
       name: 'Phòng Nhân Sự & Văn Hóa Doanh Nghiệp',
       description: 'Quản trị nhân sự, tuyển dụng, đào tạo, C&B và quan hệ lao động.',
@@ -78,9 +137,10 @@ async function main() {
   });
 
   const deptTech = await prisma.department.upsert({
-    where: { code: 'TECH' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'TECH' } },
     update: { name: 'Khối Công Nghệ & Kỹ Thuật Phần Mềm' },
     create: {
+      organizationId: defaultOrg.id,
       code: 'TECH',
       name: 'Khối Công Nghệ & Kỹ Thuật Phần Mềm',
       description: 'Nghiên cứu kiến trúc, phát triển phần mềm và hạ tầng điện toán đám mây.',
@@ -89,9 +149,10 @@ async function main() {
   });
 
   const deptSales = await prisma.department.upsert({
-    where: { code: 'SALES' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'SALES' } },
     update: { name: 'Khối Kinh Doanh & Quan Hệ Khách Hàng' },
     create: {
+      organizationId: defaultOrg.id,
       code: 'SALES',
       name: 'Khối Kinh Doanh & Quan Hệ Khách Hàng',
       description: 'Phát triển khách hàng doanh nghiệp, tư vấn giải pháp và đảm bảo doanh số.',
@@ -100,9 +161,10 @@ async function main() {
   });
 
   const deptOps = await prisma.department.upsert({
-    where: { code: 'OPS' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'OPS' } },
     update: { name: 'Khối Vận Hành Hệ Thống & Hỗ Trợ 24/7' },
     create: {
+      organizationId: defaultOrg.id,
       code: 'OPS',
       name: 'Khối Vận Hành Hệ Thống & Hỗ Trợ 24/7',
       description: 'Giám sát dịch vụ mạng, vận hành ca đêm và hỗ trợ kỹ thuật khách hàng 24/7.',
@@ -184,7 +246,7 @@ async function main() {
   const positionsMap = new Map<string, string>();
   for (const pos of positionsData) {
     const created = await prisma.position.upsert({
-      where: { code: pos.code },
+      where: { organizationId_code: { organizationId: defaultOrg.id, code: pos.code } },
       update: {
         title: pos.title,
         description: pos.description,
@@ -193,6 +255,7 @@ async function main() {
         baseSalaryGrade: new Prisma.Decimal(pos.baseSalaryGrade),
       },
       create: {
+        organizationId: defaultOrg.id,
         code: pos.code,
         title: pos.title,
         description: pos.description,
@@ -210,7 +273,7 @@ async function main() {
   // 5. Work Shifts (Fixed, Flexible, Overnight)
   // ----------------------------------------------------------------------------
   const shiftFixed = await prisma.workShift.upsert({
-    where: { code: 'CA_HANH_CHINH' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'CA_HANH_CHINH' } },
     update: {
       name: 'Ca Hành Chính Cố Định (08:00 - 17:00)',
       shiftType: 'FIXED',
@@ -223,6 +286,7 @@ async function main() {
       standardWorkHours: new Prisma.Decimal(8.0),
     },
     create: {
+      organizationId: defaultOrg.id,
       code: 'CA_HANH_CHINH',
       name: 'Ca Hành Chính Cố Định (08:00 - 17:00)',
       description: 'Ca văn phòng tiêu chuẩn từ Thứ 2 đến Thứ 6. Nghỉ trưa 12:00 - 13:00.',
@@ -239,7 +303,7 @@ async function main() {
   });
 
   const shiftFlex = await prisma.workShift.upsert({
-    where: { code: 'CA_LINH_HOAT' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'CA_LINH_HOAT' } },
     update: {
       name: 'Ca Linh Hoạt Kỹ Thuật (07:30 - 09:30 Flex)',
       shiftType: 'FLEXIBLE',
@@ -252,6 +316,7 @@ async function main() {
       standardWorkHours: new Prisma.Decimal(8.0),
     },
     create: {
+      organizationId: defaultOrg.id,
       code: 'CA_LINH_HOAT',
       name: 'Ca Linh Hoạt Kỹ Thuật (07:30 - 09:30 Flex)',
       description: 'Khung giờ linh hoạt cho đội ngũ Kỹ thuật / R&D. Check-in từ 07:30 - 09:30, làm đủ 8 tiếng.',
@@ -268,7 +333,7 @@ async function main() {
   });
 
   const shiftNight = await prisma.workShift.upsert({
-    where: { code: 'CA_DEM' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'CA_DEM' } },
     update: {
       name: 'Ca Đêm Vận Hành 24/7 (22:00 - 06:00)',
       shiftType: 'FIXED',
@@ -281,6 +346,7 @@ async function main() {
       standardWorkHours: new Prisma.Decimal(7.0),
     },
     create: {
+      organizationId: defaultOrg.id,
       code: 'CA_DEM',
       name: 'Ca Đêm Vận Hành 24/7 (22:00 - 06:00)',
       description: 'Ca làm việc qua đêm trực hệ thống trung tâm dữ liệu. Phụ cấp ca đêm theo Bộ luật Lao động.',
@@ -301,21 +367,21 @@ async function main() {
   // 6. Leave Types & Holidays
   // ----------------------------------------------------------------------------
   const leaveAnnual = await prisma.leaveType.upsert({
-    where: { code: 'ANNUAL' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'ANNUAL' } },
     update: { name: 'Nghỉ Phép Năm Hưởng Nguyên Lương', isPaid: true, deductFromAllowance: true },
-    create: { code: 'ANNUAL', name: 'Nghỉ Phép Năm Hưởng Nguyên Lương', isPaid: true, deductFromAllowance: true },
+    create: { organizationId: defaultOrg.id, code: 'ANNUAL', name: 'Nghỉ Phép Năm Hưởng Nguyên Lương', isPaid: true, deductFromAllowance: true },
   });
 
   await prisma.leaveType.upsert({
-    where: { code: 'SICK' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'SICK' } },
     update: { name: 'Nghỉ Ốm Hưởng Trợ Cấp BHXH', isPaid: false, deductFromAllowance: false },
-    create: { code: 'SICK', name: 'Nghỉ Ốm Hưởng Trợ Cấp BHXH', isPaid: false, deductFromAllowance: false },
+    create: { organizationId: defaultOrg.id, code: 'SICK', name: 'Nghỉ Ốm Hưởng Trợ Cấp BHXH', isPaid: false, deductFromAllowance: false },
   });
 
   await prisma.leaveType.upsert({
-    where: { code: 'UNPAID' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'UNPAID' } },
     update: { name: 'Nghỉ Không Lương', isPaid: false, deductFromAllowance: false },
-    create: { code: 'UNPAID', name: 'Nghỉ Không Lương', isPaid: false, deductFromAllowance: false },
+    create: { organizationId: defaultOrg.id, code: 'UNPAID', name: 'Nghỉ Không Lương', isPaid: false, deductFromAllowance: false },
   });
   console.log('✅ 6. Khởi tạo loại ngày nghỉ: ANNUAL, SICK, UNPAID');
 
@@ -323,7 +389,7 @@ async function main() {
   // 7. Statutory Payroll Rule 2026
   // ----------------------------------------------------------------------------
   await prisma.payrollRule.upsert({
-    where: { code: VIETNAM_STATUTORY_RULE_2026.ruleCode },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: VIETNAM_STATUTORY_RULE_2026.ruleCode || 'VN_STATUTORY_2026' } },
     update: {
       name: VIETNAM_STATUTORY_RULE_2026.ruleName,
       isDefault: true,
@@ -336,6 +402,7 @@ async function main() {
       roundingConfig: VIETNAM_STATUTORY_RULE_2026.rounding as any,
     },
     create: {
+      organizationId: defaultOrg.id,
       code: VIETNAM_STATUTORY_RULE_2026.ruleCode || 'VN_STATUTORY_2026',
       name: VIETNAM_STATUTORY_RULE_2026.ruleName || 'Quy chuẩn Tiền Lương Việt Nam 2026',
       isDefault: true,
@@ -388,8 +455,31 @@ async function main() {
     }
 
     const hourlyRate = Math.round(data.contractSalary / (22 * 8));
+
+    // Link user to OrganizationMember
+    const tenantRole =
+      data.roleCode === 'admin' ? 'OWNER' :
+      data.roleCode === 'hr' ? 'HR_MANAGER' :
+      data.roleCode === 'manager' ? 'MANAGER' : 'EMPLOYEE';
+
+    await prisma.organizationMember.upsert({
+      where: {
+        organizationId_userId: {
+          organizationId: defaultOrg.id,
+          userId: user.id,
+        },
+      },
+      update: { role: tenantRole as any, isActive: true },
+      create: {
+        organizationId: defaultOrg.id,
+        userId: user.id,
+        role: tenantRole as any,
+        isActive: true,
+      },
+    });
+
     const emp = await prisma.employee.upsert({
-      where: { employeeCode: data.employeeCode },
+      where: { organizationId_employeeCode: { organizationId: defaultOrg.id, employeeCode: data.employeeCode } },
       update: {
         firstName: data.firstName,
         lastName: data.lastName,
@@ -404,6 +494,8 @@ async function main() {
         bankName: data.bankName,
       },
       create: {
+        organizationId: defaultOrg.id,
+        branchId: defaultBranch.id,
         userId: user.id,
         employeeCode: data.employeeCode,
         firstName: data.firstName,
@@ -806,9 +898,10 @@ async function main() {
   const currentPeriod = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}`;
 
   const kpiVelocity = await prisma.kpi.upsert({
-    where: { code: 'TECH_VELOCITY' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'TECH_VELOCITY' } },
     update: {},
     create: {
+      organizationId: defaultOrg.id,
       code: 'TECH_VELOCITY',
       title: 'Tốc độ hoàn thành Sprint (Sprint Velocity)',
       description: 'Số điểm công việc (Story Points) hoàn thành đúng thời hạn trong tháng.',
@@ -824,9 +917,10 @@ async function main() {
   });
 
   const kpiSales = await prisma.kpi.upsert({
-    where: { code: 'SALES_REVENUE' },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: 'SALES_REVENUE' } },
     update: {},
     create: {
+      organizationId: defaultOrg.id,
       code: 'SALES_REVENUE',
       title: 'Chỉ tiêu Doanh thu Hợp đồng B2B',
       description: 'Tổng giá trị hợp đồng phần mềm & dịch vụ ký mới trong tháng.',
@@ -939,14 +1033,15 @@ async function main() {
   const lastMonthYear = today.getUTCMonth() === 0 ? today.getUTCFullYear() - 1 : today.getUTCFullYear();
   const payPeriodCode = `PAY-${lastMonthYear}-${String(lastMonth).padStart(2, '0')}`;
 
-  const rule = await prisma.payrollRule.findUnique({
+  const rule = await prisma.payrollRule.findFirst({
     where: { code: VIETNAM_STATUTORY_RULE_2026.ruleCode },
   });
 
   const payrollPeriod = await prisma.payrollPeriod.upsert({
-    where: { code: payPeriodCode },
+    where: { organizationId_code: { organizationId: defaultOrg.id, code: payPeriodCode } },
     update: { status: 'APPROVED' },
     create: {
+      organizationId: defaultOrg.id,
       code: payPeriodCode,
       name: `Bảng Lương Toàn Thể Tháng ${String(lastMonth).padStart(2, '0')}/${lastMonthYear}`,
       startDate: new Date(Date.UTC(lastMonthYear, lastMonth - 1, 1)),
@@ -1191,10 +1286,11 @@ async function main() {
   }
   console.log('✅ 15. Phát thông báo hệ thống tự động đến toàn bộ 8 tài khoản');
 
+  const demoPasswordInfo = process.env.DEMO_USER_PASSWORD || 'DevDemo@2026!';
   console.log('\n🎉 ==============================================================================');
-  console.log('🎉 DOANH NGHIỆP GIẢ LẬP ĐÃ SẴN SÀNG ĐỂ ĐĂNG NHẬP VÀ VẬN HÀNH:');
+  console.log('🎉 DOANH NGHIỆP GIẢ LẬP ĐÃ SẴN SÀNG ĐỂ ĐĂNG NHẬP VÀ VẬN HÀNH (DEV DEMO):');
   console.log('------------------------------------------------------------------------------');
-  console.log('Mật khẩu chung cho tất cả tài khoản: Antigravity@2026');
+  console.log(`Mật khẩu phát triển: ${demoPasswordInfo}`);
   console.log('1. CEO / Admin:      admin@antigravity.internal         (Nguyễn Minh Tuấn — Toàn quyền)');
   console.log('2. Trưởng Phòng HR:  hr@antigravity.internal            (Trần Thị Mai Hương — Duyệt phép & C&B)');
   console.log('3. Trưởng Phòng Tech:manager.tech@antigravity.internal  (Lê Hoàng Nam — Quản lý Tech & KPI)');
@@ -1204,6 +1300,30 @@ async function main() {
   console.log('7. Vận Hành Ca Đêm:  ops.huy@antigravity.internal       (Bùi Quang Huy — Ca đêm & Giải trình)');
   console.log('8. Chuyên Viên C&B:  hr.anh@antigravity.internal        (Hoàng Ngọc Ánh — Nghỉ phép & Phạt)');
   console.log('==============================================================================\n');
+}
+
+async function main() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isDemoMode = process.env.DEMO_MODE === 'true';
+
+  console.log('🌱 ==============================================================================');
+  console.log('🌱 ANTIGRAVITY HRMS — DATABASE SEED DISPATCHER');
+  console.log(`🌱 NODE_ENV  = ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🌱 DEMO_MODE = ${process.env.DEMO_MODE || 'false'}`);
+  console.log('🌱 ==============================================================================\n');
+
+  if (isProduction || !isDemoMode) {
+    console.log('🛡️ [SEED] Production mode or DEMO_MODE is not true.');
+    console.log('🛡️ [SEED] Production demo seed = NONE.');
+    console.log('🛡️ [SEED] Initializing ONLY essential system infrastructure.');
+    await seedSystemEssentials();
+    console.log('✅ [SEED] Production initialization complete (0 demo data).\n');
+    return;
+  }
+
+  console.log('⚠️ [DEV DEMO SEED] DEMO_MODE=true in development environment.');
+  console.log('⚠️ [DEV DEMO SEED] Seeding Tan Phong Digital development simulation fixture...\n');
+  await seedDevelopmentDemo();
 }
 
 main()

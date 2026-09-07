@@ -137,6 +137,9 @@ export class ReportService {
       options.departmentId
     );
 
+    // PHASE 5: Tenant scope — never trust client; derive from JWT session
+    const orgId = session.organizationId ?? '__no_org__';
+
     const now = new Date();
     const defaultStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const defaultEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
@@ -146,23 +149,23 @@ export class ReportService {
 
     switch (options.type) {
       case 'attendance':
-        return this.queryAttendanceReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page);
+        return this.queryAttendanceReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page, orgId);
       case 'late':
-        return this.queryLateReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page);
+        return this.queryLateReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page, orgId);
       case 'early_leave':
-        return this.queryEarlyLeaveReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page);
+        return this.queryEarlyLeaveReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page, orgId);
       case 'overtime':
-        return this.queryOvertimeReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page);
+        return this.queryOvertimeReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page, orgId);
       case 'leave':
-        return this.queryLeaveReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page);
+        return this.queryLeaveReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page, orgId);
       case 'kpi':
-        return this.queryKpiReport(targetDepartmentId, targetEmployeeId, options, skip, limit, page);
+        return this.queryKpiReport(targetDepartmentId, targetEmployeeId, options, skip, limit, page, orgId);
       case 'bonus':
-        return this.queryBonusReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page);
+        return this.queryBonusReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page, orgId);
       case 'penalty':
-        return this.queryPenaltyReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page);
+        return this.queryPenaltyReport(startDate, endDate, targetDepartmentId, targetEmployeeId, options, skip, limit, page, orgId);
       case 'payroll':
-        return this.queryPayrollReport(targetDepartmentId, targetEmployeeId, options, skip, limit, page);
+        return this.queryPayrollReport(targetDepartmentId, targetEmployeeId, options, skip, limit, page, orgId);
       default:
         throw ApiError.badRequest(`Loại báo cáo không hợp lệ: ${(options as any).type}`);
     }
@@ -179,15 +182,18 @@ export class ReportService {
     options: ReportQueryOptions,
     skip: number,
     limit: number,
-    page: number
+    page: number,
+    organizationId: string // PHASE 5
   ): Promise<ReportResult> {
     const whereClause: any = {
       workDate: { gte: startDate, lte: endDate },
+      // PHASE 5: Tenant isolation
+      employee: { organizationId },
     };
 
     if (employeeId) whereClause.employeeId = employeeId;
     if (departmentId) {
-      whereClause.employee = { departmentId };
+      whereClause.employee = { organizationId, departmentId };
     }
     if (options.status) {
       whereClause.status = options.status;
@@ -307,11 +313,14 @@ export class ReportService {
     options: ReportQueryOptions,
     skip: number,
     limit: number,
-    page: number
+    page: number,
+    organizationId: string // PHASE 5
   ): Promise<ReportResult> {
     const whereClause: any = {
       workDate: { gte: startDate, lte: endDate },
       lateMinutes: { gt: 0 },
+      // PHASE 5: Tenant isolation
+      employee: { organizationId },
     };
 
     if (employeeId) whereClause.employeeId = employeeId;
@@ -406,11 +415,14 @@ export class ReportService {
     options: ReportQueryOptions,
     skip: number,
     limit: number,
-    page: number
+    page: number,
+    organizationId: string // PHASE 5
   ): Promise<ReportResult> {
     const whereClause: any = {
       workDate: { gte: startDate, lte: endDate },
       earlyMinutes: { gt: 0 },
+      // PHASE 5: Tenant isolation
+      employee: { organizationId },
     };
 
     if (employeeId) whereClause.employeeId = employeeId;
@@ -508,11 +520,14 @@ export class ReportService {
     options: ReportQueryOptions,
     skip: number,
     limit: number,
-    page: number
+    page: number,
+    organizationId: string // PHASE 5
   ): Promise<ReportResult> {
     const whereClause: any = {
       workDate: { gte: startDate, lte: endDate },
       otHours: { gt: 0 },
+      // PHASE 5: Tenant isolation
+      employee: { organizationId },
     };
 
     if (employeeId) whereClause.employeeId = employeeId;
@@ -616,11 +631,14 @@ export class ReportService {
     options: ReportQueryOptions,
     skip: number,
     limit: number,
-    page: number
+    page: number,
+    organizationId: string // PHASE 5
   ): Promise<ReportResult> {
     const whereClause: any = {
       startDate: { lte: endDate },
       endDate: { gte: startDate },
+      // PHASE 5: Tenant isolation
+      employee: { is: { organizationId } },
     };
 
     if (employeeId) whereClause.employeeId = employeeId;
@@ -730,12 +748,16 @@ export class ReportService {
     options: ReportQueryOptions,
     skip: number,
     limit: number,
-    page: number
+    page: number,
+    organizationId: string // PHASE 5
   ): Promise<ReportResult> {
-    const whereClause: any = {};
+    const whereClause: any = {
+      // PHASE 5: Tenant isolation via employee relation
+      employee: { organizationId },
+    };
 
     if (employeeId) whereClause.employeeId = employeeId;
-    if (departmentId) whereClause.employee = { departmentId };
+    if (departmentId) whereClause.employee = { organizationId, departmentId };
     if (options.status) whereClause.status = options.status;
     if (options.search) {
       whereClause.OR = [
@@ -845,11 +867,14 @@ export class ReportService {
     options: ReportQueryOptions,
     skip: number,
     limit: number,
-    page: number
+    page: number,
+    organizationId: string // PHASE 5
   ): Promise<ReportResult> {
     const whereClause: any = {
       type: 'BONUS',
       effectiveDate: { gte: startDate, lte: endDate },
+      // PHASE 5: Tenant isolation
+      employee: { organizationId },
     };
 
     if (employeeId) whereClause.employeeId = employeeId;
@@ -955,11 +980,14 @@ export class ReportService {
     options: ReportQueryOptions,
     skip: number,
     limit: number,
-    page: number
+    page: number,
+    organizationId: string // PHASE 5
   ): Promise<ReportResult> {
     const whereClause: any = {
       type: 'PENALTY',
       effectiveDate: { gte: startDate, lte: endDate },
+      // PHASE 5: Tenant isolation
+      employee: { organizationId },
     };
 
     if (employeeId) whereClause.employeeId = employeeId;
@@ -1063,12 +1091,16 @@ export class ReportService {
     options: ReportQueryOptions,
     skip: number,
     limit: number,
-    page: number
+    page: number,
+    organizationId: string // PHASE 5
   ): Promise<ReportResult> {
-    const whereClause: any = {};
+    const whereClause: any = {
+      // PHASE 5: Tenant isolation via employee relation
+      employee: { organizationId },
+    };
 
     if (employeeId) whereClause.employeeId = employeeId;
-    if (departmentId) whereClause.employee = { departmentId };
+    if (departmentId) whereClause.employee = { organizationId, departmentId };
     if (options.status) whereClause.paymentStatus = options.status;
     if (options.search) {
       whereClause.OR = [

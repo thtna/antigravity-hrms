@@ -150,6 +150,9 @@ describe('PHASE 11 — KPI Engine: KpiService Test Suite', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setupTransaction();
+    mockPrisma.kpi.findFirst.mockImplementation((...args: any[]) =>
+      mockPrisma.kpi.findUnique(...args)
+    );
   });
 
   // ── 1. KPI Definition CRUD ───────────────────────────────────────────────

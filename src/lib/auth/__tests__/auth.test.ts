@@ -82,7 +82,10 @@ describe('PHASE 2 — AUTHENTICATION & RBAC TEST SUITE', () => {
   describe('3. Role Normalization and Permissions', () => {
     it('should normalize role aliases accurately', () => {
       expect(normalizeRole('ADMIN')).toBe('admin');
-      expect(normalizeRole('super_admin')).toBe('admin');
+      // PHASE 6 fix: super_admin is a distinct role (added in Phase 5) — must NOT alias to 'admin'
+      expect(normalizeRole('super_admin')).toBe('super_admin');
+      expect(normalizeRole('SUPER_ADMIN')).toBe('super_admin');
+      expect(normalizeRole('superadmin')).toBe('super_admin');
       expect(normalizeRole('HR')).toBe('hr');
       expect(normalizeRole('dept_manager')).toBe('manager');
       expect(normalizeRole('EMPLOYEE')).toBe('employee');

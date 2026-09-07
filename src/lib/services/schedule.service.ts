@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db/prisma';
 import { ApiError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
+import { Prisma } from '@prisma/client';
 import {
   AssignSingleScheduleInput,
   BulkAssignScheduleInput,
@@ -92,6 +93,7 @@ export class ScheduleService {
       } else {
         result = await tx.employeeSchedule.create({
           data: {
+            organizationId: session.organizationId ?? '__no_org__',
             employeeId: input.employeeId,
             shiftId: input.shiftId,
             workDate,
@@ -321,10 +323,12 @@ export class ScheduleService {
       targetEmployeeId = employee.id;
     }
 
-    const where: Record<string, unknown> = {};
+    const where: Prisma.EmployeeScheduleWhereInput = {
+      ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+    };
     if (targetEmployeeId) where.employeeId = targetEmployeeId;
     if (params.departmentId) {
-      where.employee = { departmentId: params.departmentId };
+      where.employee = { ...((where.employee as any) || {}), departmentId: params.departmentId };
     }
     if (params.startDate || params.endDate) {
       where.workDate = {};

@@ -1,7 +1,7 @@
 import { getSession } from './session';
 import { ApiError } from '@/lib/errors';
 import { RoleCode, UserSession } from '@/types';
-import { hasPermission, hasAnyRole } from './roles';
+import { hasPermission, hasAnyRole, isSuperAdmin } from './roles';
 
 /**
  * Server-Side Guard: Ensures request is from an authenticated and active user
@@ -15,6 +15,19 @@ export async function requireAuth(): Promise<UserSession> {
 
   if (!session.isActive) {
     throw ApiError.forbidden('Tài khoản của bạn đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.');
+  }
+
+  return session;
+}
+
+/**
+ * Server-Side Guard: Ensures authenticated user is a SUPER_ADMIN
+ */
+export async function requireSuperAdmin(): Promise<UserSession> {
+  const session = await requireAuth();
+
+  if (!isSuperAdmin(session)) {
+    throw ApiError.forbidden('Chỉ SUPER_ADMIN mới có quyền truy cập chức năng này.');
   }
 
   return session;
@@ -58,6 +71,17 @@ export async function requirePermission(permission: string): Promise<UserSession
 }
 
 /**
+ * Server-Side Guard: Ensures the user belongs to the requested organization
+ */
+export async function requireTenantScope(organizationId: string): Promise<UserSession> {
+  const session = await requireAuth();
+  if (session.organizationId !== organizationId) {
+    throw ApiError.forbidden('Truy cập bị từ chối: Bạn không thuộc tổ chức này.');
+  }
+  return session;
+}
+
+/**
  * Anti-IDOR (Insecure Direct Object Reference) Protection Guard
  * Ensures a user can only access their own resources, unless they are Admin/HR
  */
@@ -87,18 +111,22 @@ export async function verifyOwnershipOrAdmin(
  * Generates Prisma where clause to enforce Data Scoping (Global / Department / Self)
  */
 export function applyDataScope(session: UserSession) {
+  const baseScope = { organizationId: session.organizationId };
+
   if (session.roles.includes('admin') || session.roles.includes('hr')) {
-    return {}; // Global scope: unrestricted
+    return baseScope; // Global scope: unrestricted within organization
   }
 
   if (session.roles.includes('manager') && session.departmentId) {
     return {
+      ...baseScope,
       departmentId: session.departmentId, // Department scope
     };
   }
 
   // Default: Employee Self scope
   return {
+    ...baseScope,
     id: session.employeeId || session.userId,
   };
 }

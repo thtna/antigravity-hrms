@@ -244,14 +244,21 @@ export const cache = CacheManager.getInstance();
 export class CachedLookupService {
   /**
    * Cached Active Worksites (geofences, lat/lng) - TTL: 15 mins
-   * Read on every GPS & QR check-in attempt
+   * Scoped to organizationId to prevent cross-tenant cache bleeding.
    */
-  static async getActiveWorksites() {
+  static async getActiveWorksites(organizationId?: string) {
+    const cacheKey = organizationId
+      ? `lookup:worksites:${organizationId}:active`
+      : 'lookup:worksites:active';
+
     return cache.getOrSet(
-      'lookup:worksites:active',
+      cacheKey,
       async () => {
         return prisma.worksite.findMany({
-          where: { isActive: true },
+          where: {
+            ...(organizationId ? { organizationId } : {}),
+            isActive: true,
+          },
         });
       },
       900 // 15 mins
@@ -259,22 +266,35 @@ export class CachedLookupService {
   }
 
   /**
-   * Invalidate active worksites cache
+   * Invalidate active worksites cache (optionally for a specific tenant)
    */
-  static async invalidateWorksites() {
-    await cache.delete('lookup:worksites:active');
+  static async invalidateWorksites(organizationId?: string) {
+    if (organizationId) {
+      await cache.delete(`lookup:worksites:${organizationId}:active`);
+    } else {
+      await cache.delete('lookup:worksites:active');
+      await cache.deletePrefix('lookup:worksites:');
+    }
   }
 
   /**
    * Cached Default Payroll Rule - TTL: 10 mins
-   * Read on payroll preview and calculation runs
+   * Scoped to organizationId to prevent cross-tenant payroll rule contamination.
    */
-  static async getDefaultPayrollRule() {
+  static async getDefaultPayrollRule(organizationId?: string) {
+    const cacheKey = organizationId
+      ? `lookup:payroll_rule:${organizationId}:default`
+      : 'lookup:payroll_rule:default';
+
     return cache.getOrSet(
-      'lookup:payroll_rule:default',
+      cacheKey,
       async () => {
         return prisma.payrollRule.findFirst({
-          where: { isDefault: true, isActive: true },
+          where: {
+            ...(organizationId ? { organizationId } : {}),
+            isDefault: true,
+            isActive: true,
+          },
         });
       },
       600 // 10 mins
@@ -284,19 +304,31 @@ export class CachedLookupService {
   /**
    * Invalidate default payroll rule cache
    */
-  static async invalidatePayrollRules() {
-    await cache.deletePrefix('lookup:payroll_rule:');
+  static async invalidatePayrollRules(organizationId?: string) {
+    if (organizationId) {
+      await cache.delete(`lookup:payroll_rule:${organizationId}:default`);
+    } else {
+      await cache.deletePrefix('lookup:payroll_rule:');
+    }
   }
 
   /**
    * Cached Company Settings by Key - TTL: 15 mins
+   * Scoped to organizationId to prevent cross-tenant configuration leaks.
    */
-  static async getCompanySetting(key: string): Promise<string | null> {
+  static async getCompanySetting(key: string, organizationId?: string): Promise<string | null> {
+    const cacheKey = organizationId
+      ? `lookup:setting:${organizationId}:${key}`
+      : `lookup:setting:global:${key}`;
+
     return cache.getOrSet(
-      `lookup:setting:${key}`,
+      cacheKey,
       async () => {
-        const setting = await prisma.companySetting.findUnique({
-          where: { key },
+        const setting = await prisma.companySetting.findFirst({
+          where: {
+            ...(organizationId ? { organizationId } : {}),
+            key,
+          },
         });
         return setting ? setting.value : null;
       },
@@ -307,7 +339,12 @@ export class CachedLookupService {
   /**
    * Invalidate company setting
    */
-  static async invalidateCompanySetting(key: string) {
-    await cache.delete(`lookup:setting:${key}`);
+  static async invalidateCompanySetting(key: string, organizationId?: string) {
+    if (organizationId) {
+      await cache.delete(`lookup:setting:${organizationId}:${key}`);
+    } else {
+      await cache.delete(`lookup:setting:global:${key}`);
+      await cache.deletePrefix('lookup:setting:');
+    }
   }
 }

@@ -1,0 +1,19 @@
+{
+  "name": "Antigravity HRMS — Quản Trị Nhân Sự & Chấm Công",
+  "short_name": "AGY HRMS",
+  "description": "Ứng dụng Chấm công GPS, Quản lý Nhân sự, KPI & Bảng lương Doanh nghiệp chuẩn Luật Lao Động 2026.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070b14",
+  "theme_color": "#070b14",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

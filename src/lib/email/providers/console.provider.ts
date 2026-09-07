@@ -14,7 +14,7 @@ export class ConsoleEmailProvider implements EmailProvider {
     logger.info(`[ConsoleEmailProvider] Sending Email:
 --------------------------------------------------------------------------------
 To: ${recipients}
-From: ${message.from || 'default@antigravity.internal'}
+From: ${message.from || process.env.SYSTEM_EMAIL_FROM || 'no-reply@localhost'}
 Subject: ${message.subject}
 Content: ${(message.text || message.html).slice(0, 200)}...
 --------------------------------------------------------------------------------`);

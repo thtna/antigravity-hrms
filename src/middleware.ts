@@ -96,10 +96,14 @@ export async function middleware(request: NextRequest) {
   if (
     pathname === '/' ||
     pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password' ||
     pathname === '/unauthorized' ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api/health') ||
     pathname.startsWith('/api/v1/auth/login') ||
+    pathname.startsWith('/api/v1/auth/register') ||
+    pathname.startsWith('/api/v1/auth/forgot-password') ||
     pathname.includes('.')
   ) {
     return applySecurityHeaders(NextResponse.next());
@@ -158,6 +162,56 @@ export async function middleware(request: NextRequest) {
       );
     }
 
+    const isSuperAdmin = session.roles.some((r: any) => {
+      const s = String(r).toLowerCase();
+      return s === 'super_admin' || s === 'superadmin';
+    });
+
+    // Check organization status: PENDING MUST NOT enter dashboard!
+    // Super Admin manages the platform and is exempt from single-tenant active restriction
+    if (!isSuperAdmin && session.organizationStatus && session.organizationStatus !== 'ACTIVE') {
+      if (pathname.startsWith('/api/')) {
+        return applySecurityHeaders(
+          NextResponse.json(
+            {
+              success: false,
+              error: {
+                code: 'FORBIDDEN',
+                message: session.organizationStatus === 'PENDING'
+                  ? 'Tổ chức của bạn đang ở trạng thái CHỜ DUYỆT (PENDING). Vui lòng đợi quản trị viên phê duyệt.'
+                  : 'Tổ chức của bạn chưa được kích hoạt hoặc đã bị khóa.',
+              },
+            },
+            { status: 403 }
+          )
+        );
+      }
+      return applySecurityHeaders(
+        NextResponse.redirect(new URL('/login?error=org_pending', request.url))
+      );
+    }
+
+    // Super Admin route checking
+    if (pathname.startsWith('/super-admin') || pathname.startsWith('/api/v1/super-admin')) {
+      if (!isSuperAdmin) {
+        if (pathname.startsWith('/api/')) {
+          return applySecurityHeaders(
+            NextResponse.json(
+              {
+                success: false,
+                error: {
+                  code: 'FORBIDDEN',
+                  message: 'Chỉ SUPER_ADMIN mới có quyền truy cập chức năng này.',
+                },
+              },
+              { status: 403 }
+            )
+          );
+        }
+        return applySecurityHeaders(NextResponse.redirect(new URL('/unauthorized', request.url)));
+      }
+    }
+
     // Role-based route checking
     if (pathname.startsWith('/admin') && !session.roles.includes('admin')) {
       return applySecurityHeaders(NextResponse.redirect(new URL('/unauthorized', request.url)));
@@ -180,10 +234,16 @@ export async function middleware(request: NextRequest) {
       return applySecurityHeaders(NextResponse.redirect(new URL('/unauthorized', request.url)));
     }
 
-    // Attach user metadata to request headers for downstream handlers
+    // Attach user & tenant metadata to request headers for downstream handlers
     const response = NextResponse.next();
     response.headers.set('x-user-id', session.userId);
     response.headers.set('x-user-roles', session.roles.join(','));
+    if (session.organizationId) {
+      response.headers.set('x-organization-id', session.organizationId);
+    }
+    if (session.tenantRole) {
+      response.headers.set('x-tenant-role', session.tenantRole);
+    }
     return applySecurityHeaders(response);
   } catch {
     // Invalid/expired token

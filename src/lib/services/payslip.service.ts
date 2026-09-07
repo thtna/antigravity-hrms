@@ -40,7 +40,7 @@ export class PayslipService {
       },
     });
 
-    if (!payroll) {
+    if (!payroll || (session?.organizationId && payroll.employee?.organizationId && payroll.employee.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy phiếu lương được yêu cầu.');
     }
 

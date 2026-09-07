@@ -8,12 +8,13 @@ import { ApiResponse } from '@/types';
 
 export async function GET(request: NextRequest): Promise<NextResponse<ApiResponse<any>>> {
   try {
-    await requireAuth();
+    const session = await requireAuth();
 
     const { searchParams } = new URL(request.url);
     const includeInactive = searchParams.get('includeInactive') === 'true';
 
-    const departments = await DepartmentService.listDepartments(includeInactive);
+    // PHASE 5: Pass session so service can apply tenant scope
+    const departments = await DepartmentService.listDepartments(includeInactive, session);
 
     return NextResponse.json({
       success: true,

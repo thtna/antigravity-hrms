@@ -17,7 +17,7 @@ export class SendGridEmailProvider implements EmailProvider {
 
   constructor(config?: SendGridConfig) {
     this.apiKey = config?.apiKey || process.env.SENDGRID_API_KEY || '';
-    this.defaultFrom = config?.defaultFrom || process.env.SENDGRID_FROM_EMAIL || 'no-reply@antigravity.internal';
+    this.defaultFrom = config?.defaultFrom || process.env.SENDGRID_FROM_EMAIL || 'no-reply@localhost';
   }
 
   isConfigured(): boolean {

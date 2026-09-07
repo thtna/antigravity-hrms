@@ -10,12 +10,15 @@ import { SkeletonStatCard, SkeletonCard } from '@/components/ui/skeleton';
 import {
   RotateCcw,
   ShieldCheck,
-  Users,
-  User,
   AlertCircle,
   Loader2,
   Sparkles,
+  Compass,
+  ArrowRight,
+  Users,
+  User,
 } from 'lucide-react';
+import Link from 'next/link';
 
 export function DashboardClient() {
   const [loading, setLoading] = useState(true);
@@ -76,31 +79,6 @@ export function DashboardClient() {
     }
   };
 
-  const handleQuickLogin = async (email: string) => {
-    try {
-      setRefreshing(true);
-      setError(null);
-      const res = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password: 'Antigravity@2026',
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || 'Đăng nhập thất bại.');
-      }
-      // Re-fetch dashboard once session cookie is set
-      await fetchDashboard(undefined, false);
-    } catch (err: any) {
-      setError(err.message || 'Lỗi khi đăng nhập nhanh.');
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="space-y-6">
@@ -140,61 +118,20 @@ export function DashboardClient() {
             YÊU CẦU XÁC THỰC TÀI KHOẢN
           </div>
           <h3 className="text-2xl font-bold tracking-tight text-white">
-            Trải Nghiệm Bảng Điều Khiển Antigravity HRMS
+            Bảng Điều Khiển Doanh Nghiệp Antigravity HRMS
           </h3>
           <p className="text-sm text-slate-400 max-w-xl mx-auto">
-            Hệ thống quản trị thời gian thực yêu cầu đăng nhập theo vai trò. Bạn có thể chọn đăng nhập nhanh 1-click với các tài khoản mẫu bên dưới để trải nghiệm ngay:
+            Hệ thống quản trị yêu cầu phiên đăng nhập hợp lệ. Vui lòng đăng nhập bằng tài khoản được cấp để tiếp tục sử dụng.
           </p>
         </div>
 
-        {/* 1-Click Quick Demo Login Actions */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 max-w-2xl mx-auto pt-2">
-          <button
-            onClick={() => handleQuickLogin('admin@antigravity.internal')}
-            disabled={refreshing}
-            className="flex flex-col items-center justify-center p-4 rounded-xl border border-blue-500/40 bg-blue-950/30 hover:bg-blue-900/50 text-center transition-all group shadow-lg shadow-blue-950/40 disabled:opacity-50"
+        <div className="pt-2">
+          <a
+            href="/login"
+            className="inline-flex items-center justify-center px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-semibold shadow-lg shadow-blue-500/25 transition-all"
           >
-            <ShieldCheck className="h-6 w-6 text-blue-400 mb-2 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-bold text-white">1-Click Đăng Nhập Admin</span>
-            <span className="text-[10px] text-blue-300/80 font-mono mt-0.5">admin@antigravity.internal</span>
-            <span className="mt-2 text-[10px] rounded-full bg-blue-500/20 text-blue-300 px-2 py-0.5 font-semibold">
-              Toàn quyền hệ thống
-            </span>
-          </button>
-
-          <button
-            onClick={() => handleQuickLogin('manager.tech@antigravity.internal')}
-            disabled={refreshing}
-            className="flex flex-col items-center justify-center p-4 rounded-xl border border-indigo-500/40 bg-indigo-950/30 hover:bg-indigo-900/50 text-center transition-all group shadow-lg shadow-indigo-950/40 disabled:opacity-50"
-          >
-            <Users className="h-6 w-6 text-indigo-400 mb-2 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-bold text-white">1-Click Đăng Nhập Manager</span>
-            <span className="text-[10px] text-indigo-300/80 font-mono mt-0.5">manager.tech@antigravity.internal</span>
-            <span className="mt-2 text-[10px] rounded-full bg-indigo-500/20 text-indigo-300 px-2 py-0.5 font-semibold">
-              Quản lý phòng TECH
-            </span>
-          </button>
-
-          <button
-            onClick={() => handleQuickLogin('dev.an@antigravity.internal')}
-            disabled={refreshing}
-            className="flex flex-col items-center justify-center p-4 rounded-xl border border-emerald-500/40 bg-emerald-950/30 hover:bg-emerald-900/50 text-center transition-all group shadow-lg shadow-emerald-950/40 disabled:opacity-50"
-          >
-            <User className="h-6 w-6 text-emerald-400 mb-2 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-bold text-white">1-Click Đăng Nhập Employee</span>
-            <span className="text-[10px] text-emerald-300/80 font-mono mt-0.5">dev.an@antigravity.internal</span>
-            <span className="mt-2 text-[10px] rounded-full bg-emerald-500/20 text-emerald-300 px-2 py-0.5 font-semibold">
-              Nhân viên lập trình
-            </span>
-          </button>
-        </div>
-
-        <div className="pt-2 text-xs text-slate-500">
-          Hoặc bạn có thể truy cập trang{' '}
-          <a href="/login" className="text-blue-400 underline hover:text-blue-300 font-semibold">
-            Đăng Nhập Chuẩn
-          </a>{' '}
-          để nhập thông tin thủ công.
+            Đăng Nhập Hệ Thống
+          </a>
         </div>
       </div>
     );
@@ -294,6 +231,30 @@ export function DashboardClient() {
           </Button>
         </div>
       </div>
+
+      {/* Onboarding Incomplete Reminder Banner */}
+      {sessionUser?.needsOnboarding && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border border-blue-500/40 bg-blue-950/30 p-4 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600/20 text-blue-400 ring-1 ring-blue-500/30">
+              <Compass className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-white">Bạn chưa hoàn thành thiết lập tổ chức</h4>
+              <p className="text-xs text-slate-300">
+                Hãy hoàn tất 8 bước Onboarding để thiết lập chi nhánh, phòng ban, ca làm việc và quy chế lương.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/onboarding"
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-xs font-semibold text-white transition-colors self-start sm:self-center shrink-0"
+          >
+            Tiếp Tục Thiết Lập
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      )}
 
       {/* Render Active Role View */}
       {currentRole === 'admin' && dashboardData && (

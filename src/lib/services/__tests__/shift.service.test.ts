@@ -17,6 +17,7 @@ const mockPrisma = vi.hoisted(() => ({
   workShift: {
     findMany: vi.fn(),
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
@@ -109,6 +110,10 @@ const activeEmployee = {
 describe('PHASE 5 — WORK SHIFT & SCHEDULE TEST SUITE', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    mockPrisma.workShift.findFirst.mockImplementation((...args: any[]) =>
+      mockPrisma.workShift.findUnique(...args)
+    );
 
     // Default $transaction mock: executes callback immediately
     mockPrisma.$transaction.mockImplementation(async (cb: (tx: typeof mockPrisma) => unknown) =>

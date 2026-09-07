@@ -120,6 +120,15 @@ vi.mock('@/lib/db/prisma', () => {
         }
         return state.departments.get(where.id) || null;
       }),
+      findFirst: vi.fn(async ({ where }: any = {}) => {
+        if (where?.code) {
+          for (const d of state.departments.values()) {
+            if (d.code === where.code) return d;
+          }
+          return null;
+        }
+        return Array.from(state.departments.values())[0] || null;
+      }),
       findMany: vi.fn(async () => Array.from(state.departments.values())),
       create: vi.fn(async ({ data }) => {
         const id = data.id || uid('dept');
@@ -143,6 +152,15 @@ vi.mock('@/lib/db/prisma', () => {
         }
         return state.positions.get(where.id) || null;
       }),
+      findFirst: vi.fn(async ({ where }: any = {}) => {
+        if (where?.code) {
+          for (const pos of state.positions.values()) {
+            if (pos.code === where.code) return pos;
+          }
+          return null;
+        }
+        return Array.from(state.positions.values())[0] || null;
+      }),
       findMany: vi.fn(async () => Array.from(state.positions.values())),
       create: vi.fn(async ({ data }) => {
         const id = data.id || uid('pos');
@@ -163,6 +181,33 @@ vi.mock('@/lib/db/prisma', () => {
         if (!emp && where.userId) {
           for (const e of state.employees.values()) {
             if (e.userId === where.userId) { emp = e; break; }
+          }
+        }
+        if (!emp) return null;
+        const dept = emp.departmentId ? state.departments.get(emp.departmentId) : null;
+        const pos = emp.positionId ? state.positions.get(emp.positionId) : null;
+        const ws = emp.worksiteId ? state.worksites.get(emp.worksiteId) : null;
+        const u = emp.userId ? state.users.get(emp.userId) : null;
+        return {
+          ...emp,
+          userId: emp.userId,
+          department: dept ? { id: dept.id, name: dept.name, code: dept.code } : null,
+          position: pos ? { id: pos.id, title: pos.title, code: pos.code } : null,
+          worksite: ws || null,
+          user: u || { id: emp.userId, email: emp.email, isActive: true },
+          managedDepartments: [],
+        };
+      }),
+      findFirst: vi.fn(async ({ where }: any = {}) => {
+        let emp: any = null;
+        if (where?.employeeCode) {
+          for (const e of state.employees.values()) {
+            if (e.employeeCode === where.employeeCode) { emp = e; break; }
+          }
+        }
+        if (!emp && where?.identityCard) {
+          for (const e of state.employees.values()) {
+            if (e.identityCard === where.identityCard) { emp = e; break; }
           }
         }
         if (!emp) return null;
@@ -209,7 +254,15 @@ vi.mock('@/lib/db/prisma', () => {
         }
         return state.shifts.get(where.id) || null;
       }),
-      findFirst: vi.fn(async () => Array.from(state.shifts.values())[0] || null),
+      findFirst: vi.fn(async ({ where }: any = {}) => {
+        if (where?.code) {
+          for (const s of state.shifts.values()) {
+            if (s.code === where.code) return s;
+          }
+          return null;
+        }
+        return Array.from(state.shifts.values())[0] || null;
+      }),
       findMany: vi.fn(async () => Array.from(state.shifts.values())),
       create: vi.fn(async ({ data }) => {
         const id = data.id || uid('shift');
@@ -419,6 +472,15 @@ vi.mock('@/lib/db/prisma', () => {
         }
         return state.kpiDefinitions.get(where.id) || null;
       }),
+      findFirst: vi.fn(async ({ where }: any = {}) => {
+        if (where?.code) {
+          for (const k of state.kpiDefinitions.values()) {
+            if (k.code === where.code) return k;
+          }
+          return null;
+        }
+        return Array.from(state.kpiDefinitions.values())[0] || null;
+      }),
       findMany: vi.fn(async () => Array.from(state.kpiDefinitions.values())),
       create: vi.fn(async ({ data }) => {
         const id = data.id || uid('kpi');
@@ -475,6 +537,15 @@ vi.mock('@/lib/db/prisma', () => {
           _count: { payrolls: state.payrolls.size || 8 },
           approvals: Array.from(state.payrollApprovals.values()).filter((a: any) => a.periodId === p.id),
         };
+      }),
+      findFirst: vi.fn(async ({ where }: any = {}) => {
+        if (where?.code) {
+          for (const p of state.payrollPeriods.values()) {
+            if (p.code === where.code) return p;
+          }
+          return null;
+        }
+        return Array.from(state.payrollPeriods.values())[0] || null;
       }),
       findMany: vi.fn(async () => Array.from(state.payrollPeriods.values())),
       create: vi.fn(async ({ data }) => {

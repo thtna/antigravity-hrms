@@ -8,7 +8,7 @@ import { ApiResponse } from '@/types';
 
 export async function GET(request: NextRequest): Promise<NextResponse<ApiResponse<any>>> {
   try {
-    await requireAuth();
+    const session = await requireAuth();
 
     const { searchParams } = new URL(request.url);
     const query = {
@@ -19,7 +19,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
     };
 
     const validatedQuery = await validateRequest(WorksiteQuerySchema, query);
-    const result = await WorksiteService.getWorksites(validatedQuery);
+    const result = await WorksiteService.getWorksites(validatedQuery, session);
 
     return NextResponse.json({
       success: true,

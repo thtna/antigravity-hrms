@@ -13,7 +13,10 @@ import {
   readDocumentFile,
   deleteDocumentFile,
 } from '@/lib/security/file-storage';
+import { StorageManager } from '@/lib/storage/storage-manager';
+import { buildTenantDocumentKey } from '@/lib/storage/tenant-keys';
 import path from 'path';
+import crypto from 'crypto';
 
 export const AVATAR_ALLOWED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'] as const;
 export const AVATAR_MAX_BYTES = 2 * 1024 * 1024; // 2 MB
@@ -56,7 +59,9 @@ export class DocumentService {
 
     // Generate safe filename: avatar_<userId>_<timestamp>.<ext>
     const safeFilename = `avatar_${userId}_${Date.now()}.${validation.extension}`;
-    await saveAvatarFile(safeFilename, file.buffer);
+    const orgId = session.organizationId || 'org_default_tanphong';
+
+    await saveAvatarFile(safeFilename, file.buffer, orgId);
 
     const avatarUrl = `/api/v1/avatars/${safeFilename}`;
 
@@ -88,7 +93,7 @@ export class DocumentService {
   /**
    * Serve avatar buffer
    */
-  static async getAvatarBuffer(filename: string) {
+  static async getAvatarBuffer(filename: string, organizationId?: string) {
     // Sanitize filename against directory traversal
     const safeName = sanitizeFilename(filename);
     const ext = path.extname(safeName).toLowerCase().replace('.', '');
@@ -100,7 +105,7 @@ export class DocumentService {
     };
 
     const mimeType = mimeTypes[ext] || 'application/octet-stream';
-    const buffer = await readAvatarFile(safeName);
+    const buffer = await readAvatarFile(safeName, organizationId);
 
     return { buffer, mimeType };
   }
@@ -124,7 +129,7 @@ export class DocumentService {
       include: { department: true },
     });
 
-    if (!employee || employee.deletedAt) {
+    if (!employee || employee.deletedAt || (session.organizationId && employee.organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy nhân viên có ID: ${employeeId}`);
     }
 
@@ -149,22 +154,38 @@ export class DocumentService {
     });
 
     const docId = crypto.randomUUID();
+    const orgId = employee.organizationId || session.organizationId || 'org_default_tanphong';
+
     const { storedFilename } = await saveDocumentFile(
       employeeId,
       docId,
       validation.extension,
-      file.buffer
+      file.buffer,
+      orgId
     );
 
-    // Construct private document record
+    const objectKey = buildTenantDocumentKey(orgId, employeeId, docId, validation.extension);
+
+    // Construct private document record with rich storage metadata
     const downloadUrl = `/api/v1/employees/${employeeId}/documents/${docId}`;
-    const newDoc: EmployeeDocumentItem & { storedFilename: string; mimeType: string } = {
+    const newDoc: EmployeeDocumentItem & {
+      storedFilename: string;
+      mimeType: string;
+      objectKey: string;
+      bucket: string;
+      storageProvider: string;
+      organizationId: string;
+    } = {
       id: docId,
       name: validation.sanitizedFilename,
       type: documentType,
       url: downloadUrl,
       size: validation.sizeBytes,
       storedFilename,
+      objectKey,
+      bucket: 'documents',
+      storageProvider: StorageManager.getProvider().providerName,
+      organizationId: orgId,
       mimeType: validation.mimeType,
       uploadedAt: new Date().toISOString(),
     };
@@ -178,7 +199,9 @@ export class DocumentService {
       data: { documents: updatedDocs },
     });
 
-    logger.info(`[DocumentService] Document [${docId}] (${documentType}) uploaded for employee ${employee.employeeCode}`);
+    logger.info(`[DocumentService] Document [${docId}] (${documentType}) uploaded for employee ${employee.employeeCode}`, {
+      key: objectKey,
+    });
 
     return newDoc;
   }
@@ -186,7 +209,7 @@ export class DocumentService {
   /**
    * Download / View a private employee document.
    * STRICT AUTHORIZATION ENFORCEMENT (Anti-IDOR):
-   * - Admin & HR: Can access all documents.
+   * - Admin & HR: Can access all documents within tenant.
    * - Manager: Can ONLY access documents of employees in their own department.
    * - Employee: Can ONLY access their OWN documents.
    * - Cross-access attempt -> 403 Forbidden!
@@ -209,10 +232,11 @@ export class DocumentService {
         departmentId: true,
         documents: true,
         deletedAt: true,
+        organizationId: true,
       },
     });
 
-    if (!employee || employee.deletedAt) {
+    if (!employee || employee.deletedAt || (session.organizationId && employee.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Hồ sơ nhân viên không tồn tại hoặc đã bị xoá.');
     }
 
@@ -243,7 +267,7 @@ export class DocumentService {
       throw ApiError.notFound('Không tìm thấy tài liệu yêu cầu.');
     }
 
-    // Resolve stored filename
+    const orgId = employee.organizationId || session.organizationId || 'org_default_tanphong';
     const ext = targetDoc.name ? targetDoc.name.split('.').pop() || 'bin' : 'bin';
     const storedFilename = targetDoc.storedFilename || `${docId}.${ext}`;
 
@@ -255,6 +279,85 @@ export class DocumentService {
       mimeType: targetDoc.mimeType || 'application/octet-stream',
       size: targetDoc.size || buffer.length,
       type: targetDoc.type,
+    };
+  }
+
+  /**
+   * Generate short-lived signed URL for an authorized user to access a private document
+   */
+  static async getEmployeeDocumentSignedUrl(
+    employeeId: string,
+    docId: string,
+    session: UserSession,
+    expiresInSeconds: number = 300
+  ) {
+    if (!session || !session.userId) {
+      throw ApiError.unauthorized('Yêu cầu xác thực tài khoản.');
+    }
+
+    const employee = await prisma.employee.findUnique({
+      where: { id: employeeId },
+      select: {
+        id: true,
+        userId: true,
+        employeeCode: true,
+        departmentId: true,
+        documents: true,
+        deletedAt: true,
+        organizationId: true,
+      },
+    });
+
+    if (!employee || employee.deletedAt || (session.organizationId && employee.organizationId !== session.organizationId)) {
+      throw ApiError.notFound('Hồ sơ nhân viên không tồn tại hoặc đã bị xoá.');
+    }
+
+    // Authorization & IDOR Check
+    const isHrOrAdmin = session.roles.includes('admin') || session.roles.includes('hr');
+    const isSelf = session.employeeId === employee.id || session.userId === employee.userId;
+    const isManager = session.roles.includes('manager');
+
+    if (!isHrOrAdmin && !isSelf) {
+      if (isManager) {
+        if (employee.departmentId !== session.departmentId) {
+          throw ApiError.forbidden(
+            'Bạn không có quyền tải tài liệu của nhân viên thuộc phòng ban khác (Chặn IDOR).'
+          );
+        }
+      } else {
+        throw ApiError.forbidden(
+          'Truy cập bị từ chối: Bạn không có quyền truy cập hoặc tạo Signed URL cho tài liệu nhân viên khác (Chặn IDOR).'
+        );
+      }
+    }
+
+    const docs = (employee.documents as any) || [];
+    const targetDoc = docs.find((d: any) => d.id === docId);
+
+    if (!targetDoc) {
+      throw ApiError.notFound('Không tìm thấy tài liệu yêu cầu.');
+    }
+
+    const orgId = employee.organizationId || session.organizationId || 'org_default_tanphong';
+    const ext = targetDoc.name ? targetDoc.name.split('.').pop() || 'bin' : 'bin';
+    const storedFilename = targetDoc.storedFilename || `${docId}.${ext}`;
+    const objectKey = targetDoc.objectKey;
+
+    const signedUrl = await StorageManager.getDocumentSignedUrl({
+      organizationId: orgId,
+      employeeId,
+      docId,
+      storedFilename,
+      objectKey,
+      expiresInSeconds,
+      filename: targetDoc.name,
+    });
+
+    return {
+      signedUrl,
+      expiresInSeconds,
+      filename: targetDoc.name || `document_${docId}.${ext}`,
+      docId,
     };
   }
 
@@ -275,10 +378,11 @@ export class DocumentService {
         departmentId: true,
         documents: true,
         deletedAt: true,
+        organizationId: true,
       },
     });
 
-    if (!employee || employee.deletedAt) {
+    if (!employee || employee.deletedAt || (session.organizationId && employee.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy nhân viên.');
     }
 
@@ -297,10 +401,11 @@ export class DocumentService {
     }
 
     const docs = (employee.documents as any) || [];
-    // Ensure all documents have proper secure download URLs
+    // Ensure all documents have proper secure download URLs and signed URL endpoints
     return docs.map((d: any) => ({
       ...d,
       url: `/api/v1/employees/${employeeId}/documents/${d.id}`,
+      signedUrlEndpoint: `/api/v1/employees/${employeeId}/documents/${d.id}/signed-url`,
     }));
   }
 
@@ -324,10 +429,11 @@ export class DocumentService {
         departmentId: true,
         documents: true,
         deletedAt: true,
+        organizationId: true,
       },
     });
 
-    if (!employee || employee.deletedAt) {
+    if (!employee || employee.deletedAt || (session.organizationId && employee.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy nhân viên.');
     }
 
@@ -343,10 +449,11 @@ export class DocumentService {
       throw ApiError.notFound('Không tìm thấy tài liệu cần xoá.');
     }
 
+    const orgId = employee.organizationId || session.organizationId || 'org_default_tanphong';
     const ext = targetDoc.name ? targetDoc.name.split('.').pop() || 'bin' : 'bin';
     const storedFilename = targetDoc.storedFilename || `${docId}.${ext}`;
 
-    // Delete physical file
+    // Delete object through file-storage bridge
     await deleteDocumentFile(employeeId, storedFilename);
 
     // Update DB

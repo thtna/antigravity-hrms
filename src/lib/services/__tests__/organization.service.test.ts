@@ -10,6 +10,7 @@ vi.mock('@/lib/db/prisma', () => ({
     department: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       count: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock('@/lib/db/prisma', () => ({
     position: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       count: vi.fn(),
@@ -65,6 +67,12 @@ describe('PHASE 4 — DEPARTMENT & POSITION SERVICE TEST SUITE', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (prisma.department.findFirst as unknown as Mock).mockImplementation((...args: any[]) =>
+      (prisma.department.findUnique as unknown as Mock)(...args)
+    );
+    (prisma.position.findFirst as unknown as Mock).mockImplementation((...args: any[]) =>
+      (prisma.position.findUnique as unknown as Mock)(...args)
+    );
   });
 
   // ==========================================================================

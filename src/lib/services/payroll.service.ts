@@ -23,7 +23,10 @@ export class PayrollService {
     const { status, search, page = 1, limit = 20 } = params;
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: any = {
+      // PHASE 5: Tenant isolation
+      organizationId: session.organizationId ?? '__no_org__',
+    };
     if (status) {
       where.status = status;
     }
@@ -73,12 +76,12 @@ export class PayrollService {
       throw ApiError.forbidden('Chỉ Nhân sự hoặc Quản trị viên mới có quyền tạo kỳ tính lương.');
     }
 
-    // Check code uniqueness
-    const existing = await prisma.payrollPeriod.findUnique({
-      where: { code: input.code },
+    // Check code uniqueness scoped to this organization
+    const existing = await prisma.payrollPeriod.findFirst({
+      where: { code: input.code, organizationId: session.organizationId },
     });
     if (existing) {
-      throw ApiError.conflict(`Mã kỳ tính lương "${input.code}" đã tồn tại trên hệ thống.`);
+      throw ApiError.conflict(`Mã kỳ tính lương "${input.code}" đã tồn tại trong tổ chức.`);
     }
 
     // Resolve payroll rule
@@ -101,6 +104,7 @@ export class PayrollService {
         standardWorkDays: input.standardWorkDays,
         payrollRuleId,
         status: 'DRAFT',
+        organizationId: session.organizationId!, // PHASE 5: tenant binding
       },
       include: {
         payrollRule: {
@@ -160,6 +164,11 @@ export class PayrollService {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương yêu cầu.');
     }
 
+    // PHASE 5: Tenant isolation
+    if (session?.organizationId && (period as any).organizationId && (period as any).organizationId !== session.organizationId) {
+      throw ApiError.notFound('Không tìm thấy kỳ tính lương yêu cầu.');
+    }
+
     // Non-HR/Admin can only see their own payslip
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
     if (!isHrOrAdmin) {
@@ -190,7 +199,7 @@ export class PayrollService {
       include: { payrollRule: true },
     });
 
-    if (!period) {
+    if (!period || (session?.organizationId && (period as any).organizationId && (period as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
     }
 
@@ -222,8 +231,9 @@ export class PayrollService {
     const endRange = period.endDate;
     const standardWorkDays = period.standardWorkDays || 22;
 
-    // 1. Fetch eligible employees
+    // 1. Fetch eligible employees (strictly scoped to current tenant)
     const employeeWhere: any = {
+      organizationId: session.organizationId ?? '__no_org__',
       hireDate: { lte: endRange },
       OR: [
         { deletedAt: null },
@@ -618,6 +628,17 @@ export class PayrollService {
       throw ApiError.notFound('Không tìm thấy phiếu lương.');
     }
 
+    // PHASE 5: Tenant isolation — verify employee belongs to session org
+    if (session?.organizationId) {
+      const empCheck = await prisma.employee.findUnique({
+        where: { id: payslip.employeeId },
+        select: { organizationId: true },
+      });
+      if (!empCheck || empCheck.organizationId !== session.organizationId) {
+        throw ApiError.notFound('Không tìm thấy phiếu lương.');
+      }
+    }
+
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
     if (!isHrOrAdmin && payslip.employee.userId !== session.userId) {
       throw ApiError.forbidden('Bạn không có quyền truy cập phiếu lương của nhân viên khác.');
@@ -687,7 +708,7 @@ export class PayrollService {
     const period = await prisma.payrollPeriod.findUnique({
       where: { id: periodId },
     });
-    if (!period) {
+    if (!period || (session?.organizationId && (period as any).organizationId && (period as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
     }
 

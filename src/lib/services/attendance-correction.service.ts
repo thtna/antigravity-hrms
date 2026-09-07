@@ -129,6 +129,7 @@ export class AttendanceCorrectionService {
     const adjustment = await prisma.$transaction(async (tx) => {
       const created = await tx.attendanceAdjustment.create({
         data: {
+          organizationId: session.organizationId ?? '__no_org__',
           attendanceId: attendance ? attendance.id : null,
           employeeId,
           workDate,
@@ -291,7 +292,7 @@ export class AttendanceCorrectionService {
       },
     });
 
-    if (!correction) {
+    if (!correction || (session?.organizationId && (correction as any).organizationId && (correction as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy yêu cầu điều chỉnh có ID: ${id}`);
     }
 
@@ -613,7 +614,7 @@ export class AttendanceCorrectionService {
       where: { id },
     });
 
-    if (!correction) {
+    if (!correction || (session?.organizationId && (correction as any).organizationId && (correction as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy yêu cầu điều chỉnh có ID: ${id}`);
     }
 
@@ -665,7 +666,9 @@ export class AttendanceCorrectionService {
     const isHrOrAdmin = session.roles.includes('admin') || session.roles.includes('hr');
     const isManager = session.roles.includes('manager');
 
-    const where: Prisma.AttendanceAdjustmentWhereInput = {};
+    const where: Prisma.AttendanceAdjustmentWhereInput = {
+      ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+    };
 
     // RBAC scoping
     if (!isHrOrAdmin) {
@@ -818,7 +821,7 @@ export class AttendanceCorrectionService {
       },
     });
 
-    if (!correction) {
+    if (!correction || (session?.organizationId && (correction as any).organizationId && (correction as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy yêu cầu điều chỉnh có ID: ${id}`);
     }
 

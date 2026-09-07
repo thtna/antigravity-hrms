@@ -61,10 +61,10 @@ export class KpiService {
     // Verify employee belongs to a department managed by this manager
     const targetEmployee = await prisma.employee.findUnique({
       where: { id: employeeId },
-      select: { departmentId: true },
+      select: { departmentId: true, organizationId: true },
     });
 
-    if (!targetEmployee) {
+    if (!targetEmployee || (session.organizationId && targetEmployee.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy nhân viên.');
     }
 
@@ -84,9 +84,12 @@ export class KpiService {
   static async createKpiDefinition(input: CreateKpiDefinitionInput, session: UserSession) {
     this.ensurePrivileged(session);
 
-    // Check duplicate code
-    const existing = await prisma.kpi.findUnique({
-      where: { code: input.code },
+    // Check duplicate code within tenant
+    const existing = await prisma.kpi.findFirst({
+      where: {
+        code: input.code,
+        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+      },
     });
     if (existing) {
       throw ApiError.conflict(`Mã KPI "${input.code}" đã tồn tại trong hệ thống.`);
@@ -104,6 +107,7 @@ export class KpiService {
     return prisma.$transaction(async (tx) => {
       const created = await tx.kpi.create({
         data: {
+          organizationId: session.organizationId ?? '__no_org__',
           code: input.code,
           title: input.title,
           description: input.description,
@@ -148,12 +152,12 @@ export class KpiService {
     this.ensurePrivileged(session);
 
     const existing = await prisma.kpi.findUnique({ where: { id } });
-    if (!existing || existing.deletedAt) {
+    if (!existing || existing.deletedAt || (session.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Chỉ số KPI không tồn tại hoặc đã bị xóa.');
     }
 
     if (input.code && input.code !== existing.code) {
-      const duplicate = await prisma.kpi.findUnique({ where: { code: input.code } });
+      const duplicate = await prisma.kpi.findFirst({ where: { code: input.code } });
       if (duplicate && duplicate.id !== id) {
         throw ApiError.conflict(`Mã KPI "${input.code}" đã được sử dụng.`);
       }
@@ -210,7 +214,7 @@ export class KpiService {
       },
     });
 
-    if (!existing || existing.deletedAt) {
+    if (!existing || existing.deletedAt || (session.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Chỉ số KPI không tồn tại.');
     }
 
@@ -255,13 +259,15 @@ export class KpiService {
     });
   }
 
-  static async getKpiDefinitions(query: KpiQueryParams) {
+  static async getKpiDefinitions(query: KpiQueryParams, session?: { organizationId?: string | null }) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
     const skip = (page - 1) * limit;
 
     const where: Prisma.KpiWhereInput = {
       deletedAt: null,
+      // PHASE 5: Tenant isolation
+      ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
     };
 
     if (query.search) {

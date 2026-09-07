@@ -137,7 +137,17 @@ export function validateUploadedFile(
   }
 
   // 5. Validate MIME type
-  const mimeType = file.type?.toLowerCase() || '';
+  const EXT_TO_MIME: Record<string, string> = {
+    pdf: 'application/pdf',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  };
+
+  let mimeType = file.type?.toLowerCase() || EXT_TO_MIME[ext] || '';
   if (mimeType && !allowedMimes.includes(mimeType as any)) {
     throw ApiError.badRequest(`MIME type [${mimeType}] không được hỗ trợ hoặc bị chặn bởi chính sách bảo mật.`);
   }

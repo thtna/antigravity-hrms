@@ -25,7 +25,7 @@ export class SmtpEmailProvider implements EmailProvider {
       user: config?.user || process.env.SMTP_USER,
       pass: config?.pass || process.env.SMTP_PASS,
       secure: config?.secure ?? process.env.SMTP_SECURE === 'true',
-      defaultFrom: config?.defaultFrom || process.env.SMTP_FROM || 'no-reply@antigravity.internal',
+      defaultFrom: config?.defaultFrom || process.env.SMTP_FROM || 'no-reply@localhost',
     };
   }
 

@@ -78,6 +78,9 @@ describe('PHASE 14 — PAYROLL RULE SERVICE TEST SUITE', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockPrisma));
+    mockPrisma.payrollRule.findFirst.mockImplementation((...args: any[]) =>
+      mockPrisma.payrollRule.findUnique(...args)
+    );
   });
 
   describe('1. Rule CRUD & Permissions', () => {

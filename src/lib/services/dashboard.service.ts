@@ -302,12 +302,21 @@ export class DashboardService {
   /**
    * ADMIN & HR DASHBOARD
    */
-  static async getAdminHrDashboard(_session: UserSession): Promise<AdminHrDashboardData> {
+  static async getAdminHrDashboard(session: UserSession): Promise<AdminHrDashboardData> {
     const { startOfToday, endOfToday } = this.getTodayRange();
     const { startOfMonth, endOfMonth, periodStr } = this.getCurrentMonthRange();
     const past7Days = this.getPastDays(7);
     const rangeStart7 = past7Days[0].start;
     const rangeEnd7 = past7Days[past7Days.length - 1].end;
+
+    // PHASE 5: Build tenant filters for each entity type
+    const orgId = session.organizationId ?? '__no_org__';
+    const empFilter = { organizationId: orgId };
+    const deptFilter = { organizationId: orgId };
+    const periodFilter = { organizationId: orgId };
+    const bonusFilter = { employee: { organizationId: orgId } };
+    const attendanceFilter = { employee: { organizationId: orgId } };
+    const leaveFilter = { employee: { is: { organizationId: orgId } } };
 
     // [PHASE 25 OPTIMIZATION] Parallelize all independent DB queries and batch 7-day attendance
     const [
@@ -325,11 +334,11 @@ export class DashboardService {
     ] = await Promise.all([
       // 1. Total Active Employees
       prisma.employee.count({
-        where: { deletedAt: null, status: 'ACTIVE' },
+        where: { deletedAt: null, status: 'ACTIVE', ...empFilter },
       }),
       // 2. Today's Attendance records
       prisma.attendance.findMany({
-        where: { workDate: { gte: startOfToday, lte: endOfToday } },
+        where: { ...attendanceFilter, workDate: { gte: startOfToday, lte: endOfToday } },
         select: {
           id: true,
           employeeId: true,
@@ -343,6 +352,7 @@ export class DashboardService {
       // Active approved leaves today
       prisma.leaveRequest.findMany({
         where: {
+          ...leaveFilter,
           status: 'APPROVED',
           startDate: { lte: endOfToday },
           endDate: { gte: startOfToday },
@@ -351,13 +361,14 @@ export class DashboardService {
       }),
       // 3. Pending Queue items
       prisma.leaveRequest.count({
-        where: { status: 'PENDING' },
+        where: { ...leaveFilter, status: 'PENDING' },
       }),
       prisma.attendanceAdjustment.count({
-        where: { status: 'PENDING' },
+        where: { employee: { organizationId: orgId }, status: 'PENDING' },
       }),
       // 4. Latest Payroll Status
       prisma.payrollPeriod.findFirst({
+        where: periodFilter,
         orderBy: { createdAt: 'desc' },
         include: {
           payrolls: {
@@ -368,6 +379,7 @@ export class DashboardService {
       // 5. Overtime Hours (current month)
       prisma.attendance.aggregate({
         where: {
+          ...attendanceFilter,
           workDate: { gte: startOfMonth, lte: endOfMonth },
           status: { notIn: ['REJECTED', 'ABSENT'] },
         },
@@ -376,6 +388,7 @@ export class DashboardService {
       // 6. Bonus & Penalty for current month
       prisma.employeeBonusPenalty.findMany({
         where: {
+          ...bonusFilter,
           type: 'BONUS',
           status: 'APPROVED',
           period: periodStr,
@@ -384,6 +397,7 @@ export class DashboardService {
       }),
       prisma.employeeBonusPenalty.findMany({
         where: {
+          ...bonusFilter,
           type: 'PENALTY',
           status: 'APPROVED',
           period: periodStr,
@@ -392,12 +406,12 @@ export class DashboardService {
       }),
       // 7. Charts: Batched 7-Day Attendance Trend
       prisma.attendance.findMany({
-        where: { workDate: { gte: rangeStart7, lte: rangeEnd7 } },
+        where: { ...attendanceFilter, workDate: { gte: rangeStart7, lte: rangeEnd7 } },
         select: { workDate: true, checkInTime: true, lateMinutes: true, status: true },
       }),
       // 8. Charts: Department Distribution
       prisma.department.findMany({
-        where: { deletedAt: null, isActive: true },
+        where: { ...deptFilter, deletedAt: null, isActive: true },
         include: {
           employees: {
             where: { deletedAt: null, status: 'ACTIVE' },
@@ -513,26 +527,28 @@ export class DashboardService {
     const { startOfToday, endOfToday } = this.getTodayRange();
     const { periodStr } = this.getCurrentMonthRange();
 
+    const orgId = session.organizationId ?? '__no_org__';
+
     // 1. Determine managed department(s)
     let department = null;
 
     if (session.employeeId) {
       department = await prisma.department.findFirst({
-        where: { managerId: session.employeeId, deletedAt: null },
+        where: { managerId: session.employeeId, deletedAt: null, organizationId: orgId },
       });
     }
 
     // Fallback: If not assigned as manager directly, use user's department
     if (!department && session.departmentId) {
-      department = await prisma.department.findUnique({
-        where: { id: session.departmentId },
+      department = await prisma.department.findFirst({
+        where: { id: session.departmentId, organizationId: orgId },
       });
     }
 
     // If still no department found, get the first department
     if (!department) {
       department = await prisma.department.findFirst({
-        where: { deletedAt: null, isActive: true },
+        where: { deletedAt: null, isActive: true, organizationId: orgId },
       });
     }
 
@@ -541,7 +557,7 @@ export class DashboardService {
     // 2. Team Members in this department
     const teamEmployees = deptId
       ? await prisma.employee.findMany({
-          where: { departmentId: deptId, deletedAt: null, status: 'ACTIVE' },
+          where: { departmentId: deptId, deletedAt: null, status: 'ACTIVE', organizationId: orgId },
           include: {
             position: { select: { title: true } },
           },
@@ -869,7 +885,7 @@ export class DashboardService {
     // Fallback for testing: first employee
     if (!employee) {
       employee = await prisma.employee.findFirst({
-        where: { deletedAt: null },
+        where: { deletedAt: null, ...(session?.organizationId ? { organizationId: session.organizationId } : {}) },
         include: {
           department: { select: { name: true } },
           position: { select: { title: true } },
@@ -877,7 +893,7 @@ export class DashboardService {
       });
     }
 
-    if (!employee) {
+    if (!employee || (session?.organizationId && (employee as any).organizationId && (employee as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy thông tin nhân viên liên kết với tài khoản này.');
     }
 

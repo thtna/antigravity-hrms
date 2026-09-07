@@ -23,9 +23,9 @@ export class LeaveService {
       }
       const target = await prisma.employee.findUnique({
         where: { id: targetEmployeeId },
-        select: { id: true, status: true, deletedAt: true },
+        select: { id: true, status: true, deletedAt: true, organizationId: true },
       });
-      if (!target || target.deletedAt || target.status === 'TERMINATED') {
+      if (!target || target.deletedAt || target.status === 'TERMINATED' || (session.organizationId && target.organizationId !== session.organizationId)) {
         throw ApiError.badRequest('Nhân viên không tồn tại hoặc đã nghỉ việc.');
       }
       return target.id;
@@ -130,6 +130,7 @@ export class LeaveService {
     const createdRequest = await prisma.$transaction(async (tx) => {
       const created = await tx.leaveRequest.create({
         data: {
+          organizationId: session.organizationId ?? '__no_org__',
           employeeId,
           leaveTypeId: input.leaveTypeId ?? null,
           requestType: input.requestType,
@@ -227,7 +228,7 @@ export class LeaveService {
       },
     });
 
-    if (!leaveRequest) {
+    if (!leaveRequest || (session?.organizationId && (leaveRequest as any).organizationId && (leaveRequest as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy đơn yêu cầu có ID: ${id}`);
     }
 
@@ -351,7 +352,7 @@ export class LeaveService {
       where: { id },
     });
 
-    if (!leaveRequest) {
+    if (!leaveRequest || (session?.organizationId && (leaveRequest as any).organizationId && (leaveRequest as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy đơn yêu cầu có ID: ${id}`);
     }
 
@@ -409,7 +410,10 @@ export class LeaveService {
     const isHrOrAdmin = session.roles.includes('admin') || session.roles.includes('hr');
     const isManager = session.roles.includes('manager');
 
-    const where: Prisma.LeaveRequestWhereInput = {};
+    const where: Prisma.LeaveRequestWhereInput = {
+      // PHASE 5: Tenant isolation via employee relation
+      employee: { is: { organizationId: session.organizationId ?? '__no_org__' } },
+    };
 
     // RBAC scoping
     if (!isHrOrAdmin) {
@@ -444,6 +448,7 @@ export class LeaveService {
     if (query.departmentId) {
       where.employee = {
         is: {
+          ...where.employee?.is,
           departmentId: query.departmentId,
         },
       };
@@ -555,6 +560,17 @@ export class LeaveService {
       throw ApiError.notFound(`Không tìm thấy đơn yêu cầu có ID: ${id}`);
     }
 
+    // PHASE 5: Tenant isolation — check employee belongs to org
+    if (session?.organizationId) {
+      const empOrg = await prisma.employee.findUnique({
+        where: { id: request.employeeId },
+        select: { organizationId: true },
+      });
+      if (!empOrg || empOrg.organizationId !== session.organizationId) {
+        throw ApiError.notFound(`Không tìm thấy đơn yêu cầu có ID: ${id}`);
+      }
+    }
+
     const isHrOrAdmin = session.roles.includes('admin') || session.roles.includes('hr');
     const isManager = session.roles.includes('manager');
 
@@ -588,7 +604,10 @@ export class LeaveService {
     const isHrOrAdmin = session.roles.includes('admin') || session.roles.includes('hr');
     const isManager = session.roles.includes('manager');
 
-    const baseWhere: Prisma.LeaveRequestWhereInput = {};
+    const baseWhere: Prisma.LeaveRequestWhereInput = {
+      // PHASE 5: Tenant isolation
+      employee: { is: { organizationId: session.organizationId ?? '__no_org__' } },
+    };
 
     if (!isHrOrAdmin) {
       if (isManager) {

@@ -20,6 +20,8 @@ export interface ApiResponse<T = unknown> {
 }
 
 export type RoleCode = 
+  | 'super_admin'
+  | 'SUPER_ADMIN'
   | 'admin'
   | 'hr'
   | 'manager'
@@ -34,6 +36,14 @@ export interface UserSession {
   roles: RoleCode[];
   permissions: string[];
   isActive: boolean;
+  // Multi-tenant context
+  organizationId?: string;
+  organizationSlug?: string;
+  organizationName?: string;
+  organizationStatus?: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED' | 'CLOSED';
+  tenantRole?: 'OWNER' | 'ADMIN' | 'HR_MANAGER' | 'MANAGER' | 'EMPLOYEE';
+  onboardingStep?: number;
+  needsOnboarding?: boolean;
 }
 
 export interface SanitizedUser {
@@ -46,6 +56,14 @@ export interface SanitizedUser {
   roles: RoleCode[];
   permissions: string[];
   lastLoginAt?: Date | null;
+  // Multi-tenant context
+  organizationId?: string;
+  organizationSlug?: string;
+  organizationName?: string;
+  organizationStatus?: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED' | 'CLOSED';
+  tenantRole?: 'OWNER' | 'ADMIN' | 'HR_MANAGER' | 'MANAGER' | 'EMPLOYEE';
+  onboardingStep?: number;
+  needsOnboarding?: boolean;
 }
 
 export interface PaginationParams {

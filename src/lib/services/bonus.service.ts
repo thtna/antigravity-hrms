@@ -74,7 +74,7 @@ export class BonusService {
       include: { department: true },
     });
 
-    if (!employee || employee.deletedAt || employee.status !== 'ACTIVE') {
+    if (!employee || employee.deletedAt || employee.status !== 'ACTIVE' || (session.organizationId && employee.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Nhân viên không tồn tại hoặc đã nghỉ việc.');
     }
 
@@ -83,6 +83,7 @@ export class BonusService {
     return prisma.$transaction(async (tx) => {
       const created = await tx.employeeBonusPenalty.create({
         data: {
+          organizationId: session.organizationId ?? '__no_org__',
           employeeId: input.employeeId,
           type: 'BONUS',
           category: input.category,
@@ -138,7 +139,7 @@ export class BonusService {
       include: { employee: true },
     });
 
-    if (!existing) {
+    if (!existing || (session?.organizationId && existing.organizationId && existing.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy hồ sơ khen thưởng.');
     }
 
@@ -207,7 +208,7 @@ export class BonusService {
       include: { employee: true },
     });
 
-    if (!existing) {
+    if (!existing || (session?.organizationId && existing.organizationId && existing.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy khoản thưởng.');
     }
 
@@ -277,6 +278,8 @@ export class BonusService {
 
     const where: Prisma.EmployeeBonusPenaltyWhereInput = {
       type: 'BONUS',
+      // PHASE 5: Tenant isolation via employee relation
+      employee: { organizationId: session.organizationId ?? '__no_org__' },
     };
 
     // RBAC Scoping
@@ -304,9 +307,8 @@ export class BonusService {
 
     if (query.departmentId) {
       where.employee = {
-        is: {
-          departmentId: query.departmentId,
-        },
+        ...((where.employee as any) || {}),
+        departmentId: query.departmentId,
       };
     }
 
@@ -384,6 +386,17 @@ export class BonusService {
       throw ApiError.notFound('Không tìm thấy thông tin khoản thưởng.');
     }
 
+    // PHASE 5: Tenant isolation
+    if (session?.organizationId) {
+      const empOrg = await prisma.employee.findUnique({
+        where: { id: bonus.employeeId },
+        select: { organizationId: true },
+      });
+      if (!empOrg || empOrg.organizationId !== session.organizationId) {
+        throw ApiError.notFound('Không tìm thấy thông tin khoản thưởng.');
+      }
+    }
+
     // RBAC check
     const isOwner = session.employeeId === bonus.employeeId;
     const isPrivileged =
@@ -442,6 +455,8 @@ export class BonusService {
     const baseWhere: Prisma.EmployeeBonusPenaltyWhereInput = {
       type: 'BONUS',
       period: currentPeriod,
+      organizationId: session.organizationId ?? '__no_org__',
+      employee: { organizationId: session.organizationId ?? '__no_org__' },
     };
 
     if (!isHrOrAdmin && isManager && session.employeeId) {

@@ -9,11 +9,13 @@ export class PositionService {
   /**
    * List all positions with salary range and employee count
    */
-  static async listPositions(includeInactive = false) {
+  static async listPositions(includeInactive = false, session?: UserSession) {
     const positions = await prisma.position.findMany({
       where: {
         deletedAt: null,
         ...(includeInactive ? {} : { isActive: true }),
+        // PHASE 5: Tenant isolation
+        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
       },
       include: {
         _count: {
@@ -37,9 +39,14 @@ export class PositionService {
   /**
    * Get single position with employee list
    */
-  static async getPositionById(id: string) {
-    const position = await prisma.position.findUnique({
-      where: { id },
+  static async getPositionById(id: string, session?: UserSession) {
+    // PHASE 6: IDOR fix — findFirst with organizationId enforces tenant scoping at DB level
+    const position = await prisma.position.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+      },
       include: {
         employees: {
           where: { deletedAt: null },
@@ -61,7 +68,7 @@ export class PositionService {
       },
     });
 
-    if (!position || position.deletedAt) {
+    if (!position) {
       throw ApiError.notFound(`Không tìm thấy chức vụ với ID: ${id}`);
     }
 
@@ -89,11 +96,12 @@ export class PositionService {
 
     const upperCode = input.code.toUpperCase().trim();
 
-    const existing = await prisma.position.findUnique({
-      where: { code: upperCode },
+    // Scope duplicate code check to the organization
+    const existing = await prisma.position.findFirst({
+      where: { code: upperCode, organizationId: session.organizationId },
     });
     if (existing && !existing.deletedAt) {
-      throw ApiError.conflict(`Mã chức vụ [${upperCode}] đã tồn tại trong hệ thống.`);
+      throw ApiError.conflict(`Mã chức vụ [${upperCode}] đã tồn tại trong tổ chức.`);
     }
 
     const created = await prisma.$transaction(async (tx) => {
@@ -106,6 +114,7 @@ export class PositionService {
           maxSalary: new Prisma.Decimal(input.maxSalary),
           baseSalaryGrade: new Prisma.Decimal(input.baseSalaryGrade || input.minSalary),
           isActive: input.isActive ?? true,
+          organizationId: session.organizationId!, // PHASE 5: tenant binding
         },
       });
 
@@ -145,18 +154,19 @@ export class PositionService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền cập nhật chức vụ.');
     }
 
-    const currentPos = await prisma.position.findUnique({
-      where: { id },
+    // PHASE 6: IDOR fix — organizationId in where clause prevents cross-tenant update
+    const currentPos = await prisma.position.findFirst({
+      where: { id, deletedAt: null, organizationId: session.organizationId ?? '__no_org__' },
     });
 
-    if (!currentPos || currentPos.deletedAt) {
+    if (!currentPos) {
       throw ApiError.notFound(`Không tìm thấy chức vụ với ID: ${id}`);
     }
 
     // Check duplicate code if changed
     if (input.code && input.code.toUpperCase().trim() !== currentPos.code) {
       const upperCode = input.code.toUpperCase().trim();
-      const codeTaken = await prisma.position.findUnique({
+      const codeTaken = await prisma.position.findFirst({
         where: { code: upperCode },
       });
       if (codeTaken && codeTaken.id !== id) {
@@ -220,11 +230,12 @@ export class PositionService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền bật/tắt trạng thái chức vụ.');
     }
 
-    const position = await prisma.position.findUnique({
-      where: { id },
+    // PHASE 6: IDOR fix — organizationId in where clause prevents cross-tenant mutation
+    const position = await prisma.position.findFirst({
+      where: { id, deletedAt: null, organizationId: session.organizationId ?? '__no_org__' },
     });
 
-    if (!position || position.deletedAt) {
+    if (!position) {
       throw ApiError.notFound(`Không tìm thấy chức vụ với ID: ${id}`);
     }
 
@@ -259,11 +270,12 @@ export class PositionService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền xóa chức vụ.');
     }
 
-    const position = await prisma.position.findUnique({
-      where: { id },
+    // PHASE 6: IDOR fix — organizationId in where clause prevents cross-tenant delete
+    const position = await prisma.position.findFirst({
+      where: { id, deletedAt: null, organizationId: session.organizationId ?? '__no_org__' },
     });
 
-    if (!position || position.deletedAt) {
+    if (!position) {
       throw ApiError.notFound(`Không tìm thấy chức vụ với ID: ${id}`);
     }
 

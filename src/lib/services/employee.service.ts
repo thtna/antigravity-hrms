@@ -10,6 +10,7 @@ import {
 } from '@/lib/validations/employee';
 import { Prisma } from '@prisma/client';
 import { AuditService } from './audit.service';
+import crypto from 'crypto';
 
 export class EmployeeService {
   /**
@@ -21,14 +22,16 @@ export class EmployeeService {
 
     const where: Prisma.EmployeeWhereInput = {
       deletedAt: null,
+      // PHASE 5: Tenant isolation — always scope to the authenticated user's organization
+      organizationId: session.organizationId,
     };
 
-    // 1. Data Scoping
+    // 1. Data Scoping (within tenant)
     if (!session.roles.includes('admin') && !session.roles.includes('hr')) {
       if (session.roles.includes('manager') && session.departmentId) {
         where.departmentId = session.departmentId;
       } else {
-        // Regular employee can only see their own profile
+        // Regular employee can only see their own profile within the org
         where.id = session.employeeId || 'no-access';
       }
     }
@@ -123,7 +126,13 @@ export class EmployeeService {
       throw ApiError.notFound(`Không tìm thấy nhân viên có ID: ${id}`);
     }
 
-    // IDOR check: Non-admin/HR cannot view employees outside their scope
+    // PHASE 5: Tenant isolation — employee must belong to the session's organization
+    if (employee.organizationId !== session.organizationId) {
+      // Return 404 to avoid leaking existence of cross-tenant records
+      throw ApiError.notFound(`Không tìm thấy nhân viên có ID: ${id}`);
+    }
+
+    // IDOR check: Non-admin/HR cannot view employees outside their scope (within tenant)
     if (!session.roles.includes('admin') && !session.roles.includes('hr')) {
       if (session.roles.includes('manager')) {
         if (employee.departmentId !== session.departmentId) {
@@ -155,12 +164,12 @@ export class EmployeeService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền thêm nhân viên mới.');
     }
 
-    // 1. Check duplicate employee code
-    const existingCode = await prisma.employee.findUnique({
-      where: { employeeCode: input.employeeCode.toUpperCase() },
+    // 1. Check duplicate employee code within the same organization
+    const existingCode = await prisma.employee.findFirst({
+      where: { employeeCode: input.employeeCode.toUpperCase(), organizationId: session.organizationId },
     });
     if (existingCode) {
-      throw ApiError.conflict(`Mã nhân viên [${input.employeeCode}] đã tồn tại trong hệ thống.`);
+      throw ApiError.conflict(`Mã nhân viên [${input.employeeCode}] đã tồn tại trong tổ chức.`);
     }
 
     // 2. Check duplicate email in users
@@ -173,7 +182,7 @@ export class EmployeeService {
 
     // 3. Check duplicate identity card if provided
     if (input.identityCard && input.identityCard.trim() !== '') {
-      const existingIdCard = await prisma.employee.findUnique({
+      const existingIdCard = await prisma.employee.findFirst({
         where: { identityCard: input.identityCard.trim() },
       });
       if (existingIdCard) {
@@ -181,8 +190,36 @@ export class EmployeeService {
       }
     }
 
-    // 4. Default password for new user account
-    const defaultPassword = 'Antigravity@2026';
+    // 3.1 Verify department, position, and worksite belong to this tenant (prevent cross-tenant FK injection)
+    if (session.organizationId) {
+      if (input.departmentId) {
+        const dept = await prisma.department.findFirst({
+          where: { id: input.departmentId, organizationId: session.organizationId, deletedAt: null },
+        });
+        if (!dept) {
+          throw ApiError.badRequest('Phòng ban không tồn tại trong tổ chức của bạn.');
+        }
+      }
+      if (input.positionId) {
+        const pos = await prisma.position.findFirst({
+          where: { id: input.positionId, organizationId: session.organizationId, deletedAt: null },
+        });
+        if (!pos) {
+          throw ApiError.badRequest('Chức vụ không tồn tại trong tổ chức của bạn.');
+        }
+      }
+      if (input.worksiteId) {
+        const ws = await prisma.worksite.findFirst({
+          where: { id: input.worksiteId, organizationId: session.organizationId },
+        });
+        if (!ws) {
+          throw ApiError.badRequest('Địa điểm làm việc không tồn tại trong tổ chức của bạn.');
+        }
+      }
+    }
+
+    // 4. Default password for new user account (configurable via env or secure random generation)
+    const defaultPassword = process.env.DEFAULT_EMPLOYEE_PASSWORD || `${crypto.randomBytes(8).toString('hex')}!Aa1`;
     const passwordHash = await hashPassword(defaultPassword);
 
     // 5. Atomic Prisma transaction
@@ -220,10 +257,11 @@ export class EmployeeService {
         ? Math.round(input.contractSalary / (22 * 8))
         : 0;
 
-      // Create Employee
+      // Create Employee — bound to the current tenant (organizationId from session)
       const employee = await tx.employee.create({
         data: {
           userId: newUser.id,
+          organizationId: session.organizationId!, // PHASE 5: tenant binding
           employeeCode: input.employeeCode.toUpperCase(),
           firstName: input.firstName.trim(),
           lastName: input.lastName.trim(),
@@ -256,6 +294,16 @@ export class EmployeeService {
           },
         },
       });
+
+      // PHASE 5: Create OrganizationMember link for the new user
+      if (session.organizationId && (tx as any).organizationMember?.upsert) {
+        await (tx as any).organizationMember.upsert({
+          where: { organizationId_userId: { organizationId: session.organizationId, userId: newUser.id } },
+          create: { organizationId: session.organizationId, userId: newUser.id, role: 'EMPLOYEE', isActive: true },
+          update: { isActive: true },
+        });
+      }
+
 
       // Create Audit Log
       await tx.auditLog.create({
@@ -320,7 +368,7 @@ export class EmployeeService {
       include: { user: true },
     });
 
-    if (!employee) {
+    if (!employee || (session.organizationId && employee.organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy nhân viên có ID: ${id}`);
     }
     if (employee.deletedAt) {
@@ -394,8 +442,36 @@ export class EmployeeService {
       include: { user: true },
     });
 
-    if (!currentEmployee || currentEmployee.deletedAt) {
+    if (!currentEmployee || currentEmployee.deletedAt || (session.organizationId && currentEmployee.organizationId !== session.organizationId)) {
       throw ApiError.notFound(`Không tìm thấy nhân viên có ID: ${id}`);
+    }
+
+    // Verify department, position, and worksite belong to this tenant if updated
+    if (session.organizationId) {
+      if (input.departmentId && input.departmentId !== currentEmployee.departmentId) {
+        const dept = await prisma.department.findFirst({
+          where: { id: input.departmentId, organizationId: session.organizationId, deletedAt: null },
+        });
+        if (!dept) {
+          throw ApiError.badRequest('Phòng ban không tồn tại trong tổ chức của bạn.');
+        }
+      }
+      if (input.positionId && input.positionId !== currentEmployee.positionId) {
+        const pos = await prisma.position.findFirst({
+          where: { id: input.positionId, organizationId: session.organizationId, deletedAt: null },
+        });
+        if (!pos) {
+          throw ApiError.badRequest('Chức vụ không tồn tại trong tổ chức của bạn.');
+        }
+      }
+      if (input.worksiteId && input.worksiteId !== currentEmployee.worksiteId) {
+        const ws = await prisma.worksite.findFirst({
+          where: { id: input.worksiteId, organizationId: session.organizationId },
+        });
+        if (!ws) {
+          throw ApiError.badRequest('Địa điểm làm việc không tồn tại trong tổ chức của bạn.');
+        }
+      }
     }
 
     // Manager scope check: can only edit employees in their own department
@@ -407,7 +483,7 @@ export class EmployeeService {
 
     // Check duplicate employee code if changed
     if (input.employeeCode && input.employeeCode.toUpperCase() !== currentEmployee.employeeCode) {
-      const codeTaken = await prisma.employee.findUnique({
+      const codeTaken = await prisma.employee.findFirst({
         where: { employeeCode: input.employeeCode.toUpperCase() },
       });
       if (codeTaken) {

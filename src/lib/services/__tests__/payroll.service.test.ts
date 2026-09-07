@@ -77,6 +77,9 @@ const employeeSession: UserSession = {
 describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrisma.payrollPeriod.findFirst.mockImplementation((...args: any[]) =>
+      mockPrisma.payrollPeriod.findUnique(...args)
+    );
   });
 
   // ── 1. Create Period ───────────────────────────────────────────────────────

@@ -4,6 +4,24 @@ import { RoleCode } from '@/types';
  * Role Definitions and Default Permissions
  */
 export const ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
+  super_admin: [
+    '*',
+    'tenant:manage',
+    'tenant:approve',
+    'tenant:reject',
+    'tenant:suspend',
+    'tenant:activate',
+    'tenant:close',
+  ],
+  SUPER_ADMIN: [
+    '*',
+    'tenant:manage',
+    'tenant:approve',
+    'tenant:reject',
+    'tenant:suspend',
+    'tenant:activate',
+    'tenant:close',
+  ],
   admin: [
     '*', // Full system access
     'user:manage',
@@ -82,10 +100,22 @@ export const ROLE_PERMISSIONS: Record<RoleCode, string[]> = {
  */
 export function normalizeRole(role: string): RoleCode {
   const normalized = role.toLowerCase().trim();
-  if (normalized === 'admin' || normalized === 'super_admin') return 'admin';
+  if (normalized === 'super_admin' || normalized === 'superadmin') return 'super_admin';
+  if (normalized === 'admin') return 'admin';
   if (normalized === 'hr' || normalized === 'hr_admin') return 'hr';
   if (normalized === 'manager' || normalized === 'dept_manager' || normalized === 'department_manager') return 'manager';
   return 'employee';
+}
+
+/**
+ * Helper to check if a user session holds the SUPER_ADMIN role
+ */
+export function isSuperAdmin(session?: { roles?: any[] } | null): boolean {
+  if (!session || !session.roles) return false;
+  return session.roles.some((r: any) => {
+    const s = String(r).toLowerCase();
+    return s === 'super_admin' || s === 'superadmin';
+  });
 }
 
 /**

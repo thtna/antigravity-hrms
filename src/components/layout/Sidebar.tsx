@@ -46,6 +46,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Phiếu Lương', href: '/my-payslips', icon: FileText, group: 'Tài Chính' },
   { label: 'Báo Cáo & Export', href: '/reports', icon: FileText, group: 'Tài Chính' },
   { label: 'Thông Báo', href: '/notifications', icon: Bell, group: 'Hệ Thống' },
+  { label: 'Super Admin', href: '/super-admin', icon: ShieldAlert, group: 'Hệ Thống' },
 ];
 
 const GROUPS = ['Tổng Quan', 'Nghiệp Vụ', 'Đánh Giá', 'Tài Chính', 'Hệ Thống'];

@@ -11,10 +11,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<ApiResponse<any>>> {
   try {
-    await requireAuth();
+    const session = await requireAuth();
     const { id } = await params;
 
-    const worksite = await WorksiteService.getWorksiteById(id);
+    const worksite = await WorksiteService.getWorksiteById(id, session);
 
     return NextResponse.json({
       success: true,

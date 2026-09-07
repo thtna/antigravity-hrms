@@ -27,6 +27,9 @@ export class PayrollRuleService {
     await this.seedDefaultRulesIfEmpty();
 
     return await prisma.payrollRule.findMany({
+      where: {
+        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+      },
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
       include: {
         _count: { select: { payrollPeriods: true } },
@@ -46,7 +49,7 @@ export class PayrollRuleService {
       },
     });
 
-    if (!rule) {
+    if (!rule || (session?.organizationId && (rule as any).organizationId && (rule as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy quy chế tiền lương.');
     }
 
@@ -78,8 +81,11 @@ export class PayrollRuleService {
       throw ApiError.forbidden('Chỉ HR hoặc Quản trị viên mới có quyền tạo quy chế lương.');
     }
 
-    const existingCode = await prisma.payrollRule.findUnique({
-      where: { code: input.code },
+    const existingCode = await prisma.payrollRule.findFirst({
+      where: {
+        code: input.code,
+        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+      },
     });
     if (existingCode) {
       throw ApiError.conflict(`Mã quy chế lương "${input.code}" đã tồn tại trong hệ thống.`);
@@ -110,6 +116,7 @@ export class PayrollRuleService {
           roundingConfig: input.roundingConfig as any,
           effectiveFrom: new Date(input.effectiveFrom),
           effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
+          ...(session.organizationId ? { organizationId: session.organizationId } : {}),
         },
       });
 
@@ -153,7 +160,7 @@ export class PayrollRuleService {
     const existing = await prisma.payrollRule.findUnique({
       where: { id },
     });
-    if (!existing) {
+    if (!existing || (session?.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy quy chế tiền lương cần sửa.');
     }
 
@@ -228,7 +235,7 @@ export class PayrollRuleService {
     }
 
     const rule = await prisma.payrollRule.findUnique({ where: { id } });
-    if (!rule) {
+    if (!rule || (session?.organizationId && (rule as any).organizationId && (rule as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy quy chế tiền lương.');
     }
 

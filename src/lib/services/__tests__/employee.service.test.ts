@@ -11,6 +11,7 @@ vi.mock('@/lib/db/prisma', () => ({
       count: vi.fn(),
       findMany: vi.fn(),
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
     },
@@ -75,6 +76,9 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (prisma.employee.findFirst as unknown as Mock).mockImplementation((...args: any[]) =>
+      (prisma.employee.findUnique as unknown as Mock)(...args)
+    );
   });
 
   // --------------------------------------------------------------------------

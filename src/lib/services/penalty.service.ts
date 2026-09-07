@@ -36,7 +36,7 @@ export class PenaltyService {
       include: { department: true },
     });
 
-    if (!targetEmployee) {
+    if (!targetEmployee || (session.organizationId && targetEmployee.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy nhân viên được chỉ định hoặc đã bị vô hiệu hóa.');
     }
 
@@ -62,6 +62,7 @@ export class PenaltyService {
     return await prisma.$transaction(async (tx) => {
       const created = await tx.employeeBonusPenalty.create({
         data: {
+          organizationId: session.organizationId ?? '__no_org__',
           employeeId: input.employeeId,
           type: 'PENALTY',
           category: input.category,
@@ -127,11 +128,11 @@ export class PenaltyService {
     const existing = await prisma.employeeBonusPenalty.findUnique({
       where: { id, type: 'PENALTY' },
       include: {
-        employee: { select: { id: true, departmentId: true } },
+        employee: { select: { id: true, departmentId: true, organizationId: true } },
       },
     });
 
-    if (!existing) {
+    if (!existing || (session?.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy biên bản xử phạt.');
     }
 
@@ -232,11 +233,11 @@ export class PenaltyService {
     const existing = await prisma.employeeBonusPenalty.findUnique({
       where: { id, type: 'PENALTY' },
       include: {
-        employee: { select: { id: true, departmentId: true } },
+        employee: { select: { id: true, departmentId: true, organizationId: true } },
       },
     });
 
-    if (!existing) {
+    if (!existing || (session?.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy biên bản xử phạt.');
     }
 
@@ -333,6 +334,8 @@ export class PenaltyService {
 
     const where: Prisma.EmployeeBonusPenaltyWhereInput = {
       type: 'PENALTY',
+      // PHASE 5: Tenant isolation via employee relation
+      employee: { organizationId: session.organizationId ?? '__no_org__' },
     };
 
     // RBAC Scoping
@@ -360,9 +363,8 @@ export class PenaltyService {
 
     if (query.departmentId) {
       where.employee = {
-        is: {
-          departmentId: query.departmentId,
-        },
+        ...((where.employee as any) || {}),
+        departmentId: query.departmentId,
       };
     }
 
@@ -450,7 +452,7 @@ export class PenaltyService {
       },
     });
 
-    if (!penalty) {
+    if (!penalty || (session?.organizationId && (penalty as any).organizationId && (penalty as any).organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy biên bản xử phạt.');
     }
 
@@ -520,6 +522,8 @@ export class PenaltyService {
     const baseWhere: Prisma.EmployeeBonusPenaltyWhereInput = {
       type: 'PENALTY',
       period: currentPeriod,
+      organizationId: session.organizationId ?? '__no_org__',
+      employee: { organizationId: session.organizationId ?? '__no_org__' },
     };
 
     if (!isHrOrAdmin && isManager && session.employeeId) {

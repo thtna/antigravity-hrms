@@ -17,6 +17,10 @@ import {
   AlertTriangle,
   ArrowRight,
   ShieldCheck,
+  Sparkles,
+  Building2,
+  UserPlus,
+  Compass,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -28,6 +32,8 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(val);
   };
+
+  const isCleanWorkspace = data.totalEmployees === 0;
 
   const attendanceSeries = [
     { name: 'Có mặt', color: '#10b981', key: 'present' },
@@ -67,6 +73,44 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
         </div>
       </div>
 
+      {/* Clean Workspace Empty State Banner */}
+      {isCleanWorkspace && (
+        <div className="relative overflow-hidden rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-950/30 via-slate-900/80 to-blue-950/30 p-6 shadow-2xl backdrop-blur-xl">
+          <div className="absolute right-0 top-0 -mr-16 -mt-16 h-64 w-64 rounded-full bg-amber-500/5 blur-3xl" />
+          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-300">
+                <Sparkles className="h-3.5 w-3.5 text-amber-400 animate-pulse" />
+                WORKSPACE TRẮNG — ZERO FAKE DATA
+              </div>
+              <h3 className="text-xl font-bold text-white tracking-tight">
+                Không gian làm việc đã kích hoạt — Sẵn sàng thiết lập nghiệp vụ!
+              </h3>
+              <p className="text-sm text-slate-300 leading-relaxed">
+                Tổ chức của bạn hoàn toàn sạch: <span className="text-amber-300 font-medium">Nhân sự (0), Phòng ban (0), Chức danh (0), Chấm công (0), Đơn phép (0), Lương (0), KPI (0)</span>. Không chứa bất kỳ dữ liệu mẫu nào. Bạn có thể bắt đầu trình hướng dẫn thiết lập 8 bước hoặc tự thêm dữ liệu theo nhu cầu.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 shrink-0">
+              <Link
+                href="/onboarding"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-500/25 transition-all transform hover:-translate-y-0.5"
+              >
+                <Compass className="h-4 w-4" />
+                Khởi Động Onboarding (8 bước)
+              </Link>
+              <Link
+                href="/employees"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-200 transition-colors"
+              >
+                <UserPlus className="h-3.5 w-3.5 text-emerald-400" />
+                Thêm Nhân Viên Đầu Tiên
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Primary Metrics Grid: All 10 Required Items */}
       <div>
         <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
@@ -82,8 +126,8 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             subValue="hoạt động"
             icon={Users}
             variant="blue"
-            badgeText="Hồ sơ hoạt động"
-            badgeVariant="info"
+            badgeText={isCleanWorkspace ? 'Chưa có hồ sơ' : 'Hồ sơ hoạt động'}
+            badgeVariant={isCleanWorkspace ? 'outline' : 'info'}
           />
 
           {/* 2. Present Today */}
@@ -93,8 +137,8 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             subValue={`/ ${data.totalEmployees}`}
             icon={UserCheck}
             variant="emerald"
-            badgeText={data.totalEmployees > 0 ? `${Math.round((data.presentToday / data.totalEmployees) * 100)}% tỷ lệ` : '0%'}
-            badgeVariant="success"
+            badgeText={data.totalEmployees > 0 ? `${Math.round((data.presentToday / data.totalEmployees) * 100)}% tỷ lệ` : 'Chưa có dữ liệu'}
+            badgeVariant={data.totalEmployees > 0 ? 'success' : 'outline'}
           />
 
           {/* 3. Absent Today */}
@@ -104,8 +148,8 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             subValue="nhân viên"
             icon={UserX}
             variant="red"
-            badgeText={data.absentToday === 0 ? 'Toàn bộ có mặt' : 'Cần kiểm tra'}
-            badgeVariant={data.absentToday === 0 ? 'success' : 'destructive'}
+            badgeText={isCleanWorkspace ? '0 vắng' : data.absentToday === 0 ? 'Toàn bộ có mặt' : 'Cần kiểm tra'}
+            badgeVariant={isCleanWorkspace ? 'outline' : data.absentToday === 0 ? 'success' : 'destructive'}
           />
 
           {/* 4. Late Today */}
@@ -115,8 +159,8 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             subValue="nhân viên"
             icon={ClockAlert}
             variant="amber"
-            badgeText={data.lateToday === 0 ? 'Đúng giờ 100%' : 'Vượt giờ quy định'}
-            badgeVariant={data.lateToday === 0 ? 'success' : 'warning'}
+            badgeText={isCleanWorkspace ? '0 muộn' : data.lateToday === 0 ? 'Đúng giờ 100%' : 'Vượt giờ quy định'}
+            badgeVariant={isCleanWorkspace ? 'outline' : data.lateToday === 0 ? 'success' : 'warning'}
           />
 
           {/* 5. Pending Leave */}
@@ -126,8 +170,8 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             subValue="yêu cầu"
             icon={CalendarCheck}
             variant="purple"
-            badgeText={data.pendingLeave > 0 ? 'Cần phê duyệt' : 'Đã xử lý xong'}
-            badgeVariant={data.pendingLeave > 0 ? 'warning' : 'success'}
+            badgeText={data.pendingLeave > 0 ? 'Cần phê duyệt' : '0 yêu cầu'}
+            badgeVariant={data.pendingLeave > 0 ? 'warning' : 'outline'}
           />
 
           {/* 6. Pending Attendance */}
@@ -137,19 +181,19 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             subValue="yêu cầu"
             icon={FileCheck2}
             variant="cyan"
-            badgeText={data.pendingAttendance > 0 ? 'Hàng đợi duyệt' : 'Đã xác nhận'}
-            badgeVariant={data.pendingAttendance > 0 ? 'warning' : 'success'}
+            badgeText={data.pendingAttendance > 0 ? 'Hàng đợi duyệt' : '0 giải trình'}
+            badgeVariant={data.pendingAttendance > 0 ? 'warning' : 'outline'}
           />
 
           {/* 7. Payroll Status */}
           <StatCard
             title="Kỳ Lương Hiện Tại"
-            value={data.payrollStatus.status || 'Chưa mở'}
-            subValue={data.payrollStatus.code || 'N/A'}
+            value={data.payrollStatus.status === 'NO_PERIOD' ? 'Chưa mở' : (data.payrollStatus.status || 'Chưa mở')}
+            subValue={data.payrollStatus.code || 'Chưa thiết lập'}
             icon={ReceiptText}
             variant="blue"
-            badgeText={data.payrollStatus.name || 'Hệ thống tính lương'}
-            badgeVariant="info"
+            badgeText={data.payrollStatus.name || (isCleanWorkspace ? 'Chưa có kỳ lương' : 'Hệ thống tính lương')}
+            badgeVariant={isCleanWorkspace ? 'outline' : 'info'}
           />
 
           {/* 8. Overtime Hours */}
@@ -160,7 +204,7 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             icon={Clock}
             variant="amber"
             badgeText="Tổng giờ tăng ca"
-            badgeVariant="warning"
+            badgeVariant="outline"
           />
 
           {/* 9. Bonus */}
@@ -170,8 +214,8 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             subValue={`${data.bonus.count} lượt`}
             icon={Award}
             variant="emerald"
-            badgeText="Đã phê duyệt"
-            badgeVariant="success"
+            badgeText={data.bonus.count > 0 ? 'Đã phê duyệt' : '0 lượt thưởng'}
+            badgeVariant={data.bonus.count > 0 ? 'success' : 'outline'}
           />
 
           {/* 10. Penalty */}
@@ -181,8 +225,8 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             subValue={`${data.penalty.count} lượt`}
             icon={AlertTriangle}
             variant="red"
-            badgeText="Đã áp dụng"
-            badgeVariant="destructive"
+            badgeText={data.penalty.count > 0 ? 'Đã áp dụng' : '0 vi phạm'}
+            badgeVariant={data.penalty.count > 0 ? 'destructive' : 'outline'}
           />
         </div>
       </div>
@@ -201,12 +245,22 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             </span>
           </div>
 
-          <SvgBarChart
-            data={data.charts.attendanceTrend}
-            series={attendanceSeries}
-            height={250}
-            valueFormatter={(v) => `${v} nhân viên`}
-          />
+          {isCleanWorkspace ? (
+            <div className="flex flex-col items-center justify-center h-[250px] rounded-xl border border-dashed border-slate-800 bg-slate-950/30 p-6 text-center">
+              <Clock className="h-10 w-10 text-slate-600 mb-3" />
+              <p className="text-sm font-medium text-slate-300">Chưa có dữ liệu điểm danh thực tế</p>
+              <p className="text-xs text-slate-500 max-w-sm mt-1">
+                Biểu đồ sẽ tự động kích hoạt khi có nhân viên đầu tiên thực hiện chấm công qua QR hoặc GPS.
+              </p>
+            </div>
+          ) : (
+            <SvgBarChart
+              data={data.charts.attendanceTrend}
+              series={attendanceSeries}
+              height={250}
+              valueFormatter={(v) => `${v} nhân viên`}
+            />
+          )}
         </div>
 
         {/* Department Distribution Chart & Headcount */}
@@ -252,8 +306,19 @@ export function AdminHrDashboardView({ data }: AdminHrDashboardViewProps) {
             })}
 
             {data.charts.departmentDistribution.length === 0 && (
-              <div className="flex h-40 items-center justify-center text-sm text-slate-500">
-                Chưa có phòng ban nào được thiết lập
+              <div className="flex flex-col items-center justify-center h-[200px] rounded-xl border border-dashed border-slate-800 bg-slate-950/30 p-6 text-center">
+                <Building2 className="h-10 w-10 text-slate-600 mb-3" />
+                <p className="text-sm font-medium text-slate-300">Chưa có phòng ban nào được thiết lập</p>
+                <p className="text-xs text-slate-500 max-w-sm mt-1 mb-3">
+                  Thiết lập phòng ban để phân bổ nhân sự và quản lý quỹ lương hiệu quả.
+                </p>
+                <Link
+                  href="/organization"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-400 hover:bg-blue-500/20 transition-colors"
+                >
+                  <Building2 className="h-3.5 w-3.5" />
+                  Tạo phòng ban ngay
+                </Link>
               </div>
             )}
           </div>

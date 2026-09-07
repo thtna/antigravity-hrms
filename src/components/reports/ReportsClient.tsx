@@ -243,29 +243,6 @@ export function ReportsClient() {
     }
   };
 
-  // Quick Login Handler for Unauthenticated Users
-  const handleQuickLogin = async (email: string) => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: 'Antigravity@2026' }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || 'Đăng nhập thất bại.');
-      }
-      // Re-fetch report
-      await fetchReport(1);
-    } catch (err: any) {
-      setError(err.message || 'Lỗi đăng nhập');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const isAuthError =
     error &&
     (error.toLowerCase().includes('đăng nhập') ||
@@ -286,63 +263,16 @@ export function ReportsClient() {
             Hệ Thống Báo Cáo Antigravity HRMS Enterprise
           </h3>
           <p className="text-sm text-slate-400 max-w-xl mx-auto">
-            Hệ thống báo cáo yêu cầu đăng nhập theo vai trò để đảm bảo phân quyền dữ liệu. Bạn có thể chọn đăng nhập nhanh 1-click với các tài khoản mẫu bên dưới:
+            Hệ thống báo cáo yêu cầu đăng nhập theo vai trò để đảm bảo phân quyền dữ liệu. Vui lòng đăng nhập để tiếp tục.
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl mx-auto pt-2">
-          <div
-            onClick={() => handleQuickLogin('admin@antigravity.internal')}
-            className="group relative flex flex-col items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-center hover:border-blue-500/60 hover:bg-slate-900/90 transition-all duration-200 cursor-pointer shadow-lg hover:shadow-blue-500/10"
+        <div className="pt-2">
+          <a
+            href="/login"
+            className="inline-flex items-center justify-center px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-semibold shadow-lg shadow-blue-500/25 transition-all"
           >
-            <div className="space-y-2">
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] font-semibold text-blue-300">
-                Toàn Quyền Doanh Nghiệp
-              </span>
-              <h4 className="text-base font-bold text-white group-hover:text-blue-400 transition-colors">
-                Admin / HR Quản Trị
-              </h4>
-              <p className="text-xs text-slate-400">admin@antigravity.internal</p>
-            </div>
-            <Button size="sm" className="mt-4 w-full bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs">
-              Vào Với Vai Trò Admin
-            </Button>
-          </div>
-
-          <div
-            onClick={() => handleQuickLogin('manager.tech@antigravity.internal')}
-            className="group relative flex flex-col items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-center hover:border-indigo-500/60 hover:bg-slate-900/90 transition-all duration-200 cursor-pointer shadow-lg hover:shadow-indigo-500/10"
-          >
-            <div className="space-y-2">
-              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] font-semibold text-indigo-300">
-                Quản Lý Bộ Phận
-              </span>
-              <h4 className="text-base font-bold text-white group-hover:text-indigo-400 transition-colors">
-                Manager Kỹ Thuật
-              </h4>
-              <p className="text-xs text-slate-400">manager.tech@antigravity.internal</p>
-            </div>
-            <Button size="sm" className="mt-4 w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs">
-              Vào Với Vai Trò Manager
-            </Button>
-          </div>
-
-          <div
-            onClick={() => handleQuickLogin('dev.an@antigravity.internal')}
-            className="group relative flex flex-col items-center justify-between rounded-xl border border-slate-800 bg-slate-900/60 p-5 text-center hover:border-emerald-500/60 hover:bg-slate-900/90 transition-all duration-200 cursor-pointer shadow-lg hover:shadow-emerald-500/10"
-          >
-            <div className="space-y-2">
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
-                Cá Nhân
-              </span>
-              <h4 className="text-base font-bold text-white group-hover:text-emerald-400 transition-colors">
-                Nhân Viên Lập Trình
-              </h4>
-              <p className="text-xs text-slate-400">dev.an@antigravity.internal</p>
-            </div>
-            <Button size="sm" className="mt-4 w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs">
-              Vào Với Vai Trò Employee
-            </Button>
-          </div>
+            Đăng Nhập Hệ Thống
+          </a>
         </div>
       </div>
     );

@@ -1,22 +1,21 @@
-import path from 'path';
-import fs from 'fs/promises';
-import { ApiError } from '@/lib/errors';
-import { logger } from '@/lib/logger';
+/**
+ * ==============================================================================
+ * ANTIGRAVITY HRMS — SECURE FILE STORAGE BRIDGE
+ * ==============================================================================
+ *
+ * Provides backward-compatible file storage facade delegating to StorageManager:
+ * - In Development & Test: Routes to LocalStorageProvider
+ * - In Production & Staging: Routes to SupabaseStorageProvider (zero local disk writes)
+ * - Guarantees Vercel Serverless Function compatibility
+ */
 
-const STORAGE_ROOT = process.env.STORAGE_PATH || path.join(process.cwd(), 'storage');
-const AVATAR_DIR = path.join(STORAGE_ROOT, 'avatars');
-const DOCUMENT_DIR = path.join(STORAGE_ROOT, 'documents');
+import { StorageManager } from '@/lib/storage/storage-manager';
 
 /**
  * Ensures storage directories exist
  */
 export async function ensureStorageDirectories(): Promise<void> {
-  try {
-    await fs.mkdir(AVATAR_DIR, { recursive: true });
-    await fs.mkdir(DOCUMENT_DIR, { recursive: true });
-  } catch (error) {
-    logger.error('Failed to create storage directories', error);
-  }
+  return Promise.resolve();
 }
 
 /**
@@ -24,44 +23,62 @@ export async function ensureStorageDirectories(): Promise<void> {
  */
 export async function saveAvatarFile(
   filename: string,
-  buffer: Buffer | Uint8Array
+  buffer: Buffer | Uint8Array,
+  organizationId?: string
 ): Promise<string> {
-  await ensureStorageDirectories();
-  const filePath = path.join(AVATAR_DIR, filename);
-  await fs.writeFile(filePath, buffer);
-  return filePath;
+  const orgId = organizationId || 'org_default_tanphong';
+  const result = await StorageManager.uploadAvatar({
+    organizationId: orgId,
+    userId: filename.split('_')[1] || 'user',
+    filename,
+    buffer,
+    contentType: 'image/jpeg',
+  });
+  return result.path || result.key;
 }
 
 /**
  * Read an avatar file buffer
  */
-export async function readAvatarFile(filename: string): Promise<Buffer> {
-  const filePath = path.join(AVATAR_DIR, filename);
+export async function readAvatarFile(
+  filename: string,
+  organizationId?: string
+): Promise<Buffer> {
+  const provider = StorageManager.getProvider();
+  const orgId = organizationId || 'org_default_tanphong';
   try {
-    return await fs.readFile(filePath);
+    const key = `organizations/${orgId}/avatars/${filename}`;
+    const res = await provider.download('avatars', key);
+    return res.buffer;
   } catch {
-    throw ApiError.notFound('Ảnh đại diện không tồn tại.');
+    const res = await provider.download('avatars', filename);
+    return res.buffer;
   }
 }
 
 /**
- * Save an employee document buffer in a protected employee directory
+ * Save an employee document buffer in a protected document directory
  */
 export async function saveDocumentFile(
   employeeId: string,
   docId: string,
   extension: string,
-  buffer: Buffer | Uint8Array
+  buffer: Buffer | Uint8Array,
+  organizationId?: string
 ): Promise<{ filePath: string; storedFilename: string }> {
-  await ensureStorageDirectories();
-  const employeeDocDir = path.join(DOCUMENT_DIR, employeeId);
-  await fs.mkdir(employeeDocDir, { recursive: true });
-
-  const storedFilename = `${docId}.${extension}`;
-  const filePath = path.join(employeeDocDir, storedFilename);
-  await fs.writeFile(filePath, buffer);
-
-  return { filePath, storedFilename };
+  const orgId = organizationId || 'org_default_tanphong';
+  const result = await StorageManager.uploadDocument({
+    organizationId: orgId,
+    employeeId,
+    docId,
+    extension,
+    buffer,
+    contentType: 'application/pdf',
+  });
+  return {
+    filePath: result.path || result.key,
+    storedFilename: result.storedFilename,
+  };
 }
 
 /**
@@ -69,14 +86,18 @@ export async function saveDocumentFile(
  */
 export async function readDocumentFile(
   employeeId: string,
-  storedFilename: string
+  storedFilename: string,
+  organizationId?: string
 ): Promise<Buffer> {
-  const filePath = path.join(DOCUMENT_DIR, employeeId, storedFilename);
-  try {
-    return await fs.readFile(filePath);
-  } catch {
-    throw ApiError.notFound('Tài liệu không tồn tại trên hệ thống lưu trữ.');
-  }
+  const orgId = organizationId || 'org_default_tanphong';
+  const docId = storedFilename.split('.')[0] || storedFilename;
+  const res = await StorageManager.downloadDocument({
+    organizationId: orgId,
+    employeeId,
+    docId,
+    storedFilename,
+  });
+  return res.buffer;
 }
 
 /**
@@ -84,12 +105,15 @@ export async function readDocumentFile(
  */
 export async function deleteDocumentFile(
   employeeId: string,
-  storedFilename: string
+  storedFilename: string,
+  organizationId?: string
 ): Promise<void> {
-  const filePath = path.join(DOCUMENT_DIR, employeeId, storedFilename);
-  try {
-    await fs.unlink(filePath);
-  } catch (error) {
-    logger.warn(`Could not delete physical file ${filePath}`, { error: String(error) });
-  }
+  const orgId = organizationId || 'org_default_tanphong';
+  const docId = storedFilename.split('.')[0] || storedFilename;
+  await StorageManager.deleteDocument({
+    organizationId: orgId,
+    employeeId,
+    docId,
+    storedFilename,
+  });
 }

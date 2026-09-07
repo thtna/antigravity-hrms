@@ -1,5 +1,5 @@
 // ==============================================================================
-// ANTIGRAVITY MASTER PROJECT — PRODUCTION PRISMA SCHEMA
+// ANTIGRAVITY MASTER PROJECT — PRODUCTION PRISMA SCHEMA (MULTI-TENANT V2)
 // ==============================================================================
 
 generator client {
@@ -9,6 +9,114 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------------------------
+// 0. MULTI-TENANT ARCHITECTURE CORE (PHASE 2)
+// ------------------------------------------------------------------------------
+
+enum OrganizationStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  SUSPENDED
+  CLOSED
+}
+
+enum TenantRole {
+  OWNER
+  ADMIN
+  HR_MANAGER
+  MANAGER
+  EMPLOYEE
+}
+
+model Organization {
+  id          String             @id @default(uuid())
+  name        String
+  slug        String             @unique
+  status      OrganizationStatus @default(PENDING)
+  email       String?
+  phone       String?
+  address     String?
+  taxCode     String?            @map("tax_code")
+  approvedAt  DateTime?          @map("approved_at")
+  approvedBy  String?            @map("approved_by")
+  onboardingStep        Int       @default(0) @map("onboarding_step")
+  onboardingSkipped     Boolean   @default(false) @map("onboarding_skipped")
+  onboardingCompletedAt DateTime? @map("onboarding_completed_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @default(now()) @updatedAt @map("updated_at")
+  deletedAt   DateTime?          @map("deleted_at")
+
+  members                  OrganizationMember[]
+  branches                 Branch[]
+  departments              Department[]
+  positions                Position[]
+  worksites                Worksite[]
+  employees                Employee[]
+  workShifts               WorkShift[]
+  employeeSchedules        EmployeeSchedule[]
+  recurringSchedules       RecurringSchedule[]
+  attendances              Attendance[]
+  attendanceAdjustments    AttendanceAdjustment[]
+  qrAttendanceTokens       QrAttendanceToken[]
+  leaveTypes               LeaveType[]
+  leaveRequests            LeaveRequest[]
+  holidays                 Holiday[]
+  kpis                     Kpi[]
+  employeeKpiResults       EmployeeKpiResult[]
+  employeeBonusesPenalties EmployeeBonusPenalty[]
+  payrollRules             PayrollRule[]
+  payrollPeriods           PayrollPeriod[]
+  payrolls                 Payroll[]
+  payrollApprovals         PayrollApproval[]
+  payrollAdjustments       PayrollAdjustment[]
+  companySettings          CompanySetting[]
+  auditLogs                AuditLog[]
+  notifications            Notification[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String     @id @default(uuid())
+  organizationId String     @map("organization_id")
+  userId         String     @map("user_id")
+  role           TenantRole @default(EMPLOYEE)
+  isActive       Boolean    @default(true) @map("is_active")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @default(now()) @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId, role])
+  @@map("organization_members")
+}
+
+model Branch {
+  id             String    @id @default(uuid())
+  organizationId String    @map("organization_id")
+  name           String
+  code           String
+  address        String?
+  phone          String?
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees    Employee[]
+  worksites    Worksite[]
+  attendances  Attendance[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("branches")
 }
 
 // ------------------------------------------------------------------------------
@@ -25,11 +133,12 @@ model User {
   updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt    DateTime? @map("deleted_at")
 
-  employee      Employee?
-  userRoles     UserRole[]
-  auditLogs       AuditLog[]
-  notifications   Notification[]
-  qrTokensCreated QrAttendanceToken[] @relation("QrTokenCreatedBy")
+  employee            Employee?
+  userRoles           UserRole[]
+  organizationMembers OrganizationMember[]
+  auditLogs           AuditLog[]
+  notifications       Notification[]
+  qrTokensCreated     QrAttendanceToken[] @relation("QrTokenCreatedBy")
 
   @@map("users")
 }
@@ -86,29 +195,34 @@ model UserRole {
 // ------------------------------------------------------------------------------
 
 model Department {
-  id          String    @id @default(uuid())
-  code        String    @unique
-  name        String
-  description String?
-  parentId    String?   @map("parent_id")
-  managerId   String?   @map("manager_id")
-  isActive    Boolean   @default(true) @map("is_active")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
-  deletedAt   DateTime? @map("deleted_at")
+  id             String    @id @default(uuid())
+  organizationId String    @default("org_default_tanphong") @map("organization_id")
+  code           String
+  name           String
+  description    String?
+  parentId       String?   @map("parent_id")
+  managerId      String?   @map("manager_id")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
 
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   parentDepartment Department?  @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
   subDepartments   Department[] @relation("DepartmentHierarchy")
   manager          Employee?    @relation("DepartmentManager", fields: [managerId], references: [id], onDelete: SetNull)
   employees        Employee[]   @relation("DepartmentEmployees")
   kpis             Kpi[]
 
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@map("departments")
 }
 
 model Position {
   id              String    @id @default(uuid())
-  code            String    @unique
+  organizationId  String    @default("org_default_tanphong") @map("organization_id")
+  code            String
   title           String
   description     String?
   baseSalaryGrade Decimal   @default(0.00) @map("base_salary_grade") @db.Decimal(14, 2)
@@ -119,36 +233,47 @@ model Position {
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  employees Employee[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employees    Employee[]
 
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@map("positions")
 }
 
 model Worksite {
-  id           String   @id @default(uuid())
-  name         String
-  address      String
-  latitude     Decimal  @db.Decimal(10, 8)
-  longitude    Decimal  @db.Decimal(11, 8)
-  radiusMeters Int      @default(100) @map("radius_meters")
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id             String   @id @default(uuid())
+  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  branchId       String?  @map("branch_id")
+  name           String
+  address        String
+  latitude       Decimal  @db.Decimal(10, 8)
+  longitude      Decimal  @db.Decimal(11, 8)
+  radiusMeters   Int      @default(100) @map("radius_meters")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
 
-  employees Employee[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  employees    Employee[]
 
+  @@index([organizationId])
+  @@index([branchId])
   @@map("worksites")
 }
 
 model Employee {
   id              String    @id @default(uuid())
+  organizationId  String    @default("org_default_tanphong") @map("organization_id")
+  branchId        String?   @map("branch_id")
   userId          String    @unique @map("user_id")
-  employeeCode    String    @unique @map("employee_code")
+  employeeCode    String    @map("employee_code")
   firstName       String    @map("first_name")
   lastName        String    @map("last_name")
   avatarUrl       String?   @map("avatar_url")
   gender          String    @default("MALE")
   dob             DateTime  @default(now()) @db.Date
-  identityCard    String?   @unique @map("identity_card")
+  identityCard    String?   @map("identity_card")
   phoneNumber     String    @map("phone_number")
   departmentId    String    @map("department_id")
   positionId      String    @map("position_id")
@@ -168,6 +293,8 @@ model Employee {
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
+  organization         Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch               Branch?                  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   user                 User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
   department           Department               @relation("DepartmentEmployees", fields: [departmentId], references: [id], onDelete: Restrict)
   managedDepartments   Department[]             @relation("DepartmentManager")
@@ -191,6 +318,10 @@ model Employee {
   approvedAdjustments  PayrollAdjustment[]      @relation("ApproverPayrollAdjustments")
   qrTokensUsed         QrAttendanceToken[]      @relation("QrTokenUsedBy")
 
+  @@unique([organizationId, employeeCode])
+  @@unique([organizationId, identityCard])
+  @@index([organizationId])
+  @@index([branchId])
   @@index([departmentId])
   @@index([positionId])
   @@index([worksiteId])
@@ -204,7 +335,8 @@ model Employee {
 
 model WorkShift {
   id                 String    @id @default(uuid())
-  code               String    @unique
+  organizationId     String    @default("org_default_tanphong") @map("organization_id")
+  code               String
   name               String
   description        String?
   shiftType          String    @default("FIXED") @map("shift_type") // FIXED | FLEXIBLE
@@ -222,14 +354,18 @@ model WorkShift {
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt          DateTime? @map("deleted_at")
 
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   schedules          EmployeeSchedule[]
   recurringSchedules RecurringSchedule[]
 
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@map("work_shifts")
 }
 
 model EmployeeSchedule {
   id             String   @id @default(uuid())
+  organizationId String   @default("org_default_tanphong") @map("organization_id")
   employeeId     String   @map("employee_id")
   shiftId        String   @map("shift_id")
   workDate       DateTime @map("work_date") @db.Date
@@ -240,11 +376,13 @@ model EmployeeSchedule {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
 
-  employee   Employee    @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  shift      WorkShift   @relation(fields: [shiftId], references: [id], onDelete: Restrict)
-  attendance Attendance?
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  shift        WorkShift    @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  attendance   Attendance?
 
   @@unique([employeeId, workDate])
+  @@index([organizationId])
   @@index([employeeId, workDate])
   @@index([shiftId])
   @@index([workDate])
@@ -252,25 +390,30 @@ model EmployeeSchedule {
 }
 
 model RecurringSchedule {
-  id            String    @id @default(uuid())
-  employeeId    String    @map("employee_id")
-  shiftId       String    @map("shift_id")
-  dayOfWeek     Int       @map("day_of_week") // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  effectiveFrom DateTime  @default(now()) @map("effective_from") @db.Date
-  effectiveTo   DateTime? @map("effective_to") @db.Date
-  isActive      Boolean   @default(true) @map("is_active")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  id             String    @id @default(uuid())
+  organizationId String    @default("org_default_tanphong") @map("organization_id")
+  employeeId     String    @map("employee_id")
+  shiftId        String    @map("shift_id")
+  dayOfWeek      Int       @map("day_of_week") // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  effectiveFrom  DateTime  @default(now()) @map("effective_from") @db.Date
+  effectiveTo    DateTime? @map("effective_to") @db.Date
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  shift    WorkShift @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  shift        WorkShift    @relation(fields: [shiftId], references: [id], onDelete: Restrict)
 
+  @@index([organizationId])
   @@index([employeeId, dayOfWeek])
   @@map("recurring_schedules")
 }
 
 model Attendance {
   id               String    @id @default(uuid())
+  organizationId   String    @default("org_default_tanphong") @map("organization_id")
+  branchId         String?   @map("branch_id")
   scheduleId       String?   @unique @map("schedule_id")
   employeeId       String    @map("employee_id")
   workDate         DateTime  @map("work_date") @db.Date
@@ -289,11 +432,15 @@ model Attendance {
   status           String    @default("PENDING")
   notes            String?
 
+  organization     Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch           Branch?                @relation(fields: [branchId], references: [id], onDelete: SetNull)
   schedule         EmployeeSchedule?      @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
   employee         Employee               @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   adjustments      AttendanceAdjustment[]
 
   @@unique([employeeId, workDate])
+  @@index([organizationId])
+  @@index([branchId])
   @@index([employeeId, workDate])
   @@index([status, workDate])
   @@index([workDate])
@@ -303,6 +450,7 @@ model Attendance {
 
 model AttendanceAdjustment {
   id                String    @id @default(uuid())
+  organizationId    String    @default("org_default_tanphong") @map("organization_id")
   attendanceId      String?   @map("attendance_id")
   employeeId        String    @map("employee_id")
   workDate          DateTime  @map("work_date") @db.Date
@@ -321,10 +469,12 @@ model AttendanceAdjustment {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  attendance Attendance? @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
-  employee   Employee    @relation("EmployeeAdjustments", fields: [employeeId], references: [id], onDelete: Restrict)
-  approver   Employee?   @relation("ApproverAdjustments", fields: [approverId], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  attendance   Attendance?  @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
+  employee     Employee     @relation("EmployeeAdjustments", fields: [employeeId], references: [id], onDelete: Restrict)
+  approver     Employee?    @relation("ApproverAdjustments", fields: [approverId], references: [id], onDelete: SetNull)
 
+  @@index([organizationId])
   @@index([employeeId, workDate, status])
   @@index([status, createdAt(sort: Desc)])
   @@map("attendance_adjustments")
@@ -332,6 +482,7 @@ model AttendanceAdjustment {
 
 model QrAttendanceToken {
   id               String    @id @default(uuid())
+  organizationId   String    @default("org_default_tanphong") @map("organization_id")
   code             String    @unique
   tokenType        String    @default("ANY") @map("token_type") // CHECK_IN, CHECK_OUT, ANY
   signature        String
@@ -343,9 +494,11 @@ model QrAttendanceToken {
   createdByUserId  String?   @map("created_by_user_id")
   createdAt        DateTime  @default(now()) @map("created_at")
 
-  usedByEmployee   Employee? @relation("QrTokenUsedBy", fields: [usedByEmployeeId], references: [id], onDelete: SetNull)
-  createdByUser    User?     @relation("QrTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  usedByEmployee Employee?    @relation("QrTokenUsedBy", fields: [usedByEmployeeId], references: [id], onDelete: SetNull)
+  createdByUser  User?        @relation("QrTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
+  @@index([organizationId])
   @@index([code])
   @@index([expiresAt, isUsed])
   @@map("qr_attendance_tokens")
@@ -357,19 +510,24 @@ model QrAttendanceToken {
 
 model LeaveType {
   id                  String   @id @default(uuid())
-  code                String   @unique
+  organizationId      String   @default("org_default_tanphong") @map("organization_id")
+  code                String
   name                String
   isPaid              Boolean  @default(true) @map("is_paid")
   deductFromAllowance Boolean  @default(true) @map("deduct_from_allowance")
   createdAt           DateTime @default(now()) @map("created_at")
 
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   leaveRequests LeaveRequest[]
 
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@map("leave_types")
 }
 
 model LeaveRequest {
   id            String    @id @default(uuid())
+  organizationId String   @default("org_default_tanphong") @map("organization_id")
   employeeId    String    @map("employee_id")
   leaveTypeId   String?   @map("leave_type_id")
   requestType   String    @default("LEAVE") @map("request_type") // LEAVE, LATE_REQUEST, EARLY_LEAVE
@@ -385,21 +543,28 @@ model LeaveRequest {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  employee  Employee   @relation("EmployeeLeaves", fields: [employeeId], references: [id], onDelete: Restrict)
-  leaveType LeaveType? @relation(fields: [leaveTypeId], references: [id], onDelete: SetNull)
-  approver  Employee?  @relation("ApproverLeaves", fields: [approverId], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation("EmployeeLeaves", fields: [employeeId], references: [id], onDelete: Restrict)
+  leaveType    LeaveType?   @relation(fields: [leaveTypeId], references: [id], onDelete: SetNull)
+  approver     Employee?    @relation("ApproverLeaves", fields: [approverId], references: [id], onDelete: SetNull)
 
+  @@index([organizationId])
   @@index([employeeId, startDate, endDate])
   @@index([status, createdAt(sort: Desc)])
   @@map("leave_requests")
 }
 
 model Holiday {
-  id          String   @id @default(uuid())
-  name        String
-  date        DateTime @unique @db.Date
-  isRecurring Boolean  @default(false) @map("is_recurring")
+  id             String   @id @default(uuid())
+  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  name           String
+  date           DateTime @db.Date
+  isRecurring    Boolean  @default(false) @map("is_recurring")
 
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, date])
+  @@index([organizationId])
   @@map("holidays")
 }
 
@@ -409,7 +574,8 @@ model Holiday {
 
 model Kpi {
   id              String    @id @default(uuid())
-  code            String    @unique
+  organizationId  String    @default("org_default_tanphong") @map("organization_id")
+  code            String
   title           String
   description     String?
   metricType      String    @default("NUMERIC") @map("metric_type")
@@ -426,15 +592,19 @@ model Kpi {
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
   deletedAt       DateTime? @map("deleted_at")
 
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   department      Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   results         EmployeeKpiResult[]
 
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@index([departmentId])
   @@map("kpis")
 }
 
 model EmployeeKpiResult {
   id             String    @id @default(uuid())
+  organizationId String    @default("org_default_tanphong") @map("organization_id")
   employeeId     String    @map("employee_id")
   kpiId          String    @map("kpi_id")
   period         String    // YYYY-MM, YYYY-QX, YYYY
@@ -451,36 +621,41 @@ model EmployeeKpiResult {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  employee       Employee  @relation("EmployeeKpiResults", fields: [employeeId], references: [id], onDelete: Restrict)
-  evaluator      Employee? @relation("EvaluatedKpiResults", fields: [evaluatorId], references: [id], onDelete: SetNull)
-  kpi            Kpi       @relation(fields: [kpiId], references: [id], onDelete: Restrict)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee       Employee     @relation("EmployeeKpiResults", fields: [employeeId], references: [id], onDelete: Restrict)
+  evaluator      Employee?    @relation("EvaluatedKpiResults", fields: [evaluatorId], references: [id], onDelete: SetNull)
+  kpi            Kpi          @relation(fields: [kpiId], references: [id], onDelete: Restrict)
 
   @@unique([employeeId, kpiId, period])
+  @@index([organizationId])
   @@index([employeeId, period])
   @@index([kpiId])
   @@map("employee_kpi_results")
 }
 
 model EmployeeBonusPenalty {
-  id            String    @id @default(uuid())
-  employeeId    String    @map("employee_id")
-  type          String    @default("BONUS") // 'BONUS' or 'PENALTY'
-  category      String    // 'KPI', 'OVERTIME', 'PROJECT', 'TIME', 'OTHER'
-  amount        Decimal   @db.Decimal(14, 2)
-  effectiveDate DateTime  @map("effective_date") @db.Date
-  period        String    // YYYY-MM
-  reason        String
-  notes         String?
-  status        String    @default("PENDING") // PENDING, APPROVED, REJECTED, CANCELLED
-  approvedBy    String?   @map("approved_by")
-  approvedAt    DateTime? @map("approved_at")
-  approvalNotes String?   @map("approval_notes")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  id             String    @id @default(uuid())
+  organizationId String    @default("org_default_tanphong") @map("organization_id")
+  employeeId     String    @map("employee_id")
+  type           String    @default("BONUS") // 'BONUS' or 'PENALTY'
+  category       String    // 'KPI', 'OVERTIME', 'PROJECT', 'TIME', 'OTHER'
+  amount         Decimal   @db.Decimal(14, 2)
+  effectiveDate  DateTime  @map("effective_date") @db.Date
+  period         String    // YYYY-MM
+  reason         String
+  notes          String?
+  status         String    @default("PENDING") // PENDING, APPROVED, REJECTED, CANCELLED
+  approvedBy     String?   @map("approved_by")
+  approvedAt     DateTime? @map("approved_at")
+  approvalNotes  String?   @map("approval_notes")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  employee Employee  @relation("EmployeeBonusesPenalties", fields: [employeeId], references: [id], onDelete: Restrict)
-  approver Employee? @relation("ApprovedBonusesPenalties", fields: [approvedBy], references: [id], onDelete: SetNull)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation("EmployeeBonusesPenalties", fields: [employeeId], references: [id], onDelete: Restrict)
+  approver     Employee?    @relation("ApprovedBonusesPenalties", fields: [approvedBy], references: [id], onDelete: SetNull)
 
+  @@index([organizationId])
   @@index([employeeId, period, status])
   @@index([category, status])
   @@map("employee_bonuses_penalties")
@@ -492,7 +667,8 @@ model EmployeeBonusPenalty {
 
 model PayrollRule {
   id                String    @id @default(uuid())
-  code              String    @unique
+  organizationId    String    @default("org_default_tanphong") @map("organization_id")
+  code              String
   name              String
   description       String?
   isDefault         Boolean   @default(false) @map("is_default")
@@ -509,14 +685,18 @@ model PayrollRule {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
 
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   payrollPeriods PayrollPeriod[]
 
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@map("payroll_rules")
 }
 
 model PayrollPeriod {
   id               String    @id @default(uuid())
-  code             String    @unique
+  organizationId   String    @default("org_default_tanphong") @map("organization_id")
+  code             String
   name             String
   payrollRuleId    String?   @map("payroll_rule_id")
   startDate        DateTime  @map("start_date") @db.Date
@@ -528,11 +708,14 @@ model PayrollPeriod {
   closedAt         DateTime? @map("closed_at")
   createdAt        DateTime  @default(now()) @map("created_at")
 
-  payrollRule PayrollRule?      @relation(fields: [payrollRuleId], references: [id], onDelete: SetNull)
-  payrolls    Payroll[]
-  approvals   PayrollApproval[]
-  adjustments PayrollAdjustment[]
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  payrollRule  PayrollRule?        @relation(fields: [payrollRuleId], references: [id], onDelete: SetNull)
+  payrolls     Payroll[]
+  approvals    PayrollApproval[]
+  adjustments  PayrollAdjustment[]
 
+  @@unique([organizationId, code])
+  @@index([organizationId])
   @@index([status])
   @@index([startDate, endDate])
   @@map("payroll_periods")
@@ -540,6 +723,7 @@ model PayrollPeriod {
 
 model Payroll {
   id                    String   @id @default(uuid())
+  organizationId        String   @default("org_default_tanphong") @map("organization_id")
   periodId              String   @map("period_id")
   employeeId            String   @map("employee_id")
   contractSalary        Decimal  @map("contract_salary") @db.Decimal(14, 2)
@@ -564,12 +748,14 @@ model Payroll {
   paymentStatus         String   @default("UNPAID") @map("payment_status")
   createdAt             DateTime @default(now()) @map("created_at")
 
-  period      PayrollPeriod       @relation(fields: [periodId], references: [id], onDelete: Restrict)
-  employee    Employee            @relation(fields: [employeeId], references: [id], onDelete: Restrict)
-  details     PayrollDetail[]
-  adjustments PayrollAdjustment[]
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PayrollPeriod       @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  employee     Employee            @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  details      PayrollDetail[]
+  adjustments  PayrollAdjustment[]
 
   @@unique([periodId, employeeId])
+  @@index([organizationId])
   @@index([periodId, employeeId])
   @@index([employeeId])
   @@map("payroll")
@@ -590,24 +776,28 @@ model PayrollDetail {
 }
 
 model PayrollApproval {
-  id         String   @id @default(uuid())
-  periodId   String   @map("period_id")
-  stage      String
-  reviewerId String?  @map("reviewer_id")
-  actorEmail String?  @map("actor_email")
-  decision   String
-  comments   String?
-  actionAt   DateTime @default(now()) @map("action_at")
+  id             String   @id @default(uuid())
+  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  periodId       String   @map("period_id")
+  stage          String
+  reviewerId     String?  @map("reviewer_id")
+  actorEmail     String?  @map("actor_email")
+  decision       String
+  comments       String?
+  actionAt       DateTime @default(now()) @map("action_at")
 
-  period   PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
-  reviewer Employee?     @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  reviewer     Employee?     @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
 
+  @@index([organizationId])
   @@index([periodId, actionAt(sort: Desc)])
   @@map("payroll_approvals")
 }
 
 model PayrollAdjustment {
   id              String    @id @default(uuid())
+  organizationId  String    @default("org_default_tanphong") @map("organization_id")
   periodId        String    @map("period_id")
   payrollId       String?   @map("payroll_id")
   employeeId      String    @map("employee_id")
@@ -624,12 +814,14 @@ model PayrollAdjustment {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
 
-  period    PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
-  payroll   Payroll?      @relation(fields: [payrollId], references: [id], onDelete: SetNull)
-  employee  Employee      @relation("EmployeePayrollAdjustments", fields: [employeeId], references: [id], onDelete: Restrict)
-  requester Employee      @relation("RequesterPayrollAdjustments", fields: [requesterId], references: [id], onDelete: Restrict)
-  approver  Employee?     @relation("ApproverPayrollAdjustments", fields: [approverId], references: [id], onDelete: SetNull)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  period       PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  payroll      Payroll?      @relation(fields: [payrollId], references: [id], onDelete: SetNull)
+  employee     Employee      @relation("EmployeePayrollAdjustments", fields: [employeeId], references: [id], onDelete: Restrict)
+  requester    Employee      @relation("RequesterPayrollAdjustments", fields: [requesterId], references: [id], onDelete: Restrict)
+  approver     Employee?     @relation("ApproverPayrollAdjustments", fields: [approverId], references: [id], onDelete: SetNull)
 
+  @@index([organizationId])
   @@index([periodId, status])
   @@index([employeeId, status])
   @@map("payroll_adjustments")
@@ -640,19 +832,22 @@ model PayrollAdjustment {
 // ------------------------------------------------------------------------------
 
 model AuditLog {
-  id        String   @id @default(uuid())
-  actorId   String?  @map("actor_id")
-  action    String
-  entity    String
-  entityId  String   @map("entity_id")
-  oldValues Json?    @map("old_values")
-  newValues Json?    @map("new_values")
-  ipAddress String?  @map("ip_address")
-  userAgent String?  @map("user_agent")
-  createdAt DateTime @default(now()) @map("created_at")
+  id             String   @id @default(uuid())
+  organizationId String?  @map("organization_id")
+  actorId        String?  @map("actor_id")
+  action         String
+  entity         String
+  entityId       String   @map("entity_id")
+  oldValues      Json?    @map("old_values")
+  newValues      Json?    @map("new_values")
+  ipAddress      String?  @map("ip_address")
+  userAgent      String?  @map("user_agent")
+  createdAt      DateTime @default(now()) @map("created_at")
 
-  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor        User?         @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
+  @@index([organizationId, createdAt(sort: Desc)])
   @@index([entity, entityId, createdAt(sort: Desc)])
   @@index([actorId, createdAt(sort: Desc)])
   @@index([action, createdAt(sort: Desc)])
@@ -660,26 +855,35 @@ model AuditLog {
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  title     String
-  message   String
-  type      String
-  actionUrl String?  @map("action_url")
-  isRead    Boolean  @default(false) @map("is_read")
-  createdAt DateTime @default(now()) @map("created_at")
+  id             String   @id @default(uuid())
+  organizationId String?  @map("organization_id")
+  userId         String   @map("user_id")
+  title          String
+  message        String
+  type           String
+  actionUrl      String?  @map("action_url")
+  isRead         Boolean  @default(false) @map("is_read")
+  createdAt      DateTime @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([organizationId, userId])
   @@index([userId, isRead, createdAt(sort: Desc)])
   @@map("notifications")
 }
 
 model CompanySetting {
-  key         String   @id @unique
-  value       String
-  description String?
-  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  id             String   @id @default(uuid())
+  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  key            String
+  value          String
+  description    String?
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
 
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
   @@map("company_settings")
 }
