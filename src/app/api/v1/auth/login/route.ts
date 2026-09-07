@@ -11,7 +11,7 @@ import { logger } from '@/lib/logger';
 import { ApiResponse, RoleCode, SanitizedUser, UserSession } from '@/types';
 
 const LoginSchema = z.object({
-  email: z.string().email('Email không đúng định dạng'),
+  email: z.string().trim().email('Email không đúng định dạng'),
   password: z.string().min(1, 'Vui lòng nhập mật khẩu'),
 });
 
@@ -33,11 +33,12 @@ export async function POST(
 
     // 2. Validate input schema
     const body = await request.json().catch(() => ({}));
-    const { email, password } = await validateRequest(LoginSchema, body);
+    const { email: rawEmail, password } = await validateRequest(LoginSchema, body);
+    const email = rawEmail.toLowerCase().trim();
 
     // 3. Find user in database
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email },
       include: {
         employee: true,
         userRoles: {
@@ -74,8 +75,8 @@ export async function POST(
     }
 
     // 5. Check account active status
-    if (!user.isActive) {
-      logger.warn('Login attempt for inactive user', { email, userId: user.id });
+    if (!user.isActive || user.deletedAt) {
+      logger.warn('Login attempt for inactive or deleted user', { email, userId: user.id });
       throw ApiError.forbidden('Tài khoản của bạn đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.');
     }
 

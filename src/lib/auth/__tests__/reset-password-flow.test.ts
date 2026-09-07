@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { NextRequest } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { POST as resetPasswordHandler } from '@/app/api/v1/auth/reset-password/route';
+import { POST as loginHandler } from '@/app/api/v1/auth/login/route';
 import { middleware } from '@/middleware';
 import { generatePasswordResetToken } from '@/lib/auth/password-reset';
 import { prisma } from '@/lib/db/prisma';
@@ -16,6 +17,9 @@ vi.mock('@/lib/db/prisma', () => {
     },
     organization: {
       update: vi.fn(),
+    },
+    auditLog: {
+      create: vi.fn().mockResolvedValue({}),
     },
   };
   return { prisma: p };
@@ -391,6 +395,181 @@ describe('PHASE 11A.0D — FORGOT / RESET PASSWORD FLOW REGRESSION SUITE', () =>
       expect(json.success).toBe(true);
 
       // Verify organization was not activated
+      expect(prisma.organization.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // 3. End-to-End Regression Flow: PENDING Owner -> Reset Password -> Login
+  // --------------------------------------------------------------------------
+  describe('3. End-to-End PENDING Owner: Reset Password -> Login Verification', () => {
+    it('successfully resets password for PENDING owner, verifies credentials on login, returns 403 PENDING (not 400), and proves OLD password fails', async () => {
+      const initialPassword = 'InitialOwnerPassword@2026';
+      const initialPasswordHash = await bcrypt.hash(initialPassword, 10);
+      const newPassword = 'NewlyResetOwnerPassword@2026';
+
+      // 1. Initial State: Owner registered for a PENDING organization
+      let simulatedDbUser: any = {
+        id: 'usr-pending-owner-001',
+        email: 'pending.owner@newcorp.vn',
+        passwordHash: initialPasswordHash,
+        isActive: true,
+        deletedAt: null,
+        employee: null,
+        userRoles: [{ role: { code: 'admin', rolePermissions: [] } }],
+        organizationMembers: [
+          {
+            id: 'member-pending-001',
+            organizationId: 'org-pending-456',
+            role: 'OWNER',
+            isActive: true,
+            isDefault: true,
+            organization: {
+              id: 'org-pending-456',
+              name: 'Công Ty Chờ Phê Duyệt',
+              slug: 'cong-ty-cho-phe-duyet',
+              status: 'PENDING', // PENDING status!
+            },
+          },
+        ],
+      };
+
+      // Mock prisma lookups to reflect current user state
+      (prisma.user.findUnique as unknown as Mock).mockImplementation(async ({ where }) => {
+        if (where.id && where.id === simulatedDbUser.id) {
+          return simulatedDbUser;
+        }
+        if (where.email && where.email === simulatedDbUser.email) {
+          return simulatedDbUser;
+        }
+        return null;
+      });
+
+      // Mock updateMany to mutate user's passwordHash atomically
+      (prisma.user.updateMany as unknown as Mock).mockImplementation(async ({ where, data }) => {
+        if (where.id === simulatedDbUser.id && where.passwordHash === simulatedDbUser.passwordHash) {
+          simulatedDbUser = {
+            ...simulatedDbUser,
+            passwordHash: data.passwordHash,
+            updatedAt: data.updatedAt,
+          };
+          return { count: 1 };
+        }
+        return { count: 0 };
+      });
+
+      // 2. Generate valid unauthenticated reset token for this user
+      const { token } = generatePasswordResetToken({
+        id: simulatedDbUser.id,
+        email: simulatedDbUser.email,
+        passwordHash: simulatedDbUser.passwordHash,
+      });
+
+      // 3. Reset password via unauthenticated POST /api/v1/auth/reset-password
+      const resetReq = new NextRequest('http://localhost:3000/api/v1/auth/reset-password', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-for': '198.51.100.99',
+        },
+        body: JSON.stringify({
+          token,
+          newPassword,
+        }),
+      });
+
+      const resetRes = await resetPasswordHandler(resetReq);
+      const resetJson = await resetRes.json();
+
+      expect(resetRes.status).toBe(200);
+      expect(resetJson.success).toBe(true);
+      expect(resetJson.data.reset).toBe(true);
+
+      // Verify that the password hash in the database was updated to the new hash
+      expect(simulatedDbUser.passwordHash).not.toBe(initialPasswordHash);
+      const isNewHashValid = await bcrypt.compare(newPassword, simulatedDbUser.passwordHash);
+      expect(isNewHashValid).toBe(true);
+
+      // 4. ATTEMPT LOGIN WITH OLD PASSWORD -> MUST FAIL with 400 Bad Request
+      const oldPasswordLoginReq = new NextRequest('http://localhost:3000/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: 'pending.owner@newcorp.vn',
+          password: initialPassword,
+        }),
+      });
+
+      const oldLoginRes = await loginHandler(oldPasswordLoginReq);
+      const oldLoginJson = await oldLoginRes.json();
+
+      expect(oldLoginRes.status).toBe(400);
+      expect(oldLoginJson.success).toBe(false);
+      expect(oldLoginJson.error.code).toBe('BAD_REQUEST');
+      expect(oldLoginJson.error.message).toBe('Email hoặc mật khẩu không chính xác.');
+
+      // 5. ATTEMPT LOGIN WITH NEW PASSWORD -> MUST ACCEPT CREDENTIALS & RETURN 403 PENDING
+      const newPasswordLoginReq = new NextRequest('http://localhost:3000/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: 'pending.owner@newcorp.vn',
+          password: newPassword,
+        }),
+      });
+
+      const newLoginRes = await loginHandler(newPasswordLoginReq);
+      const newLoginJson = await newLoginRes.json();
+
+      // STRICT REQUIREMENT: Response is 403 PENDING, NOT 400 invalid credentials
+      expect(newLoginRes.status).toBe(403);
+      expect(newLoginJson.success).toBe(false);
+      expect(newLoginJson.error.code).toBe('FORBIDDEN');
+      expect(newLoginJson.error.message).toContain('CHỜ DUYỆT (PENDING)');
+      expect(newLoginJson.error.message).toBe(
+        'Tài khoản doanh nghiệp của bạn đang ở trạng thái CHỜ DUYỆT (PENDING). Vui lòng đợi quản trị viên hệ thống phê duyệt.'
+      );
+
+      // 6. Test with whitespace/untrimmed and mixed-case email -> MUST ALSO ACCEPT CREDENTIALS & RETURN 403 PENDING
+      const untrimmedLoginReq = new NextRequest('http://localhost:3000/api/v1/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: '   Pending.Owner@Newcorp.vn   ',
+          password: newPassword,
+        }),
+      });
+
+      const untrimmedLoginRes = await loginHandler(untrimmedLoginReq);
+      const untrimmedLoginJson = await untrimmedLoginRes.json();
+
+      expect(untrimmedLoginRes.status).toBe(403);
+      expect(untrimmedLoginJson.success).toBe(false);
+      expect(untrimmedLoginJson.error.code).toBe('FORBIDDEN');
+      expect(untrimmedLoginJson.error.message).toContain('CHỜ DUYỆT (PENDING)');
+
+      // 7. Reusing the same reset token MUST FAIL (Token invalidated by passwordHash change)
+      const reuseTokenReq = new NextRequest('http://localhost:3000/api/v1/auth/reset-password', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-for': '198.51.100.99',
+        },
+        body: JSON.stringify({
+          token,
+          newPassword: 'AnotherPassword@2026',
+        }),
+      });
+
+      const reuseRes = await resetPasswordHandler(reuseTokenReq);
+      const reuseJson = await reuseRes.json();
+
+      expect(reuseRes.status).toBe(400);
+      expect(reuseJson.success).toBe(false);
+      expect(reuseJson.error.message).toContain('không hợp lệ hoặc đã được sử dụng');
+
+      // 8. STRICT SECURITY REQUIREMENT: Organization was NEVER activated
+      expect(simulatedDbUser.organizationMembers[0].organization.status).toBe('PENDING');
       expect(prisma.organization.update).not.toHaveBeenCalled();
     });
   });

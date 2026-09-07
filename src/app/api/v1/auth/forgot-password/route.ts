@@ -10,7 +10,7 @@ import { generatePasswordResetToken, renderPasswordResetEmail } from '@/lib/auth
 import { EmailService } from '@/lib/email/email.service';
 
 const ForgotPasswordSchema = z.object({
-  email: z.string().email('Email không đúng định dạng'),
+  email: z.string().trim().email('Email không đúng định dạng'),
 });
 
 export async function POST(request: NextRequest): Promise<NextResponse<ApiResponse<{ sent: boolean }>>> {
