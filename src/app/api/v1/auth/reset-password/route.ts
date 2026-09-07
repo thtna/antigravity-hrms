@@ -48,15 +48,17 @@ export async function POST(
 
     if (!user || !user.isActive || user.deletedAt) {
       throw ApiError.badRequest(
-        'Tài khoản không tồn tại hoặc đã bị vô hiệu hóa.'
+        'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn.'
       );
     }
+
+    const oldPasswordHash = user.passwordHash;
 
     // Verify cryptographic signature and expiration bound to current passwordHash
     const verification = verifyPasswordResetToken(token, {
       id: user.id,
       email: user.email,
-      passwordHash: user.passwordHash,
+      passwordHash: oldPasswordHash,
     });
 
     if (!verification.valid) {
@@ -69,14 +71,26 @@ export async function POST(
     // Hash new password securely with bcrypt
     const newPasswordHash = await bcrypt.hash(newPassword, 10);
 
-    // Update user password. Changing passwordHash immediately invalidates this and any other tokens
-    await prisma.user.update({
-      where: { id: user.id },
+    // Atomic update: only update if passwordHash hasn't changed since validation (race-condition guard)
+    const result = await prisma.user.updateMany({
+      where: {
+        id: user.id,
+        passwordHash: oldPasswordHash,
+      },
       data: {
         passwordHash: newPasswordHash,
         updatedAt: new Date(),
       },
     });
+
+    if (result.count !== 1) {
+      logger.warn('Password reset race condition or token reuse detected', {
+        userId: user.id,
+      });
+      throw ApiError.badRequest(
+        'Liên kết đặt lại mật khẩu không hợp lệ hoặc đã được sử dụng.'
+      );
+    }
 
     logger.info('Password reset successfully completed for user', {
       userId: user.id,

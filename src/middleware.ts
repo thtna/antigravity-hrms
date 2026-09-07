@@ -98,12 +98,15 @@ export async function middleware(request: NextRequest) {
     pathname === '/login' ||
     pathname === '/register' ||
     pathname === '/forgot-password' ||
+    pathname === '/reset-password' ||
+    pathname.startsWith('/reset-password/') ||
     pathname === '/unauthorized' ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api/health') ||
     pathname.startsWith('/api/v1/auth/login') ||
     pathname.startsWith('/api/v1/auth/register') ||
     pathname.startsWith('/api/v1/auth/forgot-password') ||
+    pathname === '/api/v1/auth/reset-password' ||
     pathname.includes('.')
   ) {
     return applySecurityHeaders(NextResponse.next());
