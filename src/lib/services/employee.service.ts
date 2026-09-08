@@ -12,6 +12,13 @@ import { Prisma } from '@prisma/client';
 import { AuditService } from './audit.service';
 import crypto from 'crypto';
 
+export interface CreateEmployeeOptions {
+  tx?: Prisma.TransactionClient;
+  passwordHash?: string;
+  roleId?: string;
+  allowOwnerOnboarding?: boolean;
+}
+
 export class EmployeeService {
   /**
    * List employees with searching, filtering, data scoping and pagination
@@ -49,15 +56,15 @@ export class EmployeeService {
       where.status = status;
     }
 
-    // 4. Search filter
+    // 4. Search by keyword
     if (search && search.trim() !== '') {
-      const q = search.trim();
+      const keyword = search.trim();
       where.OR = [
-        { employeeCode: { contains: q, mode: 'insensitive' } },
-        { firstName: { contains: q, mode: 'insensitive' } },
-        { lastName: { contains: q, mode: 'insensitive' } },
-        { phoneNumber: { contains: q, mode: 'insensitive' } },
-        { user: { email: { contains: q, mode: 'insensitive' } } },
+        { employeeCode: { contains: keyword, mode: 'insensitive' } },
+        { firstName: { contains: keyword, mode: 'insensitive' } },
+        { lastName: { contains: keyword, mode: 'insensitive' } },
+        { phoneNumber: { contains: keyword } },
+        { user: { email: { contains: keyword, mode: 'insensitive' } } },
       ];
     }
 
@@ -66,34 +73,44 @@ export class EmployeeService {
       prisma.employee.count({ where }),
       prisma.employee.findMany({
         where,
-        include: {
-          department: {
-            select: { id: true, code: true, name: true },
-          },
-          position: {
-            select: { id: true, code: true, title: true, baseSalaryGrade: true },
-          },
-          worksite: {
-            select: { id: true, name: true, address: true, radiusMeters: true },
-          },
-          user: {
-            select: { id: true, email: true, isActive: true, lastLoginAt: true },
-          },
-        },
-        orderBy: { [sortBy]: sortOrder },
         skip,
         take: limit,
+        orderBy: {
+          [sortBy]: sortOrder,
+        },
+        include: {
+          department: {
+            select: { id: true, name: true, code: true },
+          },
+          position: {
+            select: { id: true, title: true, code: true },
+          },
+          worksite: {
+            select: { id: true, name: true },
+          },
+          user: {
+            select: { id: true, email: true, isActive: true },
+          },
+        },
       }),
     ]);
 
-    const employees = rawEmployees.map((emp) => ({
-      ...emp,
-      fullName: `${emp.lastName} ${emp.firstName}`.trim(),
-      contractSalary: Number(emp.contractSalary),
-      hourlyRate: Number(emp.hourlyRate),
-      insuranceSalary: Number(emp.insuranceSalary),
-      documents: (emp.documents as any) || [],
-    }));
+    // Mask sensitive fields if non-admin/non-hr
+    const isHrOrAdmin = session.roles.includes('admin') || session.roles.includes('hr');
+    const employees = rawEmployees.map((emp) => {
+      const base = {
+        ...emp,
+        fullName: `${emp.lastName} ${emp.firstName}`.trim(),
+        contractSalary: isHrOrAdmin ? Number(emp.contractSalary) : undefined,
+        hourlyRate: isHrOrAdmin ? Number(emp.hourlyRate) : undefined,
+        insuranceSalary: isHrOrAdmin ? Number(emp.insuranceSalary) : undefined,
+        bankAccountNo: isHrOrAdmin ? emp.bankAccountNo : undefined,
+        bankName: isHrOrAdmin ? emp.bankName : undefined,
+        taxCode: isHrOrAdmin ? emp.taxCode : undefined,
+        documents: (emp.documents as any) || [],
+      };
+      return base;
+    });
 
     return {
       employees,
@@ -158,23 +175,40 @@ export class EmployeeService {
   /**
    * Create new employee and link with system user account
    */
-  static async createEmployee(input: CreateEmployeeInput, session: UserSession) {
-    // Only Admin or HR can create employees
-    if (!session.roles.includes('admin') && !session.roles.includes('hr')) {
+  static async createEmployee(
+    input: CreateEmployeeInput,
+    session: UserSession,
+    optionsOrTx?: CreateEmployeeOptions | Prisma.TransactionClient
+  ) {
+    const options: CreateEmployeeOptions =
+      optionsOrTx && ('tx' in optionsOrTx || 'passwordHash' in optionsOrTx || 'roleId' in optionsOrTx || 'allowOwnerOnboarding' in optionsOrTx)
+        ? (optionsOrTx as CreateEmployeeOptions)
+        : optionsOrTx
+        ? { tx: optionsOrTx as Prisma.TransactionClient }
+        : {};
+
+    // Only Admin or HR can create employees globally.
+    // Tenant OWNER is allowed only when explicitly scoped via allowOwnerOnboarding in the onboarding flow.
+    const isOwner = session.tenantRole === 'OWNER';
+    const isAdminOrHr = session.roles.includes('admin') || session.roles.includes('hr');
+    if (!isAdminOrHr && (!isOwner || !options.allowOwnerOnboarding)) {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền thêm nhân viên mới.');
     }
 
+    const orgId = session.organizationId;
+    const db = options.tx || prisma;
+
     // 1. Check duplicate employee code within the same organization
-    const existingCode = await prisma.employee.findFirst({
-      where: { employeeCode: input.employeeCode.toUpperCase(), organizationId: session.organizationId },
+    const existingCode = await db.employee.findFirst({
+      where: { employeeCode: input.employeeCode.toUpperCase().trim(), organizationId: orgId },
     });
     if (existingCode) {
       throw ApiError.conflict(`Mã nhân viên [${input.employeeCode}] đã tồn tại trong tổ chức.`);
     }
 
     // 2. Check duplicate email in users
-    const existingUser = await prisma.user.findUnique({
-      where: { email: input.email.toLowerCase() },
+    const existingUser = await db.user.findUnique({
+      where: { email: input.email.toLowerCase().trim() },
     });
     if (existingUser) {
       throw ApiError.conflict(`Email [${input.email}] đã được đăng ký cho một tài khoản khác.`);
@@ -182,8 +216,8 @@ export class EmployeeService {
 
     // 3. Check duplicate identity card if provided
     if (input.identityCard && input.identityCard.trim() !== '') {
-      const existingIdCard = await prisma.employee.findFirst({
-        where: { identityCard: input.identityCard.trim() },
+      const existingIdCard = await db.employee.findFirst({
+        where: { identityCard: input.identityCard.trim(), organizationId: orgId },
       });
       if (existingIdCard) {
         throw ApiError.conflict(`Số CCCD/Hộ chiếu [${input.identityCard}] đã tồn tại.`);
@@ -191,26 +225,26 @@ export class EmployeeService {
     }
 
     // 3.1 Verify department, position, and worksite belong to this tenant (prevent cross-tenant FK injection)
-    if (session.organizationId) {
-      if (input.departmentId) {
-        const dept = await prisma.department.findFirst({
-          where: { id: input.departmentId, organizationId: session.organizationId, deletedAt: null },
+    if (orgId) {
+      if (input.departmentId && db.department?.findFirst) {
+        const dept = await db.department.findFirst({
+          where: { id: input.departmentId, organizationId: orgId, deletedAt: null },
         });
         if (!dept) {
           throw ApiError.badRequest('Phòng ban không tồn tại trong tổ chức của bạn.');
         }
       }
-      if (input.positionId) {
-        const pos = await prisma.position.findFirst({
-          where: { id: input.positionId, organizationId: session.organizationId, deletedAt: null },
+      if (input.positionId && db.position?.findFirst) {
+        const pos = await db.position.findFirst({
+          where: { id: input.positionId, organizationId: orgId, deletedAt: null },
         });
         if (!pos) {
           throw ApiError.badRequest('Chức vụ không tồn tại trong tổ chức của bạn.');
         }
       }
-      if (input.worksiteId) {
-        const ws = await prisma.worksite.findFirst({
-          where: { id: input.worksiteId, organizationId: session.organizationId },
+      if (input.worksiteId && db.worksite?.findFirst) {
+        const ws = await db.worksite.findFirst({
+          where: { id: input.worksiteId, organizationId: orgId },
         });
         if (!ws) {
           throw ApiError.badRequest('Địa điểm làm việc không tồn tại trong tổ chức của bạn.');
@@ -218,16 +252,12 @@ export class EmployeeService {
       }
     }
 
-    // 4. Default password for new user account (configurable via env or secure random generation)
-    const defaultPassword = process.env.DEFAULT_EMPLOYEE_PASSWORD || `${crypto.randomBytes(8).toString('hex')}!Aa1`;
-    const passwordHash = await hashPassword(defaultPassword);
-
-    // 5. Atomic Prisma transaction
-    const createdEmployee = await prisma.$transaction(async (tx) => {
-      // Find or create role 'employee'
-      let empRole = await tx.role.findUnique({ where: { code: 'employee' } });
+    // 4. Look up system role outside transaction if not pre-provided
+    let empRoleId = options.roleId;
+    if (!empRoleId) {
+      let empRole = await db.role.findUnique({ where: { code: 'employee' } });
       if (!empRole) {
-        empRole = await tx.role.create({
+        empRole = await db.role.create({
           data: {
             code: 'employee',
             name: 'Nhân viên',
@@ -235,34 +265,45 @@ export class EmployeeService {
           },
         });
       }
+      empRoleId = empRole.id;
+    }
 
+    // 5. Non-DB operations: default password and bcrypt hash outside transaction
+    const passwordHash =
+      options.passwordHash ||
+      (await hashPassword(
+        process.env.DEFAULT_EMPLOYEE_PASSWORD || `${crypto.randomBytes(8).toString('hex')}!Aa1`
+      ));
+
+    // Calculate hourlyRate if not specified: (contractSalary / 22 work days / 8 hours)
+    const hourlyRate = input.hourlyRate > 0
+      ? input.hourlyRate
+      : input.contractSalary > 0
+      ? Math.round(input.contractSalary / (22 * 8))
+      : 0;
+
+    // 6. Atomic write logic
+    const executeWrites = async (txClient: Prisma.TransactionClient) => {
       // Create User account
-      const newUser = await tx.user.create({
+      const newUser = await txClient.user.create({
         data: {
-          email: input.email.toLowerCase(),
+          email: input.email.toLowerCase().trim(),
           passwordHash,
           isActive: input.status === 'ACTIVE' || input.status === 'PROBATION',
           userRoles: {
             create: {
-              roleId: empRole.id,
+              roleId: empRoleId!,
             },
           },
         },
       });
 
-      // Calculate hourlyRate if not specified: (contractSalary / 22 work days / 8 hours)
-      const hourlyRate = input.hourlyRate > 0
-        ? input.hourlyRate
-        : input.contractSalary > 0
-        ? Math.round(input.contractSalary / (22 * 8))
-        : 0;
-
-      // Create Employee — bound to the current tenant (organizationId from session)
-      const employee = await tx.employee.create({
+      // Create Employee — bound to current tenant
+      const employee = await txClient.employee.create({
         data: {
           userId: newUser.id,
-          organizationId: session.organizationId!, // PHASE 5: tenant binding
-          employeeCode: input.employeeCode.toUpperCase(),
+          organizationId: orgId,
+          employeeCode: input.employeeCode.toUpperCase().trim(),
           firstName: input.firstName.trim(),
           lastName: input.lastName.trim(),
           avatarUrl: input.avatarUrl || null,
@@ -295,19 +336,28 @@ export class EmployeeService {
         },
       });
 
-      // PHASE 5: Create OrganizationMember link for the new user
-      if (session.organizationId && (tx as any).organizationMember?.upsert) {
-        await (tx as any).organizationMember.upsert({
-          where: { organizationId_userId: { organizationId: session.organizationId, userId: newUser.id } },
-          create: { organizationId: session.organizationId, userId: newUser.id, role: 'EMPLOYEE', isActive: true },
+      // Link OrganizationMember for new user
+      if ((txClient as any).organizationMember?.create) {
+        await (txClient as any).organizationMember.create({
+          data: {
+            organizationId: orgId,
+            userId: newUser.id,
+            role: 'EMPLOYEE',
+            isActive: true,
+          },
+        });
+      } else if ((txClient as any).organizationMember?.upsert) {
+        await (txClient as any).organizationMember.upsert({
+          where: { organizationId_userId: { organizationId: orgId, userId: newUser.id } },
+          create: { organizationId: orgId, userId: newUser.id, role: 'EMPLOYEE', isActive: true },
           update: { isActive: true },
         });
       }
 
-
-      // Create Audit Log
-      await tx.auditLog.create({
+      // Create Audit Log with organizationId for tenant isolation
+      await txClient.auditLog.create({
         data: {
+          organizationId: orgId,
           actorId: session.userId,
           action: 'CREATE_EMPLOYEE',
           entity: 'employees',
@@ -322,7 +372,22 @@ export class EmployeeService {
       });
 
       return employee;
-    });
+    };
+
+    let createdEmployee;
+    if (options.tx) {
+      // Caller provided transaction client — run directly without creating a nested transaction
+      createdEmployee = await executeWrites(options.tx);
+    } else {
+      // Standalone execution — short atomic transaction with reasonable timeout for cold starts
+      createdEmployee = await prisma.$transaction(
+        async (innerTx) => executeWrites(innerTx),
+        {
+          maxWait: 5000,
+          timeout: 10000,
+        }
+      );
+    }
 
     logger.info('Employee created successfully', {
       employeeId: createdEmployee.id,

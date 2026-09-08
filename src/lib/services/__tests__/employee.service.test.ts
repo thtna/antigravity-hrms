@@ -27,6 +27,10 @@ vi.mock('@/lib/db/prisma', () => ({
     auditLog: {
       create: vi.fn().mockResolvedValue({}),
     },
+    organizationMember: {
+      create: vi.fn().mockResolvedValue({}),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     $transaction: vi.fn(async (cb) => cb(prisma)),
   },
 }));

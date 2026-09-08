@@ -41,6 +41,8 @@ export async function checkDatabaseConnection(): Promise<{
 
 /**
  * [PHASE 25] Graceful connection disposal on container restart / process termination
+ * Note: process.once('beforeExit') is omitted as it poses a serverless lifecycle risk
+ * (premature $disconnect on event loop idle during async microtask resolution).
  */
 if (typeof process !== 'undefined') {
   const handleShutdown = async () => {
@@ -51,7 +53,6 @@ if (typeof process !== 'undefined') {
     }
   };
 
-  process.once('beforeExit', handleShutdown);
   process.once('SIGINT', handleShutdown);
   process.once('SIGTERM', handleShutdown);
 }

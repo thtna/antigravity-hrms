@@ -45,6 +45,7 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 | **Phase 11A.0B** | **Production Environment Plan**: Phân loại 4 nhóm biến môi trường; phát hiện và phân tích rào cản `PRODUCTION BLOCKER FOR FILE UPLOADS` trên Vercel do cơ chế `fs/promises`. | **PRODUCTION ENV PLAN COMPLETED** |
 | **Phase 11A.0C** | **Production Storage Hardening**: Xây dựng kiến trúc `StorageProvider Abstraction`, `LocalStorageProvider`, `SupabaseStorageProvider`, `StorageManager`, xác thực Magic Bytes (%PDF-, PNG, JPEG), Signed URL ngắn hạn, bảo mật tài liệu riêng tư. | **PRODUCTION STORAGE READY** |
 | **Phase 11A.0C2** | **Live Supabase Storage Staging Verification**: Kiểm thử thực tế trên Supabase Storage Staging thật (`antigravity-hrms-staging`). Khởi tạo 2 private buckets (`avatars`, `documents`), thực hiện upload/download/signed-url/delete thật, kiểm chứng $A \leftrightarrow B$ DENIED, unauthenticated client signed URL fetch HTTP 200, zero secrets logged. | **LIVE STAGING STORAGE VERIFIED** |
+| **Phase 11A.0E** | **Onboarding Step 6 P2028 Transaction Hardening**: Khắc phục triệt để lỗi Prisma P2028: phân loại rủi ro serverless lifecycle; rút gọn transaction xuống tối thiểu các DB writes nguyên tử; pre-lookup Role và băm mật khẩu ngoài transaction; bảo toàn RBAC bằng cờ `allowOwnerOnboarding`; hoàn thiện cơ chế idempotent retry (409 khi collision); xác nhận rollback an toàn (zero orphan user/partial employee); read-only staging DB clean. | **P2028 TRANSACTION HARDENING VERIFIED** |
 
 ---
 
@@ -92,13 +93,13 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 
 ## 7. TRẠNG THÁI TEST & BUILD MỚI NHẤT (EMPIRICAL BENCHMARKS)
 
-*Dữ liệu được thẩm tra thực tế tại ngày 07/09/2026:*
+*Dữ liệu được thẩm tra thực tế tại ngày 08/09/2026:*
 
 - **TypeScript Typecheck (`npx tsc --noEmit`)**:
   - Kết quả: **`PASS` (Exit Code: 0 — 0 Errors, 0 Warnings)**
 - **Toàn bộ Test Suite (`npm test`)**:
-  - Kết quả: **`PASS` (43 / 43 Test Files passed, 732 / 732 Tests passed — 100%)**
-  - Thời gian chạy: ~15.1 giây.
+  - Kết quả: **`PASS` (45 / 45 Test Files passed, 750 / 750 Tests passed — 100%)**
+  - Thời gian chạy: ~16.7 giây.
 - **Production Build (`npm run build`)**:
   - Kết quả: **`PASS` (92 / 92 Routes Compiled Cleanly trên Next.js 16.3.4 Turbopack)**
 - **Tính bất biến tiền lương (Payroll Invariance)**:
@@ -124,6 +125,7 @@ Tất cả báo cáo chi tiết nằm trong thư mục [`docs/`](file:///C:/User
 | [`PHASE_11A_0C2_LIVE_STORAGE_STAGING.md`](file:///C:/Users/LNV/.gemini/antigravity-ide/scratch/antigravity-hrms/docs/PHASE_11A_0C2_LIVE_STORAGE_STAGING.md) | Nghiệm thu thực nghiệm Supabase Storage trên môi trường Staging thật. |
 | [`PHASE_11A_0D_REAL_EMAIL_STAGING.md`](file:///C:/Users/LNV/.gemini/antigravity-ide/scratch/antigravity-hrms/docs/PHASE_11A_0D_REAL_EMAIL_STAGING.md) | Báo cáo kiểm định an toàn email staging và kích hoạt Safeguard Stop. |
 | [`PHASE_11A_0D1_STAGING_PREVIEW_ENV_PLAN.md`](file:///C:/Users/LNV/.gemini/antigravity-ide/scratch/antigravity-hrms/docs/PHASE_11A_0D1_STAGING_PREVIEW_ENV_PLAN.md) | Kế hoạch cấu hình môi trường Vercel Preview (Staging Web) và ma trận biến môi trường. |
+| [`PHASE_11A_0E_ONBOARDING_STEP6_P2028_FIX.md`](file:///C:/Users/LNV/.gemini/antigravity-ide/scratch/antigravity-hrms/docs/PHASE_11A_0E_ONBOARDING_STEP6_P2028_FIX.md) | Báo cáo phân tích và khắc phục lỗi Prisma P2028, tối ưu transaction, idempotent retry, rollback regression. |
 | [`MULTI_TENANT_SCHEMA.md`](file:///C:/Users/LNV/.gemini/antigravity-ide/scratch/antigravity-hrms/docs/MULTI_TENANT_SCHEMA.md) | Đặc tả thiết kế cấu trúc CSDL đa tổ chức. |
 | [`MULTI_TENANT_AUDIT.md`](file:///C:/Users/LNV/.gemini/antigravity-ide/scratch/antigravity-hrms/docs/MULTI_TENANT_AUDIT.md) | Báo cáo kiểm toán phân lập dữ liệu giữa các tenant. |
 | [`DISASTER_RECOVERY_RUNBOOK.md`](file:///C:/Users/LNV/.gemini/antigravity-ide/scratch/antigravity-hrms/docs/DISASTER_RECOVERY_RUNBOOK.md) | Cẩm nang phục hồi sự cố và quy trình tái nạp dữ liệu từ snapshot. |

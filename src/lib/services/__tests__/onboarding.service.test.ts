@@ -8,6 +8,7 @@ const mockPrisma = vi.hoisted(() => ({
     findUnique: vi.fn(),
     findFirst: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   branch: {
     findFirst: vi.fn(),

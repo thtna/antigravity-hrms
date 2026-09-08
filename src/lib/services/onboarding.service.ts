@@ -2,6 +2,8 @@ import { prisma } from '@/lib/db/prisma';
 import { ApiError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
+import { hashPassword } from '@/lib/auth/password';
+import crypto from 'crypto';
 import { DepartmentService } from './department.service';
 import { PositionService } from './position.service';
 import { ShiftService } from './shift.service';
@@ -291,8 +293,86 @@ export class OnboardingService {
       case 6: {
         // Employee
         const validated = Step6EmployeeSchema.parse(data);
+        const normalizedCode = validated.employeeCode.toUpperCase().trim();
+        const normalizedEmail = validated.email.toLowerCase().trim();
 
-        // Auto-resolve departmentId and positionId if not provided
+        // 1. Precise Idempotent Retry Inspection (Requirement 6):
+        // Only treat as retry if existing employee belongs to this organization AND identity fully matches
+        const existingByCode = await prisma.employee.findFirst({
+          where: {
+            organizationId: orgId,
+            employeeCode: normalizedCode,
+            deletedAt: null,
+          },
+          include: {
+            department: true,
+            position: true,
+            worksite: true,
+            user: { select: { id: true, email: true, isActive: true } },
+          },
+        });
+
+        const existingByUser = prisma.user?.findUnique
+          ? await prisma.user.findUnique({
+              where: { email: normalizedEmail },
+              include: {
+                employee: {
+                  include: {
+                    department: true,
+                    position: true,
+                    worksite: true,
+                    user: { select: { id: true, email: true, isActive: true } },
+                  },
+                },
+              },
+            })
+          : null;
+
+        const isExactMatch =
+          existingByCode &&
+          existingByUser &&
+          existingByUser.employee &&
+          existingByCode.id === existingByUser.employee.id &&
+          existingByCode.organizationId === orgId &&
+          existingByUser.employee.organizationId === orgId &&
+          existingByCode.firstName.trim().toLowerCase() === validated.firstName.trim().toLowerCase() &&
+          existingByCode.lastName.trim().toLowerCase() === validated.lastName.trim().toLowerCase();
+
+        if (isExactMatch) {
+          // Verified idempotent retry — advance step to 7 without duplicating employee (only if current step < 7)
+          const freshOrg = await prisma.organization.findUnique({
+            where: { id: orgId },
+            select: { onboardingStep: true },
+          });
+
+          if (freshOrg && freshOrg.onboardingStep < 7) {
+            await prisma.organization.update({
+              where: { id: orgId },
+              data: { onboardingStep: 7 },
+            });
+          }
+
+          result = {
+            ...existingByCode,
+            fullName: `${existingByCode.lastName} ${existingByCode.firstName}`.trim(),
+            contractSalary: Number(existingByCode.contractSalary),
+            hourlyRate: Number(existingByCode.hourlyRate),
+            insuranceSalary: Number(existingByCode.insuranceSalary),
+            documents: (existingByCode.documents as any) || [],
+          };
+          break;
+        }
+
+        // If employeeCode or email collides with a DIFFERENT record/identity:
+        // Do NOT advance step. Throw conflict (409) with explicit message.
+        if (existingByCode) {
+          throw ApiError.conflict(`Mã nhân viên [${normalizedCode}] đã tồn tại trong tổ chức.`);
+        }
+        if (existingByUser) {
+          throw ApiError.conflict(`Email [${normalizedEmail}] đã được đăng ký cho một tài khoản khác.`);
+        }
+
+        // 2. Auto-resolve departmentId and positionId if not provided (executed outside transaction)
         let targetDeptId = validated.departmentId;
         if (!targetDeptId) {
           const firstDept = await prisma.department.findFirst({
@@ -337,8 +417,8 @@ export class OnboardingService {
         const employeePayload = CreateEmployeeSchema.parse({
           firstName: validated.firstName.trim(),
           lastName: validated.lastName.trim(),
-          employeeCode: validated.employeeCode.toUpperCase().trim(),
-          email: validated.email.toLowerCase().trim(),
+          employeeCode: normalizedCode,
+          email: normalizedEmail,
           phoneNumber: validated.phoneNumber.trim(),
           departmentId: targetDeptId,
           positionId: targetPosId,
@@ -347,12 +427,127 @@ export class OnboardingService {
           hireDate: validated.hireDate || new Date().toISOString().slice(0, 10),
         });
 
-        result = await EmployeeService.createEmployee(employeePayload, session);
+        // 3. Pre-lookup system role outside transaction (Requirement 4)
+        let empRole = prisma.role?.findUnique ? await prisma.role.findUnique({ where: { code: 'employee' } }) : null;
+        if (!empRole) {
+          if (prisma.role?.create) {
+            empRole = await prisma.role.create({
+              data: {
+                code: 'employee',
+                name: 'Nhân viên',
+                description: 'Vai trò nhân viên thông thường',
+              },
+            });
+          } else {
+            empRole = { id: 'role-employee-default' } as any;
+          }
+        }
 
-        await prisma.organization.update({
-          where: { id: orgId },
-          data: { onboardingStep: Math.max(org.onboardingStep, 7) },
-        });
+        // 4. Pre-compute password hash outside transaction (Requirement 3: no CPU work in tx)
+        const defaultPassword = process.env.DEFAULT_EMPLOYEE_PASSWORD || `${crypto.randomBytes(8).toString('hex')}!Aa1`;
+        const passwordHash = await hashPassword(defaultPassword);
+
+        // 5. Short, atomic transaction containing ONLY database operations (Requirement 3)
+        try {
+          result = await prisma.$transaction(
+            async (tx) => {
+              const emp = await EmployeeService.createEmployee(employeePayload, session, {
+                tx,
+                passwordHash,
+                roleId: empRole?.id,
+                allowOwnerOnboarding: true,
+              });
+
+              // Fresh check inside transaction: only advance if current onboardingStep < 7 (never revert if already >= 7)
+              const latestOrg = await tx.organization.findUnique({
+                where: { id: orgId },
+                select: { onboardingStep: true },
+              });
+
+              if (latestOrg && latestOrg.onboardingStep < 7) {
+                await tx.organization.update({
+                  where: { id: orgId },
+                  data: { onboardingStep: 7 },
+                });
+              }
+
+              return emp;
+            },
+            {
+              maxWait: 5000,
+              timeout: 10000,
+            }
+          );
+        } catch (err: any) {
+          const isP2002 =
+            err.code === 'P2002' ||
+            err?.message?.includes('P2002') ||
+            err?.message?.includes('Unique constraint failed') ||
+            (err?.statusCode === 409 && (err?.message?.includes('đã tồn tại') || err?.message?.includes('đã được đăng ký')));
+
+          if (isP2002) {
+            // Concurrent race condition: another request just inserted the record!
+            // Re-fetch existing employee by organizationId + employeeCode / email
+            const [racingByCode, racingByUser] = await Promise.all([
+              prisma.employee.findFirst({
+                where: { organizationId: orgId, employeeCode: normalizedCode, deletedAt: null },
+                include: { user: true },
+              }),
+              prisma.user.findUnique({
+                where: { email: normalizedEmail },
+                include: { employee: true },
+              }),
+            ]);
+
+            const isRacingExactMatch =
+              racingByCode &&
+              racingByUser &&
+              racingByUser.employee &&
+              racingByCode.id === racingByUser.employee.id &&
+              racingByCode.organizationId === orgId &&
+              racingByUser.employee.organizationId === orgId &&
+              racingByCode.firstName.trim().toLowerCase() === validated.firstName.trim().toLowerCase() &&
+              racingByCode.lastName.trim().toLowerCase() === validated.lastName.trim().toLowerCase();
+
+            if (isRacingExactMatch) {
+              // Exact same identity was inserted concurrently => idempotent success!
+              const freshOrg = await prisma.organization.findUnique({
+                where: { id: orgId },
+                select: { onboardingStep: true },
+              });
+
+              if (freshOrg && freshOrg.onboardingStep < 7) {
+                await prisma.organization.update({
+                  where: { id: orgId },
+                  data: { onboardingStep: 7 },
+                });
+              }
+
+              result = {
+                ...racingByCode,
+                fullName: `${racingByCode.lastName} ${racingByCode.firstName}`.trim(),
+                contractSalary: Number(racingByCode.contractSalary),
+                hourlyRate: Number(racingByCode.hourlyRate),
+                insuranceSalary: Number(racingByCode.insuranceSalary),
+                documents: (racingByCode.documents as any) || [],
+              };
+              break;
+            }
+
+            // If collision was with a different identity / user:
+            if (racingByCode) {
+              throw ApiError.conflict(`Mã nhân viên [${normalizedCode}] đã tồn tại trong tổ chức.`);
+            }
+            if (racingByUser) {
+              throw ApiError.conflict(`Email [${normalizedEmail}] đã được đăng ký cho một tài khoản khác.`);
+            }
+            throw ApiError.conflict('Xung đột dữ liệu nhân viên trong quá trình xử lý đồng thời.');
+          }
+
+          // Other errors rethrow
+          throw err;
+        }
+
         break;
       }
 
