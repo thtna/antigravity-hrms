@@ -161,7 +161,7 @@ export function renderPasswordResetEmail(options: {
     .message-box { background-color: #111827; border-left: 4px solid #3B82F6; padding: 18px; border-radius: 8px; margin: 20px 0; color: #E5E7EB; line-height: 1.6; font-size: 15px; }
     .warning-box { background-color: #1c1917; border: 1px solid #78350f; padding: 14px; border-radius: 8px; margin: 20px 0; color: #fef08a; font-size: 13px; line-height: 1.5; }
     .btn-wrapper { text-align: center; margin: 32px 0 24px 0; }
-    .btn { display: inline-block; background: linear-gradient(135deg, #2563EB 0%, #4F46E5 100%); color: #FFFFFF; font-weight: 600; font-size: 15px; text-decoration: none; padding: 14px 32px; border-radius: 8px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); }
+    .btn { display: inline-block; background: #3b5cff; background: linear-gradient(135deg, #2563EB 0%, #4F46E5 100%); color: #ffffff !important; -webkit-text-fill-color: #ffffff; font-weight: 700; font-size: 15px; text-decoration: none; padding: 16px 32px; border-radius: 10px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); }
     .footer { background: #030712; padding: 24px 28px; text-align: center; border-top: 1px solid #1F2937; font-size: 12px; color: #6B7280; line-height: 1.5; }
   </style>
 </head>
@@ -177,8 +177,33 @@ export function renderPasswordResetEmail(options: {
       <div class="message-box">
         Hệ thống nhận được yêu cầu đặt lại mật khẩu cho tài khoản doanh nghiệp của bạn. Vui lòng bấm vào nút bên dưới để tiến hành thiết lập mật khẩu mới:
       </div>
-      <div class="btn-wrapper">
-        <a href="${resetUrl}" class="btn">Đặt Lại Mật Khẩu Ngay →</a>
+      <div class="btn-wrapper" style="text-align: center; margin: 32px 0 24px 0;">
+        <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto; border-collapse: separate;">
+          <tr>
+            <td align="center" style="border-radius: 10px; background: #3b5cff; background: linear-gradient(135deg, #2563EB 0%, #4F46E5 100%);">
+              <a
+                href="${resetUrl}"
+                class="btn"
+                target="_blank"
+                style="
+                  display: inline-block;
+                  background: #3b5cff;
+                  background: linear-gradient(135deg, #2563EB 0%, #4F46E5 100%);
+                  color: #ffffff !important;
+                  -webkit-text-fill-color: #ffffff;
+                  text-decoration: none;
+                  font-weight: 700;
+                  font-size: 15px;
+                  padding: 16px 32px;
+                  border-radius: 10px;
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                "
+              >
+                Đặt Lại Mật Khẩu Ngay →
+              </a>
+            </td>
+          </tr>
+        </table>
       </div>
       <div class="warning-box">
         ⚠️ <strong>Lưu ý bảo mật quan trọng:</strong><br>

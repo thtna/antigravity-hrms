@@ -109,4 +109,26 @@ describe('PHASE 11A.0D — PASSWORD RESET CRYPTOGRAPHIC SECURITY', () => {
     expect(html).not.toContain('passwordHash');
     expect(html).not.toContain('service_role');
   });
+
+  it('7. renders high-contrast email CTA button with explicit white text and email-safe table wrapper', () => {
+    const html = renderPasswordResetEmail({
+      recipientName: 'Alice',
+      resetUrl: 'https://staging.antigravity.internal/reset-password?token=safe_token',
+      companyName: 'Antigravity SaaS',
+    });
+
+    // 1. Explicit pure white text styling with high specificity for Gmail/Outlook
+    expect(html).toContain('color: #ffffff !important;');
+    expect(html).toContain('-webkit-text-fill-color: #ffffff;');
+    expect(html).toContain('text-decoration: none;');
+    expect(html).toContain('font-weight: 700;');
+
+    // 2. Blue/purple button background preserved
+    expect(html).toContain('background: #3b5cff;');
+    expect(html).toContain('linear-gradient(135deg, #2563EB 0%, #4F46E5 100%)');
+
+    // 3. Table-based email button wrapper for email client compatibility
+    expect(html).toContain('<table role="presentation"');
+    expect(html).toContain('Đặt Lại Mật Khẩu Ngay →');
+  });
 });
