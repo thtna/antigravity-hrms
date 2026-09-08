@@ -19,8 +19,11 @@ import {
   ShieldAlert,
   FileText,
   Briefcase,
+  LogOut,
+  Loader2,
   type LucideIcon,
 } from 'lucide-react';
+import { useLogout } from '@/lib/auth/use-logout';
 
 interface MobileNavItem {
   label: string;
@@ -61,6 +64,7 @@ interface MobileNavProps {
 export function MobileNav({ unreadCount = 0 }: MobileNavProps) {
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const { logout, loggingOut } = useLogout();
 
   // Close drawer on route change
   useEffect(() => {
@@ -195,6 +199,23 @@ export function MobileNav({ unreadCount = 0 }: MobileNavProps) {
                 );
               })}
             </nav>
+
+            {/* Drawer Footer / Logout */}
+            <div className="border-t border-slate-800/60 p-4 mt-auto">
+              <button
+                type="button"
+                onClick={logout}
+                disabled={loggingOut}
+                className="flex items-center justify-center gap-2.5 w-full rounded-xl py-3 px-4 text-sm font-semibold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-50"
+              >
+                {loggingOut ? (
+                  <Loader2 className="h-4.5 w-4.5 animate-spin" />
+                ) : (
+                  <LogOut className="h-4.5 w-4.5" />
+                )}
+                <span>{loggingOut ? 'Đang đăng xuất...' : 'Đăng Xuất'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

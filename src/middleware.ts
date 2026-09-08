@@ -5,7 +5,9 @@ import { UserSession } from './types';
 const SECRET_KEY = new TextEncoder().encode(
   process.env.AUTH_SECRET || 'antigravity_super_secret_jwt_key_minimum_32_characters_long_for_security'
 );
-const COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'antigravity_session';
+function getSessionCookieName(): string {
+  return process.env.AUTH_COOKIE_NAME || 'antigravity_session';
+}
 
 /**
  * Appends standard security headers (CSP, HSTS, X-Frame-Options, nosniff, Referrer-Policy)
@@ -113,7 +115,8 @@ export async function middleware(request: NextRequest) {
   }
 
   // Check session cookie
-  const token = request.cookies.get(COOKIE_NAME)?.value;
+  const cookieName = getSessionCookieName();
+  const token = request.cookies.get(cookieName)?.value;
 
   if (!token) {
     // If API request, return 401 JSON
@@ -246,6 +249,10 @@ export async function middleware(request: NextRequest) {
     }
     if (session.tenantRole) {
       response.headers.set('x-tenant-role', session.tenantRole);
+    }
+    // Prevent browser bfcache from retaining sensitive authenticated views upon logout
+    if (!pathname.startsWith('/api/')) {
+      response.headers.set('Cache-Control', 'no-store, max-age=0, must-revalidate');
     }
     return applySecurityHeaders(response);
   } catch {

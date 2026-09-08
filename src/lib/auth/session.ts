@@ -6,6 +6,14 @@ const SECRET_KEY = new TextEncoder().encode(
   process.env.AUTH_SECRET || 'antigravity_super_secret_jwt_key_minimum_32_characters_long_for_security'
 );
 
+/**
+ * Dynamically resolves the session cookie name from AUTH_COOKIE_NAME environment variable,
+ * falling back to 'antigravity_session'. Supports staging environments (e.g. antigravity_session_staging).
+ */
+export function getSessionCookieName(): string {
+  return process.env.AUTH_COOKIE_NAME || 'antigravity_session';
+}
+
 export const COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'antigravity_session';
 const TOKEN_EXPIRY = process.env.AUTH_TOKEN_EXPIRATION || '7d';
 
@@ -40,7 +48,7 @@ export async function verifySessionToken(token: string): Promise<UserSession | n
 export async function setSessionCookie(token: string): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.set({
-    name: COOKIE_NAME,
+    name: getSessionCookieName(),
     value: token,
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -56,7 +64,7 @@ export async function setSessionCookie(token: string): Promise<void> {
 export async function clearSessionCookie(): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.set({
-    name: COOKIE_NAME,
+    name: getSessionCookieName(),
     value: '',
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -71,7 +79,7 @@ export async function clearSessionCookie(): Promise<void> {
  */
 export async function getSession(): Promise<UserSession | null> {
   const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value;
+  const token = cookieStore.get(getSessionCookieName())?.value;
   if (!token) return null;
   return verifySessionToken(token);
 }

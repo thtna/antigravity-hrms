@@ -19,8 +19,11 @@ import {
   ChevronRight,
   Building2,
   Briefcase,
+  LogOut,
+  Loader2,
   type LucideIcon,
 } from 'lucide-react';
+import { useLogout } from '@/lib/auth/use-logout';
 
 // ─── Nav items ────────────────────────────────────────────────────────────────
 
@@ -60,6 +63,7 @@ interface SidebarProps {
 export function Sidebar({ unreadCount = 0 }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { logout, loggingOut } = useLogout();
 
   const itemsWithBadge = NAV_ITEMS.map((item) =>
     item.href === '/notifications' ? { ...item, badge: unreadCount } : item
@@ -163,6 +167,31 @@ export function Sidebar({ unreadCount = 0 }: SidebarProps) {
           );
         })}
       </nav>
+
+      {/* Bottom User / Logout Section */}
+      <div className="border-t border-slate-800/60 p-2 mt-auto">
+        <button
+          type="button"
+          onClick={logout}
+          disabled={loggingOut}
+          title={collapsed ? 'Đăng xuất tài khoản' : undefined}
+          aria-label="Đăng xuất tài khoản"
+          className={cn(
+            'group flex items-center gap-3 w-full rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150',
+            'text-slate-400 hover:text-rose-300 hover:bg-rose-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 disabled:opacity-50',
+            collapsed && 'justify-center px-0'
+          )}
+        >
+          {loggingOut ? (
+            <Loader2 className="h-4.5 w-4.5 shrink-0 animate-spin text-rose-400" />
+          ) : (
+            <LogOut className="h-4.5 w-4.5 shrink-0 text-slate-500 group-hover:text-rose-400 transition-colors" />
+          )}
+          {!collapsed && (
+            <span className="truncate">{loggingOut ? 'Đang đăng xuất...' : 'Đăng Xuất'}</span>
+          )}
+        </button>
+      </div>
     </aside>
   );
 }
