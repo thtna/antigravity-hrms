@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/guard';
 import { DashboardService } from '@/lib/services/dashboard.service';
 import { handleApiError, ApiError } from '@/lib/errors';
 import { ApiResponse, RoleCode } from '@/types';
+import { prisma } from '@/lib/db/prisma';
 
 /**
  * GET /api/v1/dashboard
@@ -57,6 +58,23 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<an
       data = await DashboardService.getEmployeeDashboard(session);
     }
 
+    // Inspect live organization onboarding status dynamically from database
+    // Prevents stale JWT cookie from falsely displaying "chưa hoàn thành thiết lập"
+    let liveOnboardingStep = session.onboardingStep;
+    let liveNeedsOnboarding = Boolean(session.needsOnboarding);
+
+    if (session.organizationId && session.organizationId !== '__no_org__') {
+      const org = await prisma.organization.findUnique({
+        where: { id: session.organizationId },
+        select: { onboardingStep: true, onboardingSkipped: true },
+      });
+      if (org) {
+        liveOnboardingStep = org.onboardingStep;
+        const isOwner = session.tenantRole === 'OWNER';
+        liveNeedsOnboarding = isOwner && org.onboardingStep < 9 && !org.onboardingSkipped;
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -70,8 +88,8 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<an
           tenantRole: session.tenantRole,
           organizationId: session.organizationId,
           organizationName: session.organizationName,
-          onboardingStep: session.onboardingStep,
-          needsOnboarding: session.needsOnboarding,
+          onboardingStep: liveOnboardingStep,
+          needsOnboarding: liveNeedsOnboarding,
         },
         payload: data,
       },

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
+import { Prisma } from '@prisma/client';
 import { ApiError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
@@ -71,17 +72,28 @@ export class PayrollRuleService {
   }
 
   // ── 2. Create Rule ─────────────────────────────────────────────────────────
-  static async createRule(input: CreatePayrollRuleInput, session: UserSession) {
+  static async createRule(
+    input: CreatePayrollRuleInput,
+    session: UserSession,
+    options?: { tx?: Prisma.TransactionClient; allowOwnerOnboarding?: boolean }
+  ) {
     if (!session || !session.userId) {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
-    if (!isHrOrAdmin) {
+    const isOwnerAllowed = Boolean(
+      options?.allowOwnerOnboarding &&
+        (session.tenantRole === 'OWNER' || (session.roles as string[]).includes('owner') || (session as any).tenantRole === 'owner')
+    );
+
+    if (!isHrOrAdmin && !isOwnerAllowed) {
       throw ApiError.forbidden('Chỉ HR hoặc Quản trị viên mới có quyền tạo quy chế lương.');
     }
 
-    const existingCode = await prisma.payrollRule.findFirst({
+    const client = options?.tx || prisma;
+
+    const existingCode = await client.payrollRule.findFirst({
       where: {
         code: input.code,
         ...(session.organizationId ? { organizationId: session.organizationId } : {}),
@@ -91,11 +103,14 @@ export class PayrollRuleService {
       throw ApiError.conflict(`Mã quy chế lương "${input.code}" đã tồn tại trong hệ thống.`);
     }
 
-    return await prisma.$transaction(async (tx) => {
-      // If new rule is set as default, unset previous default rules
+    const executeWrites = async (tx: Prisma.TransactionClient) => {
+      // If new rule is set as default, unset previous default rules within this organization
       if (input.isDefault) {
         await tx.payrollRule.updateMany({
-          where: { isDefault: true },
+          where: {
+            isDefault: true,
+            ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+          },
           data: { isDefault: false },
         });
       }
@@ -127,6 +142,7 @@ export class PayrollRuleService {
           action: 'CREATE_PAYROLL_RULE',
           entity: 'PayrollRule',
           entityId: created.id,
+          organizationId: session.organizationId || null,
           newValues: {
             code: created.code,
             name: created.name,
@@ -139,6 +155,15 @@ export class PayrollRuleService {
       logger.info(`[PayrollRuleService] Rule ${created.code} created by ${session.email}`);
 
       return created;
+    };
+
+    if (options?.tx) {
+      return await executeWrites(options.tx);
+    }
+
+    return await prisma.$transaction(executeWrites, {
+      maxWait: 5000,
+      timeout: 10000,
     });
   }
 

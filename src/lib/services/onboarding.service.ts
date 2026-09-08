@@ -56,6 +56,78 @@ export interface OnboardingStatusResult {
   }>;
 }
 
+/**
+ * Deterministic canonical comparison for Step 8 Payroll Rule idempotency.
+ * Verifies exact match on normalized code, normalized name, standardWorkDays,
+ * and material generated configuration fields. Zero fuzzy matching.
+ */
+function isPayrollRuleMatching(
+  existingRule: {
+    code: string;
+    name: string;
+    salaryBasisConfig?: any;
+    overtimeConfig?: any;
+    insuranceConfig?: any;
+    taxConfig?: any;
+    deductionConfig?: any;
+    roundingConfig?: any;
+    [key: string]: any;
+  },
+  validated: {
+    ruleCode: string;
+    ruleName: string;
+    standardWorkDays: number;
+    useStatutoryVietnam: boolean;
+  }
+): boolean {
+  // 1. Normalized Code Match
+  if (existingRule.code.toUpperCase().trim() !== validated.ruleCode.toUpperCase().trim()) {
+    return false;
+  }
+
+  // 2. Normalized Name Match
+  if (existingRule.name.trim() !== validated.ruleName.trim()) {
+    return false;
+  }
+
+  // 3. Material Submitted Configuration: standardWorkDays
+  const existingWorkDays = (existingRule.salaryBasisConfig as any)?.standardWorkDays;
+  if (existingWorkDays !== undefined && Number(existingWorkDays) !== Number(validated.standardWorkDays)) {
+    return false;
+  }
+
+  // 4. Material Generated Configuration: Statutory Vietnam Labor Code Config
+  if (validated.useStatutoryVietnam) {
+    const sb = existingRule.salaryBasisConfig as any;
+    if (sb && sb.method !== VIETNAM_STATUTORY_RULE_2026.salaryBasis.method) return false;
+    if (
+      sb &&
+      sb.standardHoursPerDay !== undefined &&
+      Number(sb.standardHoursPerDay) !== Number(VIETNAM_STATUTORY_RULE_2026.salaryBasis.standardHoursPerDay)
+    ) {
+      return false;
+    }
+
+    const ot = existingRule.overtimeConfig as any;
+    if (ot && Number(ot.weekdayMultiplier) !== Number(VIETNAM_STATUTORY_RULE_2026.overtime.weekdayMultiplier)) return false;
+    if (ot && Number(ot.weekendMultiplier) !== Number(VIETNAM_STATUTORY_RULE_2026.overtime.weekendMultiplier)) return false;
+    if (ot && Number(ot.holidayMultiplier) !== Number(VIETNAM_STATUTORY_RULE_2026.overtime.holidayMultiplier)) return false;
+
+    const ins = existingRule.insuranceConfig as any;
+    if (ins && ins.method !== VIETNAM_STATUTORY_RULE_2026.insurance.method) return false;
+    if (ins && Number(ins.employeeSocialRate) !== Number(VIETNAM_STATUTORY_RULE_2026.insurance.employeeSocialRate)) return false;
+    if (ins && Number(ins.employeeHealthRate) !== Number(VIETNAM_STATUTORY_RULE_2026.insurance.employeeHealthRate)) return false;
+    if (ins && Number(ins.employeeUnemploymentRate) !== Number(VIETNAM_STATUTORY_RULE_2026.insurance.employeeUnemploymentRate)) return false;
+
+    const tax = existingRule.taxConfig as any;
+    if (tax && tax.model !== VIETNAM_STATUTORY_RULE_2026.tax.model) return false;
+    if (tax && Number(tax.personalRelief) !== Number(VIETNAM_STATUTORY_RULE_2026.tax.personalRelief)) return false;
+    if (tax && Number(tax.dependentRelief) !== Number(VIETNAM_STATUTORY_RULE_2026.tax.dependentRelief)) return false;
+  }
+
+  return true;
+}
+
 export class OnboardingService {
   /**
    * Helper to verify caller is OWNER or ADMIN of the current tenant
@@ -576,33 +648,152 @@ export class OnboardingService {
       case 8: {
         // Payroll Settings
         const validated = Step8PayrollSchema.parse(data);
-
-        result = await PayrollRuleService.createRule(
-          {
-            code: validated.ruleCode.toUpperCase().trim(),
-            name: validated.ruleName.trim(),
-            description: 'Quy chế lương thiết lập trong quá trình khởi tạo tổ chức.',
-            isDefault: true,
-            salaryBasisConfig: VIETNAM_STATUTORY_RULE_2026.salaryBasis as any,
-            overtimeConfig: VIETNAM_STATUTORY_RULE_2026.overtime as any,
-            insuranceConfig: VIETNAM_STATUTORY_RULE_2026.insurance as any,
-            taxConfig: VIETNAM_STATUTORY_RULE_2026.tax as any,
-            deductionConfig: VIETNAM_STATUTORY_RULE_2026.deduction as any,
-            roundingConfig: VIETNAM_STATUTORY_RULE_2026.rounding as any,
-            effectiveFrom: '2026-01-01',
-          },
-          session
-        );
-
-        // Mark onboarding complete (step 9)
+        const normalizedRuleCode = validated.ruleCode.toUpperCase().trim();
         nextStep = 9;
-        await prisma.organization.update({
-          where: { id: orgId },
-          data: {
-            onboardingStep: 9,
-            onboardingCompletedAt: new Date(),
-          },
+
+        // 1. Tenant-scoped idempotency pre-check
+        const existingOrgRule = await prisma.payrollRule.findFirst({
+          where: { organizationId: orgId, code: normalizedRuleCode },
         });
+
+        if (existingOrgRule) {
+          const isMatch = isPayrollRuleMatching(existingOrgRule, validated);
+          if (isMatch) {
+            // Verified idempotent retry / recovery!
+            // Preserve existing completion state if already >= 9 or completedAt exists
+            const freshOrg = await prisma.organization.findUnique({
+              where: { id: orgId },
+              select: { onboardingStep: true, onboardingCompletedAt: true },
+            });
+
+            if (freshOrg) {
+              const needsStepUpdate = freshOrg.onboardingStep < 9;
+              const needsTimestampUpdate = !freshOrg.onboardingCompletedAt;
+
+              if (needsStepUpdate || needsTimestampUpdate) {
+                await prisma.organization.update({
+                  where: { id: orgId },
+                  data: {
+                    ...(needsStepUpdate ? { onboardingStep: 9 } : {}),
+                    ...(needsTimestampUpdate ? { onboardingCompletedAt: new Date() } : {}),
+                  },
+                });
+              }
+            }
+
+            result = existingOrgRule;
+            break;
+          }
+
+          // Same tenant, same code, but materially different configuration/identity
+          throw ApiError.conflict(
+            `Mã quy chế lương "${normalizedRuleCode}" đã tồn tại trong tổ chức với cấu hình khác.`
+          );
+        }
+
+        // 2. Atomic transaction: create rule + complete organization in ONE transaction
+        const payrollPayload = {
+          code: normalizedRuleCode,
+          name: validated.ruleName.trim(),
+          description: 'Quy chế lương thiết lập trong quá trình khởi tạo tổ chức.',
+          isDefault: true,
+          salaryBasisConfig: {
+            ...VIETNAM_STATUTORY_RULE_2026.salaryBasis,
+            standardWorkDays: validated.standardWorkDays,
+          } as any,
+          overtimeConfig: VIETNAM_STATUTORY_RULE_2026.overtime as any,
+          insuranceConfig: VIETNAM_STATUTORY_RULE_2026.insurance as any,
+          taxConfig: VIETNAM_STATUTORY_RULE_2026.tax as any,
+          deductionConfig: VIETNAM_STATUTORY_RULE_2026.deduction as any,
+          roundingConfig: VIETNAM_STATUTORY_RULE_2026.rounding as any,
+          effectiveFrom: '2026-01-01',
+        };
+
+        try {
+          result = await prisma.$transaction(
+            async (tx) => {
+              const createdRule = await PayrollRuleService.createRule(payrollPayload, session, {
+                tx,
+                allowOwnerOnboarding: true,
+              });
+
+              const freshOrg = await tx.organization.findUnique({
+                where: { id: orgId },
+                select: { onboardingStep: true, onboardingCompletedAt: true },
+              });
+
+              if (freshOrg) {
+                const needsStepUpdate = freshOrg.onboardingStep < 9;
+                const needsTimestampUpdate = !freshOrg.onboardingCompletedAt;
+
+                if (needsStepUpdate || needsTimestampUpdate) {
+                  await tx.organization.update({
+                    where: { id: orgId },
+                    data: {
+                      ...(needsStepUpdate ? { onboardingStep: 9 } : {}),
+                      ...(needsTimestampUpdate ? { onboardingCompletedAt: new Date() } : {}),
+                    },
+                  });
+                }
+              }
+
+              return createdRule;
+            },
+            {
+              maxWait: 5000,
+              timeout: 10000,
+            }
+          );
+        } catch (err: any) {
+          const isP2002 =
+            err?.code === 'P2002' ||
+            err?.message?.includes('P2002') ||
+            err?.message?.includes('Unique constraint failed') ||
+            (err?.statusCode === 409 && err?.message?.includes('đã tồn tại'));
+
+          if (isP2002) {
+            // Concurrent race condition: another request just inserted the rule
+            const racingRule = await prisma.payrollRule.findFirst({
+              where: { organizationId: orgId, code: normalizedRuleCode },
+            });
+
+            if (racingRule && isPayrollRuleMatching(racingRule, validated)) {
+              const freshOrg = await prisma.organization.findUnique({
+                where: { id: orgId },
+                select: { onboardingStep: true, onboardingCompletedAt: true },
+              });
+
+              if (freshOrg) {
+                const needsStepUpdate = freshOrg.onboardingStep < 9;
+                const needsTimestampUpdate = !freshOrg.onboardingCompletedAt;
+
+                if (needsStepUpdate || needsTimestampUpdate) {
+                  await prisma.organization.update({
+                    where: { id: orgId },
+                    data: {
+                      ...(needsStepUpdate ? { onboardingStep: 9 } : {}),
+                      ...(needsTimestampUpdate ? { onboardingCompletedAt: new Date() } : {}),
+                    },
+                  });
+                }
+              }
+
+              result = racingRule;
+              break;
+            }
+
+            if (racingRule) {
+              throw ApiError.conflict(
+                `Mã quy chế lương "${normalizedRuleCode}" đã tồn tại trong tổ chức với cấu hình khác.`
+              );
+            }
+
+            throw ApiError.conflict('Xung đột dữ liệu quy chế lương trong quá trình xử lý đồng thời.');
+          }
+
+          throw err;
+        }
+
         break;
       }
 

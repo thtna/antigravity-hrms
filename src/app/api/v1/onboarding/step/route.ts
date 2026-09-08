@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/guard';
 import { OnboardingService } from '@/lib/services/onboarding.service';
 import { handleApiError, ApiError } from '@/lib/errors';
-import { ApiResponse } from '@/types';
+import { ApiResponse, UserSession } from '@/types';
+import { signSessionToken, setSessionCookie } from '@/lib/auth/session';
 
 export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<any>>> {
   try {
@@ -15,6 +16,21 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<a
     }
 
     const result = await OnboardingService.saveStep(session, step, body.data || {});
+
+    // Synchronize session cookie with latest onboarding progress
+    try {
+      const updatedStep = Math.max(session.onboardingStep ?? 0, result.nextStep);
+      const isCompleted = updatedStep >= 9 || Boolean(result.status?.isCompleted);
+      const refreshedSession: UserSession = {
+        ...session,
+        onboardingStep: updatedStep,
+        needsOnboarding: !isCompleted,
+      };
+      const token = await signSessionToken(refreshedSession);
+      await setSessionCookie(token);
+    } catch {
+      // Cookie update failure in detached context should not fail API response
+    }
 
     return NextResponse.json({
       success: true,
