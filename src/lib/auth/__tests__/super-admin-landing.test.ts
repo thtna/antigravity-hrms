@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { middleware } from '@/middleware';
+import { middleware, config } from '@/middleware';
 import { signSessionToken } from '@/lib/auth/session';
 import {
   SUPER_ADMIN_LANDING_PATH,
@@ -114,6 +114,17 @@ describe('Phase 2 — SUPER_ADMIN landing redirects', () => {
   });
 
   describe('middleware defense-in-depth', () => {
+    it('matches and redirects unauthenticated /super-admin page requests to login', async () => {
+      expect(config.matcher).toContain('/super-admin/:path*');
+
+      const res = await middleware(new NextRequest('http://localhost:3000/super-admin'));
+
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe(
+        'http://localhost:3000/login?redirect=%2Fsuper-admin'
+      );
+    });
+
     it('redirects authenticated SUPER_ADMIN from /dashboard to /super-admin', async () => {
       const res = await requestWithSession(
         '/dashboard',

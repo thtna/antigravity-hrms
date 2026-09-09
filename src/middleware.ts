@@ -339,6 +339,7 @@ export const config = {
     '/admin/:path*',
     '/hr/:path*',
     '/manager/:path*',
+    '/super-admin/:path*',
     '/portal/:path*',
     '/api/v1/:path*',
   ],
