@@ -27,14 +27,24 @@ import {
 export class LocalStorageProvider implements StorageProvider {
   public readonly providerName = 'local';
   private rootDir: string;
-  private signSecret: string;
+  private signSecret?: string;
 
-  constructor(rootDir?: string) {
+  constructor(rootDir?: string, signSecret?: string) {
     this.rootDir = rootDir || process.env.STORAGE_PATH || path.join(process.cwd(), 'storage');
-    this.signSecret =
-      process.env.AUTH_SECRET ||
-      process.env.JWT_SECRET ||
-      'antigravity_storage_local_signing_secret_dev_32chars';
+    this.signSecret = signSecret;
+  }
+
+  private resolveSignSecret(): string {
+    if (this.signSecret && this.signSecret.trim() !== '') {
+      return this.signSecret;
+    }
+    const secret = process.env.AUTH_SECRET?.trim() || process.env.JWT_SECRET?.trim();
+    if (!secret) {
+      throw ApiError.internal(
+        'Cấu hình bảo mật lỗi: Yêu cầu thiết lập AUTH_SECRET để ký/xác thực URL tài liệu cục bộ.'
+      );
+    }
+    return secret;
   }
 
   private resolveBucketPath(bucket: StorageBucket): string {
@@ -128,7 +138,8 @@ export class LocalStorageProvider implements StorageProvider {
     const exp = Date.now() + expiresInSeconds * 1000;
 
     // Create HMAC-SHA256 signature
-    const hmac = crypto.createHmac('sha256', this.signSecret);
+    const secret = this.resolveSignSecret();
+    const hmac = crypto.createHmac('sha256', secret);
     hmac.update(`${bucket}:${key}:${exp}`);
     const token = hmac.digest('hex');
 
@@ -165,10 +176,18 @@ export class LocalStorageProvider implements StorageProvider {
     if (Date.now() > exp) {
       return false; // Expired
     }
-    const hmac = crypto.createHmac('sha256', this.signSecret);
-    hmac.update(`${bucket}:${key}:${exp}`);
-    const expected = hmac.digest('hex');
+    try {
+      const secret = this.resolveSignSecret();
+      const hmac = crypto.createHmac('sha256', secret);
+      hmac.update(`${bucket}:${key}:${exp}`);
+      const expected = hmac.digest('hex');
 
-    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+      const tokenBuf = Buffer.from(token);
+      const expectedBuf = Buffer.from(expected);
+      if (tokenBuf.length !== expectedBuf.length) return false;
+      return crypto.timingSafeEqual(tokenBuf, expectedBuf);
+    } catch {
+      return false;
+    }
   }
 }

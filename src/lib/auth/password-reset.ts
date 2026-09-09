@@ -24,14 +24,34 @@ export interface UserResetContext {
 }
 
 function getSignSecret(user: UserResetContext): Buffer {
-  const authSecret =
-    process.env.AUTH_SECRET ||
-    process.env.JWT_SECRET ||
-    'antigravity_dev_auth_secret_minimum_32_chars_fallback';
+  const isProduction =
+    process.env.APP_ENV === 'production' || process.env.NODE_ENV === 'production';
+  const authSecret = process.env.AUTH_SECRET?.trim();
+
+  let secretToUse = authSecret;
+
+  if (isProduction) {
+    if (!secretToUse) {
+      throw ApiError.internal(
+        'Cấu hình bảo mật lỗi: AUTH_SECRET bắt buộc phải được thiết lập trong môi trường Production.'
+      );
+    }
+  } else {
+    // Non-production fallback only outside Production for backward compatibility
+    if (!secretToUse) {
+      secretToUse = process.env.JWT_SECRET?.trim();
+    }
+    if (!secretToUse) {
+      throw ApiError.internal(
+        'Cấu hình bảo mật lỗi: Yêu cầu thiết lập AUTH_SECRET để ký/xác thực mã khôi phục mật khẩu.'
+      );
+    }
+  }
+
   // Derive a key uniquely coupled to this user's current password hash
   return crypto
     .createHash('sha256')
-    .update(`${authSecret}:${user.id}:${user.passwordHash}`)
+    .update(`${secretToUse}:${user.id}:${user.passwordHash}`)
     .digest();
 }
 

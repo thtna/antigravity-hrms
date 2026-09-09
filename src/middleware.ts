@@ -1,10 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
 import { UserSession } from './types';
+import { getAuthSecretKey } from './lib/auth/auth-secret';
 
-const SECRET_KEY = new TextEncoder().encode(
-  process.env.AUTH_SECRET || 'antigravity_super_secret_jwt_key_minimum_32_characters_long_for_security'
-);
 function getSessionCookieName(): string {
   return process.env.AUTH_COOKIE_NAME || 'antigravity_session';
 }
@@ -141,8 +139,29 @@ export async function middleware(request: NextRequest) {
     return applySecurityHeaders(NextResponse.redirect(loginUrl));
   }
 
+  const secretKey = getAuthSecretKey();
+  if (!secretKey) {
+    if (pathname.startsWith('/api/')) {
+      return applySecurityHeaders(
+        NextResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'UNAUTHORIZED',
+              message: 'Cấu hình bảo mật hệ thống chưa hoàn tất hoặc phiên không hợp lệ.',
+            },
+          },
+          { status: 401 }
+        )
+      );
+    }
+    const loginUrl = new URL('/login', request.url);
+    loginUrl.searchParams.set('redirect', pathname);
+    return applySecurityHeaders(NextResponse.redirect(loginUrl));
+  }
+
   try {
-    const { payload } = await jwtVerify(token, SECRET_KEY, {
+    const { payload } = await jwtVerify(token, secretKey, {
       algorithms: ['HS256'],
     });
     const session = payload as unknown as UserSession;

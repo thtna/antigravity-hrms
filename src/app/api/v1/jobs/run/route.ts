@@ -21,8 +21,9 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
   try {
     // 1. Authorize via CRON_SECRET or Admin Session
     const authHeader = request.headers.get('authorization') || '';
-    const cronSecret = process.env.CRON_SECRET || 'antigravity_cron_internal_2026';
-    const isCronAuthorized = authHeader === `Bearer ${cronSecret}`;
+    const cronSecret = process.env.CRON_SECRET;
+    const isCronAuthorized =
+      Boolean(cronSecret) && authHeader === `Bearer ${cronSecret}`;
 
     if (!isCronAuthorized) {
       const session = await getSession();

@@ -21,7 +21,45 @@ import {
   QrTokenQueryParams,
 } from '@/lib/validations/qr-attendance';
 
-const QR_SECRET = process.env.QR_SECRET || process.env.JWT_SECRET || 'antigravity-secure-qr-secret-key-2026';
+/**
+ * Resolves the cryptographic secret used for signing and verifying dynamic QR tokens.
+ *
+ * Fail-Closed Security Requirements:
+ * - Production (APP_ENV === 'production' or NODE_ENV === 'production'):
+ *   QR_SECRET MUST be explicitly configured. If missing or empty, fail closed (throw configuration error).
+ *   Silent fallback to JWT_SECRET or hardcoded secret is strictly forbidden.
+ * - Non-Production (dev/test):
+ *   Prefers explicit QR_SECRET. If missing, fallback to AUTH_SECRET is permitted ONLY outside Production.
+ *   If neither is configured, fail closed. No hardcoded secret is permitted.
+ */
+export function getQrSecret(): string {
+  const isProduction =
+    process.env.APP_ENV === 'production' || process.env.NODE_ENV === 'production';
+  const qrSecret = process.env.QR_SECRET?.trim();
+
+  if (isProduction) {
+    if (!qrSecret) {
+      throw ApiError.internal(
+        'Cấu hình bảo mật lỗi: QR_SECRET bắt buộc phải được thiết lập trong môi trường Production.'
+      );
+    }
+    return qrSecret;
+  }
+
+  // Non-production fallback logic:
+  if (qrSecret) {
+    return qrSecret;
+  }
+
+  const authSecret = process.env.AUTH_SECRET?.trim();
+  if (authSecret) {
+    return authSecret;
+  }
+
+  throw ApiError.internal(
+    'Cấu hình bảo mật lỗi: Yêu cầu thiết lập QR_SECRET (hoặc AUTH_SECRET trong môi trường phát triển).'
+  );
+}
 
 export interface QrTokenPayload {
   v: string;         // Protocol version
@@ -34,11 +72,19 @@ export interface QrTokenPayload {
 
 export class QrAttendanceService {
   /**
+   * Centralized secret resolver for QR attendance.
+   */
+  static getQrSecret(): string {
+    return getQrSecret();
+  }
+
+  /**
    * Cryptographically sign QR parameters using HMAC-SHA256.
    */
   static signToken(code: string, tokenType: string, exp: number): string {
+    const secret = this.getQrSecret();
     return crypto
-      .createHmac('sha256', QR_SECRET)
+      .createHmac('sha256', secret)
       .update(`${code}:${tokenType}:${exp}`)
       .digest('hex');
   }

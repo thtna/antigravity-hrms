@@ -1,10 +1,7 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
 import { UserSession } from '@/types';
-
-const SECRET_KEY = new TextEncoder().encode(
-  process.env.AUTH_SECRET || 'antigravity_super_secret_jwt_key_minimum_32_characters_long_for_security'
-);
+import { getAuthSecretKey } from './auth-secret';
 
 /**
  * Dynamically resolves the session cookie name from AUTH_COOKIE_NAME environment variable,
@@ -18,22 +15,32 @@ export const COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'antigravity_session'
 const TOKEN_EXPIRY = process.env.AUTH_TOKEN_EXPIRATION || '7d';
 
 /**
- * Signs a JWT session token with HS256
+ * Signs a JWT session token with HS256 (fails closed if AUTH_SECRET is not configured)
  */
 export async function signSessionToken(payload: UserSession): Promise<string> {
+  const secretKey = getAuthSecretKey();
+  if (!secretKey) {
+    throw new Error(
+      'Cấu hình bảo mật lỗi: AUTH_SECRET bắt buộc phải được thiết lập để ký phiên đăng nhập (Fail-Closed).'
+    );
+  }
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(TOKEN_EXPIRY)
-    .sign(SECRET_KEY);
+    .sign(secretKey);
 }
 
 /**
- * Verifies a JWT session token and returns the typed UserSession or null
+ * Verifies a JWT session token and returns the typed UserSession or null (fails closed if secret missing)
  */
 export async function verifySessionToken(token: string): Promise<UserSession | null> {
   try {
-    const { payload } = await jwtVerify(token, SECRET_KEY, {
+    const secretKey = getAuthSecretKey();
+    if (!secretKey) {
+      return null;
+    }
+    const { payload } = await jwtVerify(token, secretKey, {
       algorithms: ['HS256'],
     });
     return payload as unknown as UserSession;
