@@ -5,6 +5,7 @@ import { POST as registerHandler } from '@/app/api/v1/auth/register/route';
 import { GET as meHandler } from '@/app/api/v1/auth/me/route';
 import { hashPassword } from '@/lib/auth/password';
 import { prisma } from '@/lib/db/prisma';
+import { resetRateLimit } from '@/lib/security/rate-limit';
 
 // Mock dependencies
 vi.mock('@/lib/db/prisma', () => {
@@ -82,6 +83,7 @@ describe('PHASE 2 — AUTHENTICATION API ROUTE TESTS', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    resetRateLimit('login:127.0.0.1');
     hashedPassword = await hashPassword(testPassword);
   });
 
@@ -106,6 +108,20 @@ describe('PHASE 2 — AUTHENTICATION API ROUTE TESTS', () => {
           role: {
             code: 'admin',
             rolePermissions: [],
+          },
+        },
+      ],
+      organizationMembers: [
+        {
+          id: 'member-001',
+          organizationId: 'org-test-01',
+          role: 'ADMIN',
+          isActive: true,
+          isDefault: true,
+          organization: {
+            id: 'org-test-01',
+            name: 'Test Org',
+            status: 'ACTIVE',
           },
         },
       ],
@@ -360,5 +376,152 @@ describe('PHASE 2 — AUTHENTICATION API ROUTE TESTS', () => {
     expect(res.status).toBe(201);
     expect(json.success).toBe(true);
     expect(json.data.status).toBe('PENDING');
+  });
+
+  // --------------------------------------------------------------------------
+  // 9. SUPER_ADMIN Login Guard: Zero Organization Memberships
+  // --------------------------------------------------------------------------
+  it('POST /api/v1/auth/login - should allow SUPER_ADMIN with zero organization memberships and set organizationId = null', async () => {
+    const mockSuperAdmin = {
+      id: 'usr-superadmin-001',
+      email: 'root@antigravity.internal',
+      passwordHash: hashedPassword,
+      isActive: true,
+      employee: null,
+      userRoles: [{ role: { code: 'super_admin', rolePermissions: [] } }],
+      organizationMembers: [], // ZERO memberships
+    };
+
+    (prisma.user.findUnique as unknown as Mock).mockResolvedValue(mockSuperAdmin);
+
+    const req = new NextRequest('http://localhost:3000/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'root@antigravity.internal',
+        password: testPassword,
+      }),
+    });
+
+    const res = await loginHandler(req);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.data.roles).toContain('super_admin');
+    expect(json.data.organizationId).toBeNull();
+    // Verify audit log recorded null organizationId
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          actorId: 'usr-superadmin-001',
+          action: 'LOGIN',
+          organizationId: null,
+        }),
+      })
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // 10. SUPER_ADMIN Invariant Guard: With Active Membership MUST STILL BE NULL
+  // --------------------------------------------------------------------------
+  it('POST /api/v1/auth/login - should enforce organizationId = null for SUPER_ADMIN even if active membership exists', async () => {
+    const mockSuperAdminWithMembership = {
+      id: 'usr-superadmin-002',
+      email: 'superadmin.withorg@antigravity.internal',
+      passwordHash: hashedPassword,
+      isActive: true,
+      employee: null,
+      userRoles: [{ role: { code: 'super_admin', rolePermissions: [] } }],
+      organizationMembers: [
+        {
+          id: 'member-accidental-001',
+          organizationId: 'org-accidental-999',
+          role: 'ADMIN',
+          isActive: true,
+          isDefault: true,
+          organization: {
+            id: 'org-accidental-999',
+            name: 'Accidental Tenant',
+            slug: 'accidental-tenant',
+            status: 'ACTIVE',
+          },
+        },
+      ],
+    };
+
+    (prisma.user.findUnique as unknown as Mock).mockResolvedValue(mockSuperAdminWithMembership);
+
+    const req = new NextRequest('http://localhost:3000/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'superadmin.withorg@antigravity.internal',
+        password: testPassword,
+      }),
+    });
+
+    const res = await loginHandler(req);
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.data.roles).toContain('super_admin');
+    // CRITICAL INVARIANT: organizationId MUST remain null
+    expect(json.data.organizationId).toBeNull();
+    expect(json.data.tenantRole).toBeUndefined();
+    // Verify audit log also explicitly received organizationId: null
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          actorId: 'usr-superadmin-002',
+          action: 'LOGIN',
+          organizationId: null,
+        }),
+      })
+    );
+  });
+
+  // --------------------------------------------------------------------------
+  // 11. Tenant User Guard: Rejection when No Active Membership Exists
+  // --------------------------------------------------------------------------
+  it('POST /api/v1/auth/login - should strictly reject tenant user without active organization membership with 403', async () => {
+    const mockTenantUserWithoutActiveOrg = {
+      id: 'usr-no-active-org',
+      email: 'no.org@company.vn',
+      passwordHash: hashedPassword,
+      isActive: true,
+      employee: null,
+      userRoles: [{ role: { code: 'employee', rolePermissions: [] } }],
+      organizationMembers: [
+        {
+          id: 'member-inactive-001',
+          organizationId: 'org-inactive',
+          role: 'EMPLOYEE',
+          isActive: false, // Inactive!
+          isDefault: true,
+          organization: {
+            id: 'org-inactive',
+            status: 'ACTIVE',
+          },
+        },
+      ],
+    };
+
+    (prisma.user.findUnique as unknown as Mock).mockResolvedValue(mockTenantUserWithoutActiveOrg);
+
+    const req = new NextRequest('http://localhost:3000/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: 'no.org@company.vn',
+        password: testPassword,
+      }),
+    });
+
+    const res = await loginHandler(req);
+    const json = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(json.success).toBe(false);
+    expect(json.error.code).toBe('FORBIDDEN');
+    expect(json.error.message).toContain('Tài khoản của bạn chưa thuộc tổ chức nào');
   });
 });

@@ -640,9 +640,12 @@ vi.mock('@/lib/db/prisma', () => {
 // ─── Test Suite Execution ───────────────────────────────────────────────────
 
 describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => {
+  const testOrgId = 'org-tanphong-enterprise';
+
   // Session Definitions for Actors
   const adminSession: UserSession = {
     userId: 'usr-ceo',
+    organizationId: testOrgId,
     email: 'admin@antigravity.internal',
     roles: ['admin'],
     fullName: 'Tổng Giám Đốc',
@@ -652,6 +655,7 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
 
   const hrSession: UserSession = {
     userId: 'usr-hr-mgr',
+    organizationId: testOrgId,
     email: 'hr@antigravity.internal',
     roles: ['hr'],
     fullName: 'Trưởng Phòng Nhân Sự',
@@ -661,6 +665,7 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
 
   const techLeadSession: UserSession = {
     userId: 'usr-tech-lead',
+    organizationId: testOrgId,
     email: 'manager.tech@antigravity.internal',
     roles: ['manager'],
     fullName: 'Trưởng Nhóm Tech',
@@ -670,6 +675,7 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
 
   const devAnSession: UserSession = {
     userId: 'usr-dev-an',
+    organizationId: testOrgId,
     email: 'dev.an@antigravity.internal',
     roles: ['employee'],
     fullName: 'Phạm Văn An',
@@ -679,6 +685,7 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
 
   const nightOpsSession: UserSession = {
     userId: 'usr-ops-huy',
+    organizationId: testOrgId,
     email: 'ops.huy@antigravity.internal',
     roles: ['employee'],
     fullName: 'Bùi Quang Huy',
@@ -688,6 +695,7 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
 
   const hrCbSession: UserSession = {
     userId: 'usr-hr-cb',
+    organizationId: testOrgId,
     email: 'hr.anh@antigravity.internal',
     roles: ['employee'],
     fullName: 'Hoàng Ngọc Ánh',
@@ -1266,6 +1274,7 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
 
     state.payrollPeriods.set(periodId, {
       id: periodId,
+      organizationId: testOrgId,
       code: 'PAY-2026-09',
       name: 'Bảng Lương Tháng 09/2026',
       startDate: new Date('2026-09-01'),
@@ -1274,6 +1283,7 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
 
     state.payrolls.set(payrollId, {
       id: payrollId,
+      organizationId: testOrgId,
       periodId,
       employeeId: devAnEmpId,
       contractSalary: 32000000,
@@ -1306,6 +1316,7 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
     // 2. Another employee attempts to view Dev An's payslip -> STRICTLY BLOCKED WITH 403
     const attackerSession: UserSession = {
       userId: 'usr-attacker-emp-0005',
+      organizationId: testOrgId,
       email: 'attacker@antigravity.internal',
       roles: ['employee'],
       fullName: 'Attacker Staff',

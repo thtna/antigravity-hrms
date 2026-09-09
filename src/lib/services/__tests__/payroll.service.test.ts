@@ -57,6 +57,7 @@ import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
 const hrSession: UserSession = {
   userId: 'usr-hr',
   employeeId: 'emp-hr',
+  organizationId: 'org-test-payroll',
   roles: ['hr'],
   email: 'hr@antigravity.test',
   fullName: 'HR Specialist',
@@ -67,6 +68,7 @@ const hrSession: UserSession = {
 const employeeSession: UserSession = {
   userId: 'usr-emp',
   employeeId: 'emp-01',
+  organizationId: 'org-test-payroll',
   roles: ['employee'],
   email: 'emp@antigravity.test',
   fullName: 'Regular Employee',
@@ -88,11 +90,13 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
       mockPrisma.payrollPeriod.findUnique.mockResolvedValue(null);
       mockPrisma.payrollRule.findFirst.mockResolvedValue({
         id: 'rule-default-id',
+        organizationId: 'org-test-payroll',
         code: 'VN_STATUTORY_2026',
         name: 'Luật Lao Động VN 2026',
       });
       mockPrisma.payrollPeriod.create.mockResolvedValue({
         id: 'period-new-id',
+        organizationId: 'org-test-payroll',
         code: 'PR-2026-09',
         name: 'Kỳ Lương Tháng 09/2026',
         startDate: new Date('2026-09-01'),
@@ -140,6 +144,7 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
       // Setup Period
       mockPrisma.payrollPeriod.findUnique.mockResolvedValue({
         id: 'period-01',
+        organizationId: 'org-test-payroll',
         code: 'PR-2026-09',
         name: 'Kỳ Lương Tháng 09/2026',
         startDate: new Date('2026-09-01'),
@@ -148,6 +153,7 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
         status: 'DRAFT',
         payrollRule: {
           id: 'rule-01',
+          organizationId: 'org-test-payroll',
           code: 'VN_STATUTORY_2026',
           name: 'Quy Chế Tiền Lương 2026',
           salaryBasisConfig: VIETNAM_STATUTORY_RULE_2026.salaryBasis,
@@ -163,6 +169,7 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
       mockPrisma.employee.findMany.mockResolvedValue([
         {
           id: 'emp-01',
+          organizationId: 'org-test-payroll',
           employeeCode: 'EMP-001',
           firstName: 'Văn A',
           lastName: 'Nguyễn',
@@ -264,6 +271,7 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
     it('rejects calculation if period is already CLOSED', async () => {
       mockPrisma.payrollPeriod.findUnique.mockResolvedValue({
         id: 'period-closed',
+        organizationId: 'org-test-payroll',
         code: 'PR-2026-08',
         status: 'CLOSED',
       });
@@ -280,19 +288,23 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
   // ── 3. Get Payslip Detail ──────────────────────────────────────────────────
   describe('3. getPayslipDetail', () => {
     it('returns payslip with line items and enforces RBAC', async () => {
+      mockPrisma.employee.findUnique.mockResolvedValue({ id: 'emp-01', organizationId: 'org-test-payroll' });
       mockPrisma.payroll.findUnique.mockResolvedValue({
         id: 'slip-01',
+        organizationId: 'org-test-payroll',
         periodId: 'period-01',
         employeeId: 'emp-01',
         contractSalary: 20000000,
         netSalary: 17500000,
         employee: {
           id: 'emp-01',
+          organizationId: 'org-test-payroll',
           userId: 'usr-emp',
           employeeCode: 'EMP-001',
         },
         period: {
           id: 'period-01',
+          organizationId: 'org-test-payroll',
           code: 'PR-2026-09',
         },
         details: [
@@ -310,6 +322,7 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
       const otherEmployeeSession: UserSession = {
         userId: 'usr-other',
         employeeId: 'emp-other',
+        organizationId: 'org-test-payroll',
         roles: ['employee'],
         email: 'other@antigravity.test',
         fullName: 'Other Emp',
@@ -328,6 +341,7 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
     it('closes payroll period and records audit log', async () => {
       mockPrisma.payrollPeriod.findUnique.mockResolvedValue({
         id: 'period-01',
+        organizationId: 'org-test-payroll',
         status: 'CALCULATED',
       });
       mockPrisma.payrollPeriod.update.mockResolvedValue({

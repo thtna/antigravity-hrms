@@ -76,9 +76,14 @@ export class PayrollService {
       throw ApiError.forbidden('Chỉ Nhân sự hoặc Quản trị viên mới có quyền tạo kỳ tính lương.');
     }
 
+    const targetOrgId = session.organizationId;
+    if (!targetOrgId) {
+      throw ApiError.badRequest('Yêu cầu context tổ chức để tạo kỳ tính lương.');
+    }
+
     // Check code uniqueness scoped to this organization
     const existing = await prisma.payrollPeriod.findFirst({
-      where: { code: input.code, organizationId: session.organizationId },
+      where: { code: input.code, organizationId: targetOrgId },
     });
     if (existing) {
       throw ApiError.conflict(`Mã kỳ tính lương "${input.code}" đã tồn tại trong tổ chức.`);
@@ -88,10 +93,18 @@ export class PayrollService {
     let payrollRuleId = input.payrollRuleId;
     if (!payrollRuleId) {
       const defaultRule = await prisma.payrollRule.findFirst({
-        where: { isDefault: true, isActive: true },
+        where: { isDefault: true, isActive: true, organizationId: targetOrgId },
       });
       if (defaultRule) {
         payrollRuleId = defaultRule.id;
+      }
+    } else {
+      const rule = await prisma.payrollRule.findUnique({
+        where: { id: payrollRuleId },
+        select: { id: true, organizationId: true },
+      });
+      if (!rule || rule.organizationId !== targetOrgId) {
+        throw ApiError.badRequest('Quy tắc tính lương không tồn tại hoặc không thuộc tổ chức.');
       }
     }
 
@@ -104,7 +117,7 @@ export class PayrollService {
         standardWorkDays: input.standardWorkDays,
         payrollRuleId,
         status: 'DRAFT',
-        organizationId: session.organizationId!, // PHASE 5: tenant binding
+        organizationId: targetOrgId,
       },
       include: {
         payrollRule: {
@@ -119,6 +132,7 @@ export class PayrollService {
         action: 'CREATE_PAYROLL_PERIOD',
         entity: 'PayrollPeriod',
         entityId: period.id,
+        organizationId: targetOrgId,
         newValues: {
           code: period.code,
           name: period.name,
@@ -199,8 +213,13 @@ export class PayrollService {
       include: { payrollRule: true },
     });
 
-    if (!period || (session?.organizationId && (period as any).organizationId && (period as any).organizationId !== session.organizationId)) {
+    if (!period || (session?.organizationId && period.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
+    }
+
+    const targetOrgId = period.organizationId;
+    if (!targetOrgId) {
+      throw ApiError.badRequest('Kỳ tính lương không có thông tin tổ chức hợp lệ.');
     }
 
     // Enforce Immutability Guard: APPROVED, PAID, or CLOSED periods cannot be edited directly
@@ -231,9 +250,9 @@ export class PayrollService {
     const endRange = period.endDate;
     const standardWorkDays = period.standardWorkDays || 22;
 
-    // 1. Fetch eligible employees (strictly scoped to current tenant)
+    // 1. Fetch eligible employees (strictly scoped to target tenant)
     const employeeWhere: any = {
-      organizationId: session.organizationId ?? '__no_org__',
+      organizationId: targetOrgId,
       hireDate: { lte: endRange },
       OR: [
         { deletedAt: null },
@@ -257,6 +276,7 @@ export class PayrollService {
       where: employeeWhere,
       select: {
         id: true,
+        organizationId: true,
         employeeCode: true,
         firstName: true,
         lastName: true,
@@ -362,6 +382,10 @@ export class PayrollService {
     }
 
     for (const emp of employees) {
+      if (emp.organizationId !== targetOrgId) {
+        throw ApiError.forbidden(`Nhân viên ${emp.employeeCode} không thuộc tổ chức của kỳ lương.`);
+      }
+
       // a. Official Attendance records (O(1) in-memory lookup)
       const attendances = attendanceMap.get(emp.id) || [];
 
@@ -503,6 +527,7 @@ export class PayrollService {
 
         const createdPayroll = await tx.payroll.create({
           data: {
+            organizationId: targetOrgId,
             periodId: period.id,
             employeeId: item.employeeId,
             contractSalary: out.baseSalary,
@@ -559,6 +584,7 @@ export class PayrollService {
           action: 'CALCULATE_PAYROLL',
           entity: 'PayrollPeriod',
           entityId: period.id,
+          organizationId: targetOrgId,
           newValues: {
             totalEmployees: calculatedPayrolls.length,
             totalGrossPayout: grandTotalGross.toNumber(),
@@ -708,7 +734,7 @@ export class PayrollService {
     const period = await prisma.payrollPeriod.findUnique({
       where: { id: periodId },
     });
-    if (!period || (session?.organizationId && (period as any).organizationId && (period as any).organizationId !== session.organizationId)) {
+    if (!period || (session?.organizationId && period.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
     }
 
@@ -726,6 +752,7 @@ export class PayrollService {
         action: 'CLOSE_PAYROLL_PERIOD',
         entity: 'PayrollPeriod',
         entityId: periodId,
+        organizationId: period.organizationId,
         newValues: { status: 'CLOSED', closedAt: new Date().toISOString() },
       },
     });

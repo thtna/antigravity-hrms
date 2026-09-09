@@ -34,6 +34,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
   const adminSession: UserSession = {
     userId: 'usr-admin-01',
     employeeId: 'emp-admin-01',
+    organizationId: 'org-test-doc',
     email: 'admin@antigravity.internal',
     fullName: 'Admin User',
     roles: ['admin'],
@@ -44,6 +45,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
   const hrSession: UserSession = {
     userId: 'usr-hr-01',
     employeeId: 'emp-hr-01',
+    organizationId: 'org-test-doc',
     email: 'hr@antigravity.internal',
     fullName: 'HR Officer',
     roles: ['hr'],
@@ -54,6 +56,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
   const managerTechSession: UserSession = {
     userId: 'usr-mgr-tech',
     employeeId: 'emp-mgr-tech',
+    organizationId: 'org-test-doc',
     departmentId: 'dept-tech',
     email: 'mgr.tech@antigravity.internal',
     fullName: 'Tech Manager',
@@ -65,6 +68,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
   const employeeASession: UserSession = {
     userId: 'usr-emp-a',
     employeeId: 'emp-a',
+    organizationId: 'org-test-doc',
     departmentId: 'dept-tech',
     email: 'employee.a@antigravity.internal',
     fullName: 'Employee A',
@@ -76,6 +80,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
   const employeeBSession: UserSession = {
     userId: 'usr-emp-b',
     employeeId: 'emp-b',
+    organizationId: 'org-test-doc',
     departmentId: 'dept-sales',
     email: 'employee.b@antigravity.internal',
     fullName: 'Employee B',
@@ -87,6 +92,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
   const mockEmployeeA = {
     id: 'emp-a',
     userId: 'usr-emp-a',
+    organizationId: 'org-test-doc',
     employeeCode: 'EMP-A',
     departmentId: 'dept-tech',
     deletedAt: null,
@@ -107,6 +113,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
   const mockEmployeeB = {
     id: 'emp-b',
     userId: 'usr-emp-b',
+    organizationId: 'org-test-doc',
     employeeCode: 'EMP-B',
     departmentId: 'dept-sales',
     deletedAt: null,
@@ -132,7 +139,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
   describe('1. Avatar Upload & Image Validation', () => {
     it('should upload avatar successfully for user self', async () => {
       const validPngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG header
-      (prisma.employee.findUnique as unknown as Mock).mockResolvedValue({ id: 'emp-a', userId: 'usr-emp-a' });
+      (prisma.employee.findUnique as unknown as Mock).mockResolvedValue({ id: 'emp-a', userId: 'usr-emp-a', organizationId: 'org-test-doc' });
       (prisma.employee.update as unknown as Mock).mockResolvedValue({});
 
       const result = await DocumentService.uploadAvatar(
@@ -347,7 +354,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
 
       expect(result.filename).toBe('HopDongLaoDong_EmpA.pdf');
       expect(result.mimeType).toBe('application/pdf');
-      expect(fileStorage.readDocumentFile).toHaveBeenCalledWith('emp-a', 'doc-contract-a.pdf');
+      expect(fileStorage.readDocumentFile).toHaveBeenCalledWith('emp-a', 'doc-contract-a.pdf', 'org-test-doc');
       expect(result.buffer).toBeDefined();
     });
 
@@ -416,7 +423,7 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
 
       const del = await DocumentService.deleteEmployeeDocument('emp-a', 'doc-contract-a', adminSession);
       expect(del.success).toBe(true);
-      expect(fileStorage.deleteDocumentFile).toHaveBeenCalledWith('emp-a', 'doc-contract-a.pdf');
+      expect(fileStorage.deleteDocumentFile).toHaveBeenCalledWith('emp-a', 'doc-contract-a.pdf', 'org-test-doc');
     });
 
     it('should block regular employee from deleting document with 403 Forbidden', async () => {

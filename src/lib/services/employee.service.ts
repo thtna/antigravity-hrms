@@ -30,7 +30,7 @@ export class EmployeeService {
     const where: Prisma.EmployeeWhereInput = {
       deletedAt: null,
       // PHASE 5: Tenant isolation — always scope to the authenticated user's organization
-      organizationId: session.organizationId,
+      organizationId: session.organizationId || undefined,
     };
 
     // 1. Data Scoping (within tenant)
@@ -195,7 +195,10 @@ export class EmployeeService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền thêm nhân viên mới.');
     }
 
-    const orgId = session.organizationId;
+    const orgId = session.organizationId || (session.roles.includes('super_admin') && (input as any).organizationId ? (input as any).organizationId : null);
+    if (!orgId) {
+      throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để tạo nhân viên.');
+    }
     const db = options.tx || prisma;
 
     // 1. Check duplicate employee code within the same organization
@@ -461,6 +464,7 @@ export class EmployeeService {
           action: 'SOFT_DELETE_EMPLOYEE',
           entity: 'employees',
           entityId: id,
+          organizationId: employee.organizationId || session.organizationId || null,
           oldValues: { status: employee.status, deletedAt: null },
           newValues: { status: 'TERMINATED', deletedAt: new Date().toISOString() },
         },
@@ -622,6 +626,7 @@ export class EmployeeService {
           action: 'UPDATE_EMPLOYEE',
           entity: 'employees',
           entityId: emp.id,
+          organizationId: currentEmployee.organizationId || session.organizationId || null,
           oldValues: {
             employeeCode: currentEmployee.employeeCode,
             status: currentEmployee.status,

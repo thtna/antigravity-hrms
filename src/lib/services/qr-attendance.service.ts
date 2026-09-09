@@ -67,6 +67,11 @@ export class QrAttendanceService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập để khởi tạo mã QR.');
     }
 
+    const targetOrgId = session.organizationId || ((session.roles.includes('super_admin') && (input as any).organizationId) ? (input as any).organizationId : null);
+    if (!targetOrgId) {
+      throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để khởi tạo mã QR điểm danh.');
+    }
+
     const expiresInSeconds = Number(input.expiresInSeconds) || 30;
     const code = crypto.randomBytes(24).toString('hex');
     const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
@@ -77,6 +82,7 @@ export class QrAttendanceService {
     // Save token to database for anti-replay tracking
     const tokenRecord = await prisma.qrAttendanceToken.create({
       data: {
+        organizationId: targetOrgId,
         code,
         tokenType,
         signature,
@@ -158,6 +164,7 @@ export class QrAttendanceService {
         lastName: true,
         status: true,
         deletedAt: true,
+        organizationId: true,
       },
     });
 
@@ -204,6 +211,10 @@ export class QrAttendanceService {
 
     if (!qrToken) {
       throw ApiError.badRequest('Mã QR không tồn tại trong hệ thống hoặc không hợp lệ.');
+    }
+
+    if (qrToken.organizationId && qrToken.organizationId !== employee.organizationId) {
+      throw ApiError.forbidden('Mã QR này thuộc về một tổ chức khác.');
     }
 
     const now = new Date();

@@ -31,6 +31,18 @@ vi.mock('@/lib/db/prisma', () => ({
       create: vi.fn().mockResolvedValue({}),
       upsert: vi.fn().mockResolvedValue({}),
     },
+    department: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+    },
+    worksite: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+    },
+    position: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+    },
     $transaction: vi.fn(async (cb) => cb(prisma)),
   },
 }));
@@ -39,6 +51,7 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
   const adminSession: UserSession = {
     userId: 'usr-admin',
     employeeId: 'emp-admin',
+    organizationId: 'org-test-emp',
     email: 'admin@antigravity.internal',
     fullName: 'Admin User',
     roles: ['admin'],
@@ -49,6 +62,7 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
   const hrSession: UserSession = {
     userId: 'usr-hr',
     employeeId: 'emp-hr',
+    organizationId: 'org-test-emp',
     email: 'hr@antigravity.internal',
     fullName: 'HR Officer',
     roles: ['hr'],
@@ -59,6 +73,7 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
   const managerSession: UserSession = {
     userId: 'usr-mgr',
     employeeId: 'emp-mgr',
+    organizationId: 'org-test-emp',
     email: 'manager@antigravity.internal',
     fullName: 'Dept Manager',
     departmentId: 'dept-engineering',
@@ -70,6 +85,7 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
   const employeeSession: UserSession = {
     userId: 'usr-emp',
     employeeId: 'emp-target',
+    organizationId: 'org-test-emp',
     email: 'employee@antigravity.internal',
     fullName: 'Regular Employee',
     departmentId: 'dept-sales',
@@ -80,6 +96,22 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (prisma.department.findUnique as unknown as Mock).mockResolvedValue({
+      id: 'dept-tech',
+      organizationId: 'org-test-emp',
+    });
+    (prisma.department.findFirst as unknown as Mock).mockResolvedValue({
+      id: 'dept-tech',
+      organizationId: 'org-test-emp',
+    });
+    (prisma.position.findUnique as unknown as Mock).mockResolvedValue({
+      id: 'pos-dev',
+      organizationId: 'org-test-emp',
+    });
+    (prisma.position.findFirst as unknown as Mock).mockResolvedValue({
+      id: 'pos-dev',
+      organizationId: 'org-test-emp',
+    });
     (prisma.employee.findFirst as unknown as Mock).mockImplementation((...args: any[]) =>
       (prisma.employee.findUnique as unknown as Mock)(...args)
     );
@@ -185,6 +217,7 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
     it('should return employee detail for Admin', async () => {
       const mockEmp = {
         id: 'emp-target',
+        organizationId: 'org-test-emp',
         employeeCode: 'EMP-999',
         firstName: 'Bình',
         lastName: 'Trần',
@@ -206,6 +239,7 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
     it('should block employee trying to view another employee profile (IDOR Block)', async () => {
       const otherEmployee = {
         id: 'emp-other-person',
+        organizationId: 'org-test-emp',
         userId: 'usr-other',
         employeeCode: 'EMP-777',
         departmentId: 'dept-finance',
@@ -349,6 +383,7 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
   describe('5. Manager Salary Protection & Department Scoping', () => {
     const mockDeptEmp = {
       id: 'emp-dept-01',
+      organizationId: 'org-test-emp',
       employeeCode: 'EMP-DEPT-01',
       userId: 'usr-dept-01',
       firstName: 'Đức',
@@ -459,6 +494,7 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
     it('should soft-delete employee by setting deletedAt and deactivating user without deleting history', async () => {
       const activeEmp = {
         id: 'emp-preserve-01',
+        organizationId: 'org-test-emp',
         employeeCode: 'EMP-PRESERVE',
         userId: 'usr-preserve-01',
         status: 'ACTIVE',

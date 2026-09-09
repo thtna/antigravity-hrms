@@ -27,6 +27,7 @@ import { UserSession } from '@/types';
 describe('PHASE 8 — WORKSITE MANAGEMENT SERVICE TEST SUITE', () => {
   const adminSession: UserSession = {
     userId: 'usr-admin',
+    organizationId: 'org-test-worksite',
     email: 'admin@antigravity.test',
     fullName: 'Admin System',
     roles: ['admin'],
@@ -36,6 +37,7 @@ describe('PHASE 8 — WORKSITE MANAGEMENT SERVICE TEST SUITE', () => {
 
   const hrSession: UserSession = {
     userId: 'usr-hr',
+    organizationId: 'org-test-worksite',
     email: 'hr@antigravity.test',
     fullName: 'HR Manager',
     roles: ['hr'],
@@ -45,6 +47,7 @@ describe('PHASE 8 — WORKSITE MANAGEMENT SERVICE TEST SUITE', () => {
 
   const employeeSession: UserSession = {
     userId: 'usr-emp',
+    organizationId: 'org-test-worksite',
     email: 'emp@antigravity.test',
     fullName: 'Employee Dev',
     roles: ['employee'],
@@ -54,6 +57,7 @@ describe('PHASE 8 — WORKSITE MANAGEMENT SERVICE TEST SUITE', () => {
 
   const mockWorksite = {
     id: 'ws-001',
+    organizationId: 'org-test-worksite',
     name: 'Trụ sở chính — Antigravity Tower',
     address: 'Tầng 18, Tòa nhà Antigravity, Quận 1, TP. Hồ Chí Minh',
     latitude: new Prisma.Decimal('10.776889'),

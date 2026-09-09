@@ -94,6 +94,10 @@ export class PositionService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền tạo chức vụ.');
     }
 
+    if (!session.organizationId) {
+      throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để tạo chức vụ.');
+    }
+
     const upperCode = input.code.toUpperCase().trim();
 
     // Scope duplicate code check to the organization

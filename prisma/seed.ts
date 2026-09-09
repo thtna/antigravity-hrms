@@ -99,6 +99,7 @@ export async function seedDevelopmentDemo() {
     update: {},
     create: {
       id: 'ws-hanoi-discovery',
+      organizationId: defaultOrg.id,
       name: 'Trụ Sở Chính — Discovery Complex Tower',
       address: 'Tầng 18, Tòa nhà Discovery Complex, 302 Cầu Giấy, Hà Nội',
       latitude: new Prisma.Decimal(21.035417),
@@ -728,6 +729,7 @@ export async function seedDevelopmentDemo() {
         },
         update: { shiftId: shift.id },
         create: {
+          organizationId: defaultOrg.id,
           employeeId: emp.id,
           shiftId: shift.id,
           workDate,
@@ -804,6 +806,7 @@ export async function seedDevelopmentDemo() {
           status,
         },
         create: {
+          organizationId: defaultOrg.id,
           scheduleId: schedule.id,
           employeeId: emp.id,
           workDate,
@@ -838,6 +841,7 @@ export async function seedDevelopmentDemo() {
   if (missingAtt) {
     await prisma.attendanceAdjustment.create({
       data: {
+        organizationId: defaultOrg.id,
         attendanceId: missingAtt.id,
         employeeId: empNightOps.id,
         workDate: missingDate,
@@ -877,6 +881,7 @@ export async function seedDevelopmentDemo() {
 
   await prisma.leaveRequest.create({
     data: {
+      organizationId: defaultOrg.id,
       employeeId: empCb.id,
       leaveTypeId: leaveAnnual.id,
       requestType: 'LEAVE',
@@ -946,6 +951,7 @@ export async function seedDevelopmentDemo() {
     },
     update: {},
     create: {
+      organizationId: defaultOrg.id,
       employeeId: empSeniorDev.id,
       kpiId: kpiVelocity.id,
       period: currentPeriod,
@@ -973,6 +979,7 @@ export async function seedDevelopmentDemo() {
     },
     update: {},
     create: {
+      organizationId: defaultOrg.id,
       employeeId: empSalesLead.id,
       kpiId: kpiSales.id,
       period: currentPeriod,
@@ -995,6 +1002,7 @@ export async function seedDevelopmentDemo() {
   // ----------------------------------------------------------------------------
   await prisma.employeeBonusPenalty.create({
     data: {
+      organizationId: defaultOrg.id,
       employeeId: empSalesLead.id,
       type: 'BONUS',
       category: 'PROJECT',
@@ -1011,6 +1019,7 @@ export async function seedDevelopmentDemo() {
 
   await prisma.employeeBonusPenalty.create({
     data: {
+      organizationId: defaultOrg.id,
       employeeId: empCb.id,
       type: 'PENALTY',
       category: 'OTHER',
@@ -1242,6 +1251,7 @@ export async function seedDevelopmentDemo() {
         paymentStatus: 'PAID',
       },
       create: {
+        organizationId: defaultOrg.id,
         periodId: payrollPeriod.id,
         employeeId: row.emp.id,
         contractSalary: new Prisma.Decimal(row.contractSalary),

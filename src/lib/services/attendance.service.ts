@@ -154,7 +154,18 @@ export class AttendanceService {
   static async resolveShiftForDate(employeeId: string, workDate: Date): Promise<{
     shift: ShiftTimeWindow;
     scheduleId?: string;
+    organizationId: string;
   }> {
+    // 0. Fetch verified employee
+    const employee = await prisma.employee.findUnique({
+      where: { id: employeeId },
+      select: { id: true, organizationId: true },
+    });
+    if (!employee) {
+      throw ApiError.notFound('Không tìm thấy nhân viên.');
+    }
+    const organizationId = employee.organizationId;
+
     // 1. Direct EmployeeSchedule for this date
     const schedule = await prisma.employeeSchedule.findUnique({
       where: { employeeId_workDate: { employeeId, workDate } },
@@ -164,6 +175,7 @@ export class AttendanceService {
     if (schedule && schedule.shift && schedule.shift.isActive && !schedule.shift.deletedAt) {
       return {
         scheduleId: schedule.id,
+        organizationId,
         shift: {
           startTime: schedule.shift.startTime,
           endTime: schedule.shift.endTime,
@@ -194,6 +206,7 @@ export class AttendanceService {
       // Auto-create EmployeeSchedule row to link permanently
       const newSchedule = await prisma.employeeSchedule.create({
         data: {
+          organizationId,
           employeeId,
           shiftId: recurring.shift.id,
           workDate,
@@ -203,6 +216,7 @@ export class AttendanceService {
 
       return {
         scheduleId: newSchedule.id,
+        organizationId,
         shift: {
           startTime: recurring.shift.startTime,
           endTime: recurring.shift.endTime,
@@ -216,15 +230,16 @@ export class AttendanceService {
       };
     }
 
-    // 3. Fallback: First active default WorkShift in system
+    // 3. Fallback: First active default WorkShift in employee's organization
     const defaultShift = await prisma.workShift.findFirst({
-      where: { isActive: true, deletedAt: null },
+      where: { organizationId, isActive: true, deletedAt: null },
       orderBy: { createdAt: 'asc' },
     });
 
     if (!defaultShift) {
       // Default fallback shift 08:30 - 17:30
       return {
+        organizationId,
         shift: {
           startTime: '08:30',
           endTime: '17:30',
@@ -240,6 +255,7 @@ export class AttendanceService {
     // Auto-create schedule for default shift
     const fallbackSchedule = await prisma.employeeSchedule.create({
       data: {
+        organizationId,
         employeeId,
         shiftId: defaultShift.id,
         workDate,
@@ -249,6 +265,7 @@ export class AttendanceService {
 
     return {
       scheduleId: fallbackSchedule.id,
+      organizationId,
       shift: {
         startTime: defaultShift.startTime,
         endTime: defaultShift.endTime,
@@ -288,7 +305,7 @@ export class AttendanceService {
     }
 
     // 2. Resolve shift & schedule
-    const { shift, scheduleId } = await this.resolveShiftForDate(employeeId, workDate);
+    const { shift, scheduleId, organizationId } = await this.resolveShiftForDate(employeeId, workDate);
 
     // 3. Compute late minutes at check-in
     const parseTime = (t: string) => {
@@ -310,6 +327,7 @@ export class AttendanceService {
     const attendance = await prisma.$transaction(async (tx) => {
       const created = await tx.attendance.create({
         data: {
+          organizationId,
           employeeId,
           scheduleId: scheduleId || null,
           workDate,
@@ -340,6 +358,7 @@ export class AttendanceService {
           action: 'ATTENDANCE_CHECK_IN',
           entity: 'attendance',
           entityId: created.id,
+          organizationId,
           newValues: {
             employeeId,
             workDate: workDateStr,
@@ -490,6 +509,7 @@ export class AttendanceService {
           action: 'ATTENDANCE_CHECK_OUT',
           entity: 'attendance',
           entityId: attendance.id,
+          organizationId: attendance.organizationId,
           newValues: {
             checkOutTime: checkOutTime.toISOString(),
             actualWorkHours: metrics.actualWorkHours,
@@ -730,11 +750,11 @@ export class AttendanceService {
 
     const employee = await prisma.employee.findUnique({
       where: { id: input.employeeId },
-      select: { id: true, status: true, deletedAt: true },
+      select: { id: true, status: true, deletedAt: true, organizationId: true },
     });
 
-    if (!employee || employee.deletedAt || employee.status === 'TERMINATED') {
-      throw ApiError.badRequest('Nhân viên không tồn tại hoặc đã nghỉ việc.');
+    if (!employee || employee.deletedAt || employee.status === 'TERMINATED' || (session.organizationId && employee.organizationId !== session.organizationId)) {
+      throw ApiError.badRequest('Nhân viên không tồn tại, đã nghỉ việc hoặc không thuộc tổ chức hiện tại.');
     }
 
     const workDate = new Date(input.workDate);
@@ -757,6 +777,9 @@ export class AttendanceService {
 
     if (input.shiftId) {
       shiftData = await prisma.workShift.findUnique({ where: { id: input.shiftId } });
+      if (!shiftData || shiftData.organizationId !== employee.organizationId) {
+        throw ApiError.badRequest('Ca làm việc không hợp lệ hoặc không thuộc cùng tổ chức với nhân viên.');
+      }
     }
 
     const resolved = await this.resolveShiftForDate(input.employeeId, workDate);
@@ -782,6 +805,7 @@ export class AttendanceService {
       const record = await tx.attendance.upsert({
         where: { employeeId_workDate: { employeeId: input.employeeId, workDate } },
         create: {
+          organizationId: employee.organizationId,
           employeeId: input.employeeId,
           scheduleId: scheduleId || null,
           workDate,
@@ -822,6 +846,7 @@ export class AttendanceService {
           action: 'MANUAL_ATTENDANCE_LOG',
           entity: 'attendance',
           entityId: record.id,
+          organizationId: employee.organizationId,
           newValues: {
             employeeId: input.employeeId,
             workDate: input.workDate,

@@ -38,7 +38,7 @@ export class PayrollWorkflowService {
       },
     });
 
-    if (!period) {
+    if (!period || (session?.organizationId && period.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
     }
 
@@ -148,6 +148,7 @@ export class PayrollWorkflowService {
       // 3. Write Approval History
       const approval = await tx.payrollApproval.create({
         data: {
+          organizationId: period.organizationId,
           periodId: period.id,
           stage: `${currentStatus}_TO_${targetStatus}`,
           reviewerId: session.employeeId || null,
@@ -164,6 +165,7 @@ export class PayrollWorkflowService {
           action: `PAYROLL_WORKFLOW_${action}`,
           entity: 'PayrollPeriod',
           entityId: period.id,
+          organizationId: period.organizationId,
           oldValues: { status: currentStatus },
           newValues: {
             status: targetStatus,
@@ -201,17 +203,38 @@ export class PayrollWorkflowService {
     const period = await prisma.payrollPeriod.findUnique({
       where: { id: input.periodId },
     });
-    if (!period) {
+    if (!period || (session.organizationId && period.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
     }
 
-    // Verify target employee exists
+    const targetOrgId = period.organizationId;
+
+    // Verify target employee exists and belongs to the same organization
     const emp = await prisma.employee.findUnique({
       where: { id: input.employeeId },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, organizationId: true },
     });
     if (!emp) {
       throw ApiError.notFound('Không tìm thấy nhân viên được yêu cầu điều chỉnh.');
+    }
+    if (emp.organizationId !== targetOrgId) {
+      throw ApiError.forbidden('Nhân viên không thuộc cùng tổ chức với kỳ tính lương.');
+    }
+
+    // If payrollId is provided, verify it belongs to this period and employee and organization
+    if (input.payrollId) {
+      const payroll = await prisma.payroll.findUnique({
+        where: { id: input.payrollId },
+        select: { id: true, organizationId: true, periodId: true, employeeId: true },
+      });
+      if (
+        !payroll ||
+        payroll.organizationId !== targetOrgId ||
+        payroll.periodId !== period.id ||
+        payroll.employeeId !== emp.id
+      ) {
+        throw ApiError.badRequest('Phiếu lương không hợp lệ hoặc không thuộc cùng tổ chức/kỳ lương.');
+      }
     }
 
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
@@ -224,14 +247,15 @@ export class PayrollWorkflowService {
     // Resolve requester employee id
     const requesterEmployee = await prisma.employee.findUnique({
       where: { userId: session.userId },
-      select: { id: true },
+      select: { id: true, organizationId: true },
     });
-    if (!requesterEmployee) {
-      throw ApiError.badRequest('Tài khoản của bạn không gắn với thông tin nhân sự hợp lệ.');
+    if (!requesterEmployee || requesterEmployee.organizationId !== targetOrgId) {
+      throw ApiError.badRequest('Tài khoản của bạn không gắn với thông tin nhân sự thuộc tổ chức này.');
     }
 
     const adjustment = await prisma.payrollAdjustment.create({
       data: {
+        organizationId: targetOrgId,
         periodId: input.periodId,
         payrollId: input.payrollId || null,
         employeeId: input.employeeId,
@@ -258,6 +282,7 @@ export class PayrollWorkflowService {
         action: 'CREATE_PAYROLL_ADJUSTMENT',
         entity: 'PayrollAdjustment',
         entityId: adjustment.id,
+        organizationId: targetOrgId,
         newValues: {
           periodId: input.periodId,
           employeeId: input.employeeId,
@@ -294,7 +319,7 @@ export class PayrollWorkflowService {
       include: { period: true },
     });
 
-    if (!adjustment) {
+    if (!adjustment || (session.organizationId && adjustment.organizationId !== session.organizationId)) {
       throw ApiError.notFound('Không tìm thấy yêu cầu điều chỉnh lương.');
     }
 
@@ -325,6 +350,7 @@ export class PayrollWorkflowService {
         action: `PROCESS_PAYROLL_ADJUSTMENT_${input.decision}`,
         entity: 'PayrollAdjustment',
         entityId: adjustmentId,
+        organizationId: adjustment.organizationId,
         oldValues: { status: 'PENDING' },
         newValues: {
           status: newStatus,
@@ -348,8 +374,16 @@ export class PayrollWorkflowService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
+    const period = await prisma.payrollPeriod.findUnique({
+      where: { id: periodId },
+      select: { id: true, organizationId: true },
+    });
+    if (!period || (session.organizationId && period.organizationId !== session.organizationId)) {
+      throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
+    }
+
     return await prisma.payrollApproval.findMany({
-      where: { periodId },
+      where: { periodId, organizationId: period.organizationId },
       orderBy: { actionAt: 'desc' },
       include: {
         reviewer: {
@@ -369,8 +403,16 @@ export class PayrollWorkflowService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
+    const period = await prisma.payrollPeriod.findUnique({
+      where: { id: periodId },
+      select: { id: true, organizationId: true },
+    });
+    if (!period || (session.organizationId && period.organizationId !== session.organizationId)) {
+      throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
+    }
+
     return await prisma.payrollAdjustment.findMany({
-      where: { periodId },
+      where: { periodId, organizationId: period.organizationId },
       orderBy: { createdAt: 'desc' },
       include: {
         employee: {

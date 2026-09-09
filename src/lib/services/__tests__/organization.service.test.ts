@@ -35,6 +35,8 @@ vi.mock('@/lib/db/prisma', () => ({
 }));
 
 describe('PHASE 4 — DEPARTMENT & POSITION SERVICE TEST SUITE', () => {
+  const testOrgId = 'org-test-dept';
+
   const adminSession: UserSession = {
     userId: 'usr-admin',
     employeeId: 'emp-admin',
@@ -43,6 +45,7 @@ describe('PHASE 4 — DEPARTMENT & POSITION SERVICE TEST SUITE', () => {
     roles: ['admin'],
     permissions: ['*'],
     isActive: true,
+    organizationId: testOrgId,
   };
 
   const hrSession: UserSession = {
@@ -53,6 +56,7 @@ describe('PHASE 4 — DEPARTMENT & POSITION SERVICE TEST SUITE', () => {
     roles: ['hr'],
     permissions: ['dept:read', 'dept:write'],
     isActive: true,
+    organizationId: testOrgId,
   };
 
   const employeeSession: UserSession = {
@@ -63,6 +67,7 @@ describe('PHASE 4 — DEPARTMENT & POSITION SERVICE TEST SUITE', () => {
     roles: ['employee'],
     permissions: [],
     isActive: true,
+    organizationId: testOrgId,
   };
 
   beforeEach(() => {

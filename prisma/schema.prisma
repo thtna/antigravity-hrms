@@ -196,7 +196,7 @@ model UserRole {
 
 model Department {
   id             String    @id @default(uuid())
-  organizationId String    @default("org_default_tanphong") @map("organization_id")
+  organizationId String    @map("organization_id")
   code           String
   name           String
   description    String?
@@ -221,7 +221,7 @@ model Department {
 
 model Position {
   id              String    @id @default(uuid())
-  organizationId  String    @default("org_default_tanphong") @map("organization_id")
+  organizationId  String    @map("organization_id")
   code            String
   title           String
   description     String?
@@ -243,7 +243,7 @@ model Position {
 
 model Worksite {
   id             String   @id @default(uuid())
-  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  organizationId String   @map("organization_id")
   branchId       String?  @map("branch_id")
   name           String
   address        String
@@ -264,7 +264,7 @@ model Worksite {
 
 model Employee {
   id              String    @id @default(uuid())
-  organizationId  String    @default("org_default_tanphong") @map("organization_id")
+  organizationId  String    @map("organization_id")
   branchId        String?   @map("branch_id")
   userId          String    @unique @map("user_id")
   employeeCode    String    @map("employee_code")
@@ -335,7 +335,7 @@ model Employee {
 
 model WorkShift {
   id                 String    @id @default(uuid())
-  organizationId     String    @default("org_default_tanphong") @map("organization_id")
+  organizationId     String    @map("organization_id")
   code               String
   name               String
   description        String?
@@ -365,7 +365,7 @@ model WorkShift {
 
 model EmployeeSchedule {
   id             String   @id @default(uuid())
-  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  organizationId String   @map("organization_id")
   employeeId     String   @map("employee_id")
   shiftId        String   @map("shift_id")
   workDate       DateTime @map("work_date") @db.Date
@@ -391,7 +391,7 @@ model EmployeeSchedule {
 
 model RecurringSchedule {
   id             String    @id @default(uuid())
-  organizationId String    @default("org_default_tanphong") @map("organization_id")
+  organizationId String    @map("organization_id")
   employeeId     String    @map("employee_id")
   shiftId        String    @map("shift_id")
   dayOfWeek      Int       @map("day_of_week") // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
@@ -412,7 +412,7 @@ model RecurringSchedule {
 
 model Attendance {
   id               String    @id @default(uuid())
-  organizationId   String    @default("org_default_tanphong") @map("organization_id")
+  organizationId   String    @map("organization_id")
   branchId         String?   @map("branch_id")
   scheduleId       String?   @unique @map("schedule_id")
   employeeId       String    @map("employee_id")
@@ -450,7 +450,7 @@ model Attendance {
 
 model AttendanceAdjustment {
   id                String    @id @default(uuid())
-  organizationId    String    @default("org_default_tanphong") @map("organization_id")
+  organizationId    String    @map("organization_id")
   attendanceId      String?   @map("attendance_id")
   employeeId        String    @map("employee_id")
   workDate          DateTime  @map("work_date") @db.Date
@@ -482,7 +482,7 @@ model AttendanceAdjustment {
 
 model QrAttendanceToken {
   id               String    @id @default(uuid())
-  organizationId   String    @default("org_default_tanphong") @map("organization_id")
+  organizationId   String    @map("organization_id")
   code             String    @unique
   tokenType        String    @default("ANY") @map("token_type") // CHECK_IN, CHECK_OUT, ANY
   signature        String
@@ -510,7 +510,7 @@ model QrAttendanceToken {
 
 model LeaveType {
   id                  String   @id @default(uuid())
-  organizationId      String   @default("org_default_tanphong") @map("organization_id")
+  organizationId      String   @map("organization_id")
   code                String
   name                String
   isPaid              Boolean  @default(true) @map("is_paid")
@@ -527,7 +527,7 @@ model LeaveType {
 
 model LeaveRequest {
   id            String    @id @default(uuid())
-  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  organizationId String   @map("organization_id")
   employeeId    String    @map("employee_id")
   leaveTypeId   String?   @map("leave_type_id")
   requestType   String    @default("LEAVE") @map("request_type") // LEAVE, LATE_REQUEST, EARLY_LEAVE
@@ -556,7 +556,7 @@ model LeaveRequest {
 
 model Holiday {
   id             String   @id @default(uuid())
-  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  organizationId String   @map("organization_id")
   name           String
   date           DateTime @db.Date
   isRecurring    Boolean  @default(false) @map("is_recurring")
@@ -574,7 +574,7 @@ model Holiday {
 
 model Kpi {
   id              String    @id @default(uuid())
-  organizationId  String    @default("org_default_tanphong") @map("organization_id")
+  organizationId  String    @map("organization_id")
   code            String
   title           String
   description     String?
@@ -604,7 +604,7 @@ model Kpi {
 
 model EmployeeKpiResult {
   id             String    @id @default(uuid())
-  organizationId String    @default("org_default_tanphong") @map("organization_id")
+  organizationId String    @map("organization_id")
   employeeId     String    @map("employee_id")
   kpiId          String    @map("kpi_id")
   period         String    // YYYY-MM, YYYY-QX, YYYY
@@ -635,7 +635,7 @@ model EmployeeKpiResult {
 
 model EmployeeBonusPenalty {
   id             String    @id @default(uuid())
-  organizationId String    @default("org_default_tanphong") @map("organization_id")
+  organizationId String    @map("organization_id")
   employeeId     String    @map("employee_id")
   type           String    @default("BONUS") // 'BONUS' or 'PENALTY'
   category       String    // 'KPI', 'OVERTIME', 'PROJECT', 'TIME', 'OTHER'
@@ -667,7 +667,7 @@ model EmployeeBonusPenalty {
 
 model PayrollRule {
   id                String    @id @default(uuid())
-  organizationId    String    @default("org_default_tanphong") @map("organization_id")
+  organizationId    String    @map("organization_id")
   code              String
   name              String
   description       String?
@@ -695,7 +695,7 @@ model PayrollRule {
 
 model PayrollPeriod {
   id               String    @id @default(uuid())
-  organizationId   String    @default("org_default_tanphong") @map("organization_id")
+  organizationId   String    @map("organization_id")
   code             String
   name             String
   payrollRuleId    String?   @map("payroll_rule_id")
@@ -723,7 +723,7 @@ model PayrollPeriod {
 
 model Payroll {
   id                    String   @id @default(uuid())
-  organizationId        String   @default("org_default_tanphong") @map("organization_id")
+  organizationId        String   @map("organization_id")
   periodId              String   @map("period_id")
   employeeId            String   @map("employee_id")
   contractSalary        Decimal  @map("contract_salary") @db.Decimal(14, 2)
@@ -777,7 +777,7 @@ model PayrollDetail {
 
 model PayrollApproval {
   id             String   @id @default(uuid())
-  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  organizationId String   @map("organization_id")
   periodId       String   @map("period_id")
   stage          String
   reviewerId     String?  @map("reviewer_id")
@@ -797,7 +797,7 @@ model PayrollApproval {
 
 model PayrollAdjustment {
   id              String    @id @default(uuid())
-  organizationId  String    @default("org_default_tanphong") @map("organization_id")
+  organizationId  String    @map("organization_id")
   periodId        String    @map("period_id")
   payrollId       String?   @map("payroll_id")
   employeeId      String    @map("employee_id")
@@ -875,7 +875,7 @@ model Notification {
 
 model CompanySetting {
   id             String   @id @default(uuid())
-  organizationId String   @default("org_default_tanphong") @map("organization_id")
+  organizationId String   @map("organization_id")
   key            String
   value          String
   description    String?

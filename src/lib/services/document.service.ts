@@ -59,7 +59,10 @@ export class DocumentService {
 
     // Generate safe filename: avatar_<userId>_<timestamp>.<ext>
     const safeFilename = `avatar_${userId}_${Date.now()}.${validation.extension}`;
-    const orgId = session.organizationId || 'org_default_tanphong';
+    const orgId = session.organizationId;
+    if (!orgId) {
+      throw ApiError.forbidden('Yêu cầu ngữ cảnh tổ chức hợp lệ để tải lên ảnh đại diện.');
+    }
 
     await saveAvatarFile(safeFilename, file.buffer, orgId);
 
@@ -94,6 +97,26 @@ export class DocumentService {
    * Serve avatar buffer
    */
   static async getAvatarBuffer(filename: string, organizationId?: string) {
+    let resolvedOrgId = organizationId;
+    if (!resolvedOrgId) {
+      // Derive org from avatar filename pattern: avatar_<userId>_<timestamp>.<ext>
+      const parts = filename.split('_');
+      if (parts.length >= 2 && parts[0] === 'avatar') {
+        const userId = parts[1];
+        const membership = await prisma.organizationMember.findFirst({
+          where: { userId, isActive: true },
+          select: { organizationId: true },
+        });
+        if (membership) {
+          resolvedOrgId = membership.organizationId;
+        }
+      }
+    }
+
+    if (!resolvedOrgId) {
+      throw ApiError.badRequest('Yêu cầu ngữ cảnh tổ chức hợp lệ để truy cập ảnh đại diện.');
+    }
+
     // Sanitize filename against directory traversal
     const safeName = sanitizeFilename(filename);
     const ext = path.extname(safeName).toLowerCase().replace('.', '');
@@ -105,7 +128,7 @@ export class DocumentService {
     };
 
     const mimeType = mimeTypes[ext] || 'application/octet-stream';
-    const buffer = await readAvatarFile(safeName, organizationId);
+    const buffer = await readAvatarFile(safeName, resolvedOrgId);
 
     return { buffer, mimeType };
   }
@@ -122,6 +145,10 @@ export class DocumentService {
   ) {
     if (!session || !session.userId) {
       throw ApiError.unauthorized('Yêu cầu đăng nhập để tải lên tài liệu.');
+    }
+
+    if (!session.organizationId) {
+      throw ApiError.forbidden('Yêu cầu ngữ cảnh tổ chức hợp lệ để tải lên tài liệu nhân sự.');
     }
 
     const employee = await prisma.employee.findUnique({
@@ -154,7 +181,10 @@ export class DocumentService {
     });
 
     const docId = crypto.randomUUID();
-    const orgId = employee.organizationId || session.organizationId || 'org_default_tanphong';
+    const orgId = employee.organizationId || session.organizationId;
+    if (!orgId) {
+      throw ApiError.badRequest('Không xác định được tổ chức hợp lệ của nhân viên.');
+    }
 
     const { storedFilename } = await saveDocumentFile(
       employeeId,
@@ -267,11 +297,14 @@ export class DocumentService {
       throw ApiError.notFound('Không tìm thấy tài liệu yêu cầu.');
     }
 
-    const orgId = employee.organizationId || session.organizationId || 'org_default_tanphong';
+    const orgId = employee.organizationId || session.organizationId;
+    if (!orgId) {
+      throw ApiError.badRequest('Không xác định được tổ chức hợp lệ của nhân viên.');
+    }
     const ext = targetDoc.name ? targetDoc.name.split('.').pop() || 'bin' : 'bin';
     const storedFilename = targetDoc.storedFilename || `${docId}.${ext}`;
 
-    const buffer = await readDocumentFile(employeeId, storedFilename);
+    const buffer = await readDocumentFile(employeeId, storedFilename, orgId);
 
     return {
       buffer,
@@ -338,7 +371,10 @@ export class DocumentService {
       throw ApiError.notFound('Không tìm thấy tài liệu yêu cầu.');
     }
 
-    const orgId = employee.organizationId || session.organizationId || 'org_default_tanphong';
+    const orgId = employee.organizationId || session.organizationId;
+    if (!orgId) {
+      throw ApiError.badRequest('Không xác định được tổ chức hợp lệ của nhân viên.');
+    }
     const ext = targetDoc.name ? targetDoc.name.split('.').pop() || 'bin' : 'bin';
     const storedFilename = targetDoc.storedFilename || `${docId}.${ext}`;
     const objectKey = targetDoc.objectKey;
@@ -449,12 +485,15 @@ export class DocumentService {
       throw ApiError.notFound('Không tìm thấy tài liệu cần xoá.');
     }
 
-    const orgId = employee.organizationId || session.organizationId || 'org_default_tanphong';
+    const orgId = employee.organizationId || session.organizationId;
+    if (!orgId) {
+      throw ApiError.badRequest('Không xác định được tổ chức hợp lệ của nhân viên.');
+    }
     const ext = targetDoc.name ? targetDoc.name.split('.').pop() || 'bin' : 'bin';
     const storedFilename = targetDoc.storedFilename || `${docId}.${ext}`;
 
     // Delete object through file-storage bridge
-    await deleteDocumentFile(employeeId, storedFilename);
+    await deleteDocumentFile(employeeId, storedFilename, orgId);
 
     // Update DB
     const updatedDocs = docs.filter((d: any) => d.id !== docId);

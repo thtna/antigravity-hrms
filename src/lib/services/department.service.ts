@@ -133,6 +133,10 @@ export class DepartmentService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền tạo phòng ban.');
     }
 
+    if (!session.organizationId) {
+      throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để tạo phòng ban.');
+    }
+
     const upperCode = input.code.toUpperCase().trim();
 
     // 1. Check duplicate code scoped to the organization

@@ -139,11 +139,15 @@ export class ShiftService {
     }
 
     const upperCode = input.code.toUpperCase().trim();
+    const targetOrgId = session.organizationId || ((session.roles.includes('super_admin') && (input as any).organizationId) ? (input as any).organizationId : null);
+    if (!targetOrgId) {
+      throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để tạo ca làm việc.');
+    }
 
     const existing = await prisma.workShift.findFirst({
       where: {
         code: upperCode,
-        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: targetOrgId,
       },
     });
     if (existing && !existing.deletedAt) {
@@ -163,6 +167,7 @@ export class ShiftService {
     const created = await prisma.$transaction(async (tx) => {
       const shift = await tx.workShift.create({
         data: {
+          organizationId: targetOrgId,
           code: upperCode,
           name: input.name.trim(),
           description: input.description?.trim() || null,
@@ -177,7 +182,6 @@ export class ShiftService {
           isActive: input.isActive ?? true,
           effectiveFrom: new Date(input.effectiveFrom),
           effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
-          ...(session.organizationId ? { organizationId: session.organizationId } : {}),
         },
       });
 
@@ -187,6 +191,7 @@ export class ShiftService {
           action: 'CREATE_SHIFT',
           entity: 'work_shifts',
           entityId: shift.id,
+          organizationId: targetOrgId,
           newValues: {
             code: shift.code,
             name: shift.name,
@@ -289,6 +294,7 @@ export class ShiftService {
           action: 'UPDATE_SHIFT',
           entity: 'work_shifts',
           entityId: shift.id,
+          organizationId: currentShift.organizationId || session.organizationId || null,
           oldValues: {
             name: currentShift.name,
             startTime: currentShift.startTime,
@@ -342,6 +348,7 @@ export class ShiftService {
           action: isActive ? 'ACTIVATE_SHIFT' : 'DEACTIVATE_SHIFT',
           entity: 'work_shifts',
           entityId: id,
+          organizationId: shift.organizationId || session.organizationId || null,
           oldValues: { isActive: shift.isActive },
           newValues: { isActive },
         },
@@ -401,6 +408,7 @@ export class ShiftService {
           action: 'DELETE_SHIFT',
           entity: 'work_shifts',
           entityId: id,
+          organizationId: shift.organizationId || session.organizationId || null,
           oldValues: { code: shift.code, name: shift.name },
           newValues: { deletedAt: new Date().toISOString() },
         },

@@ -84,11 +84,16 @@ export class KpiService {
   static async createKpiDefinition(input: CreateKpiDefinitionInput, session: UserSession) {
     this.ensurePrivileged(session);
 
+    const targetOrgId = session.organizationId || ((session.roles.includes('super_admin') && (input as any).organizationId) ? (input as any).organizationId : null);
+    if (!targetOrgId) {
+      throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để tạo chỉ số KPI.');
+    }
+
     // Check duplicate code within tenant
     const existing = await prisma.kpi.findFirst({
       where: {
         code: input.code,
-        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: targetOrgId,
       },
     });
     if (existing) {
@@ -99,15 +104,15 @@ export class KpiService {
       const dept = await prisma.department.findUnique({
         where: { id: input.departmentId },
       });
-      if (!dept) {
-        throw ApiError.notFound('Phòng ban được chỉ định không tồn tại.');
+      if (!dept || dept.organizationId !== targetOrgId) {
+        throw ApiError.badRequest('Phòng ban được chỉ định không tồn tại hoặc không thuộc tổ chức hiện tại.');
       }
     }
 
     return prisma.$transaction(async (tx) => {
       const created = await tx.kpi.create({
         data: {
-          organizationId: session.organizationId ?? '__no_org__',
+          organizationId: targetOrgId,
           code: input.code,
           title: input.title,
           description: input.description,
@@ -133,6 +138,7 @@ export class KpiService {
           action: 'CREATE_KPI_DEFINITION',
           entity: 'Kpi',
           entityId: created.id,
+          organizationId: targetOrgId,
           newValues: {
             code: created.code,
             title: created.title,
@@ -250,7 +256,8 @@ export class KpiService {
           actorId: session.userId,
           action: 'HARD_DELETE_KPI_DEFINITION',
           entity: 'Kpi',
-          entityId: id,
+          entityId: existing.id,
+          organizationId: existing.organizationId,
           oldValues: { code: existing.code, title: existing.title },
         },
       });
@@ -320,11 +327,22 @@ export class KpiService {
   static async assignKpiToEmployee(input: AssignKpiInput, session: UserSession) {
     await this.checkManagerOrHrAccess(input.employeeId, session);
 
+    const employee = await prisma.employee.findUnique({
+      where: { id: input.employeeId },
+      select: { id: true, status: true, deletedAt: true, organizationId: true },
+    });
+    if (!employee || employee.deletedAt || employee.status === 'TERMINATED' || (session.organizationId && employee.organizationId !== session.organizationId)) {
+      throw ApiError.badRequest('Nhân viên không tồn tại, đã nghỉ việc hoặc không thuộc tổ chức hiện tại.');
+    }
+
     const kpi = await prisma.kpi.findUnique({
       where: { id: input.kpiId },
     });
     if (!kpi || kpi.deletedAt || kpi.status !== 'ACTIVE') {
       throw ApiError.notFound('Chỉ số KPI không khả dụng hoặc đã bị ngừng hoạt động.');
+    }
+    if (kpi.organizationId !== employee.organizationId) {
+      throw ApiError.forbidden('Chỉ số KPI không thuộc cùng tổ chức với nhân viên.');
     }
 
     // Prevent duplicate assignment in same period
@@ -364,6 +382,7 @@ export class KpiService {
     return prisma.$transaction(async (tx) => {
       const created = await tx.employeeKpiResult.create({
         data: {
+          organizationId: employee.organizationId,
           employeeId: input.employeeId,
           kpiId: input.kpiId,
           period: input.period,
@@ -390,6 +409,7 @@ export class KpiService {
           action: 'ASSIGN_KPI_TO_EMPLOYEE',
           entity: 'EmployeeKpiResult',
           entityId: created.id,
+          organizationId: employee.organizationId,
           newValues: {
             employeeId: input.employeeId,
             kpiCode: kpi.code,
@@ -410,8 +430,22 @@ export class KpiService {
     const kpi = await prisma.kpi.findUnique({
       where: { id: input.kpiId },
     });
-    if (!kpi || kpi.deletedAt || kpi.status !== 'ACTIVE') {
-      throw ApiError.notFound('Chỉ số KPI không khả dụng.');
+    if (!kpi || kpi.deletedAt || kpi.status !== 'ACTIVE' || (session.organizationId && kpi.organizationId !== session.organizationId)) {
+      throw ApiError.notFound('Chỉ số KPI không khả dụng hoặc không thuộc tổ chức hiện tại.');
+    }
+
+    const employees = await prisma.employee.findMany({
+      where: {
+        id: { in: input.employeeIds },
+        deletedAt: null,
+        status: { not: 'TERMINATED' },
+        organizationId: kpi.organizationId,
+      },
+      select: { id: true, organizationId: true },
+    });
+
+    if (employees.length !== input.employeeIds.length) {
+      throw ApiError.badRequest('Một hoặc nhiều nhân viên không hợp lệ hoặc không thuộc cùng tổ chức với chỉ số KPI.');
     }
 
     const targetValue = input.targetValue != null ? input.targetValue : Number(kpi.targetValue);
@@ -432,6 +466,7 @@ export class KpiService {
       if (!existing) {
         const item = await prisma.employeeKpiResult.create({
           data: {
+            organizationId: kpi.organizationId,
             employeeId: empId,
             kpiId: input.kpiId,
             period: input.period,
@@ -447,6 +482,22 @@ export class KpiService {
         assignedResults.push(item);
       }
     }
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: session.userId,
+        action: 'BULK_ASSIGN_KPI',
+        entity: 'EmployeeKpiResult',
+        entityId: input.kpiId,
+        organizationId: kpi.organizationId,
+        newValues: {
+          employeeIds: input.employeeIds,
+          kpiId: input.kpiId,
+          period: input.period,
+          assignedCount: assignedResults.length,
+        },
+      },
+    });
 
     return {
       success: true,

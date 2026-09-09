@@ -56,15 +56,16 @@ import { ScheduleService } from '@/lib/services/schedule.service';
 
 // ── Fixture sessions ─────────────────────────────────────────────────────────
 
-const adminSession = { userId: 'usr-admin', roles: ['admin' as const], email: 'admin@test.com', fullName: 'Admin', permissions: [], isActive: true };
-const hrSession = { userId: 'usr-hr', roles: ['hr' as const], email: 'hr@test.com', fullName: 'HR', permissions: [], isActive: true };
-const managerSession = { userId: 'usr-manager', roles: ['manager' as const], email: 'mgr@test.com', fullName: 'Manager', permissions: [], isActive: true };
-const employeeSession = { userId: 'usr-emp', roles: ['employee' as const], email: 'emp@test.com', fullName: 'Employee', permissions: [], isActive: true };
+const adminSession = { userId: 'usr-admin', organizationId: 'org-test-shift', roles: ['admin' as const], email: 'admin@test.com', fullName: 'Admin', permissions: [], isActive: true };
+const hrSession = { userId: 'usr-hr', organizationId: 'org-test-shift', roles: ['hr' as const], email: 'hr@test.com', fullName: 'HR', permissions: [], isActive: true };
+const managerSession = { userId: 'usr-manager', organizationId: 'org-test-shift', roles: ['manager' as const], email: 'mgr@test.com', fullName: 'Manager', permissions: [], isActive: true };
+const employeeSession = { userId: 'usr-emp', organizationId: 'org-test-shift', roles: ['employee' as const], email: 'emp@test.com', fullName: 'Employee', permissions: [], isActive: true };
 
 // ── Fixture data ──────────────────────────────────────────────────────────────
 
 const activeShift = {
   id: 'shift-001',
+  organizationId: 'org-test-shift',
   code: 'CA-HANH-CHINH',
   name: 'Ca Hành Chính',
   shiftType: 'FIXED',
@@ -98,6 +99,7 @@ const overnightShift = {
 
 const activeEmployee = {
   id: 'emp-001',
+  organizationId: 'org-test-shift',
   employeeCode: 'EMP-001',
   firstName: 'Văn A',
   lastName: 'Nguyễn',
@@ -114,6 +116,8 @@ describe('PHASE 5 — WORK SHIFT & SCHEDULE TEST SUITE', () => {
     mockPrisma.workShift.findFirst.mockImplementation((...args: any[]) =>
       mockPrisma.workShift.findUnique(...args)
     );
+
+    mockPrisma.employee.findUnique.mockResolvedValue(activeEmployee);
 
     // Default $transaction mock: executes callback immediately
     mockPrisma.$transaction.mockImplementation(async (cb: (tx: typeof mockPrisma) => unknown) =>

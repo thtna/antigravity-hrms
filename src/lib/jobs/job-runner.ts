@@ -105,7 +105,7 @@ export class JobRunner {
 JobRunner.register(
   'DAILY_ATTENDANCE_RECONCILIATION',
   'Tự động đối soát ca làm việc và ghi nhận vắng mặt không phép (ABSENT) cho các ca không có check-in',
-  async (params?: { targetDate?: string }) => {
+  async (params?: { targetDate?: string; organizationId?: string }) => {
     const now = new Date();
     // Default to yesterday
     const target = params?.targetDate
@@ -120,11 +120,13 @@ JobRunner.register(
       where: {
         workDate: { gte: dayStart, lte: dayEnd },
         status: 'SCHEDULED',
+        ...(params?.organizationId ? { organizationId: params.organizationId } : {}),
       },
       select: {
         id: true,
         employeeId: true,
         workDate: true,
+        organizationId: true,
       },
     });
 
@@ -177,6 +179,7 @@ JobRunner.register(
             notes: 'Hệ thống tự động ghi nhận vắng mặt không phép (Attendance Reconciliation Job)',
           },
           create: {
+            organizationId: sch.organizationId,
             employeeId: sch.employeeId,
             scheduleId: sch.id,
             workDate: sch.workDate,

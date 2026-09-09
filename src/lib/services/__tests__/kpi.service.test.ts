@@ -43,6 +43,7 @@ import { UserSession } from '@/types';
 const adminSession: UserSession = {
   userId: 'usr-admin',
   employeeId: 'emp-admin',
+  organizationId: 'org-test-kpi',
   roles: ['admin'],
   email: 'admin@test.com',
   fullName: 'Admin User',
@@ -53,6 +54,7 @@ const adminSession: UserSession = {
 const hrSession: UserSession = {
   userId: 'usr-hr',
   employeeId: 'emp-hr',
+  organizationId: 'org-test-kpi',
   roles: ['hr'],
   email: 'hr@test.com',
   fullName: 'HR User',
@@ -63,6 +65,7 @@ const hrSession: UserSession = {
 const managerSession: UserSession = {
   userId: 'usr-mgr',
   employeeId: 'emp-mgr',
+  organizationId: 'org-test-kpi',
   roles: ['manager'],
   email: 'manager@test.com',
   fullName: 'Manager User',
@@ -73,6 +76,7 @@ const managerSession: UserSession = {
 const employeeSession: UserSession = {
   userId: 'usr-emp',
   employeeId: 'emp-001',
+  organizationId: 'org-test-kpi',
   roles: ['employee'],
   email: 'employee@test.com',
   fullName: 'Employee One',
@@ -84,12 +88,14 @@ const employeeSession: UserSession = {
 
 const mockDepartment = {
   id: 'dept-tech',
+  organizationId: 'org-test-kpi',
   code: 'TECH',
   name: 'Phòng Kỹ Thuật',
 };
 
 const mockEmployee = {
   id: 'emp-001',
+  organizationId: 'org-test-kpi',
   employeeCode: 'EMP001',
   firstName: 'Van A',
   lastName: 'Nguyen',
@@ -101,6 +107,7 @@ const mockEmployee = {
 
 const mockKpi = {
   id: 'kpi-001',
+  organizationId: 'org-test-kpi',
   code: 'SALES_REV_M',
   title: 'Doanh Thu Tháng',
   description: 'Chỉ tiêu doanh thu bán hàng hàng tháng',
@@ -121,6 +128,7 @@ const mockKpi = {
 
 const mockResult = {
   id: 'res-001',
+  organizationId: 'org-test-kpi',
   employeeId: 'emp-001',
   kpiId: 'kpi-001',
   period: '2026-09',
@@ -150,6 +158,7 @@ describe('PHASE 11 — KPI Engine: KpiService Test Suite', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setupTransaction();
+    mockPrisma.employee.findUnique.mockResolvedValue(mockEmployee);
     mockPrisma.kpi.findFirst.mockImplementation((...args: any[]) =>
       mockPrisma.kpi.findUnique(...args)
     );
@@ -338,8 +347,8 @@ describe('PHASE 11 — KPI Engine: KpiService Test Suite', () => {
 
     it('blocks manager from assigning to employee in unmanaged department (403)', async () => {
       mockPrisma.employee.findUnique
-        .mockResolvedValueOnce({ departmentId: 'dept-other' }) // target employee
-        .mockResolvedValueOnce({ managedDepartments: [{ id: 'dept-tech' }] }); // manager managed depts
+        .mockResolvedValueOnce({ departmentId: 'dept-other', organizationId: 'org-test-kpi' }) // target employee
+        .mockResolvedValueOnce({ managedDepartments: [{ id: 'dept-tech' }], organizationId: 'org-test-kpi' }); // manager managed depts
 
       await expect(
         KpiService.assignKpiToEmployee(

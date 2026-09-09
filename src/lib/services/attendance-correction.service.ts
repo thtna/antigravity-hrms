@@ -14,10 +14,9 @@ import { Prisma } from '@prisma/client';
 
 export class AttendanceCorrectionService {
   /**
-   * Resolve an employee ID for a given session.
-   * If session.employeeId is provided, returns it; otherwise looks up employee by userId.
+   * Resolve an employee ID and verified organizationId for a given session.
    */
-  private static async resolveEmployeeId(session: UserSession, targetEmployeeId?: string): Promise<string> {
+  private static async resolveEmployeeId(session: UserSession, targetEmployeeId?: string): Promise<{ id: string; organizationId: string }> {
     const isPrivileged = session.roles.includes('admin') || session.roles.includes('hr');
 
     if (targetEmployeeId) {
@@ -26,28 +25,24 @@ export class AttendanceCorrectionService {
       }
       const target = await prisma.employee.findUnique({
         where: { id: targetEmployeeId },
-        select: { id: true, status: true, deletedAt: true },
+        select: { id: true, status: true, deletedAt: true, organizationId: true },
       });
-      if (!target || target.deletedAt || target.status === 'TERMINATED') {
-        throw ApiError.badRequest('Nhân viên không tồn tại hoặc đã nghỉ việc.');
+      if (!target || target.deletedAt || target.status === 'TERMINATED' || (session.organizationId && target.organizationId !== session.organizationId)) {
+        throw ApiError.badRequest('Nhân viên không tồn tại, đã nghỉ việc hoặc không thuộc tổ chức hiện tại.');
       }
-      return target.id;
-    }
-
-    if (session.employeeId) {
-      return session.employeeId;
+      return { id: target.id, organizationId: target.organizationId };
     }
 
     const self = await prisma.employee.findUnique({
-      where: { userId: session.userId },
-      select: { id: true, status: true, deletedAt: true },
+      where: session.employeeId ? { id: session.employeeId } : { userId: session.userId },
+      select: { id: true, status: true, deletedAt: true, organizationId: true },
     });
 
     if (!self || self.deletedAt || self.status === 'TERMINATED') {
       throw ApiError.badRequest('Không tìm thấy thông tin nhân viên hợp lệ hoặc nhân viên đã nghỉ việc.');
     }
 
-    return self.id;
+    return { id: self.id, organizationId: self.organizationId };
   }
 
   /**
@@ -60,7 +55,9 @@ export class AttendanceCorrectionService {
     targetEmployeeId?: string,
     clientInfo?: { ipAddress?: string; userAgent?: string }
   ) {
-    const employeeId = await this.resolveEmployeeId(session, targetEmployeeId);
+    const emp = await this.resolveEmployeeId(session, targetEmployeeId);
+    const employeeId = emp.id;
+    const organizationId = emp.organizationId;
 
     // Parse and validate work date
     const workDate = new Date(input.workDate);
@@ -129,7 +126,7 @@ export class AttendanceCorrectionService {
     const adjustment = await prisma.$transaction(async (tx) => {
       const created = await tx.attendanceAdjustment.create({
         data: {
-          organizationId: session.organizationId ?? '__no_org__',
+          organizationId,
           attendanceId: attendance ? attendance.id : null,
           employeeId,
           workDate,
@@ -162,6 +159,7 @@ export class AttendanceCorrectionService {
           action: 'CREATE_ATTENDANCE_CORRECTION',
           entity: 'attendance_adjustment',
           entityId: created.id,
+          organizationId,
           newValues: {
             correctionType: created.correctionType,
             workDate: input.workDate,
@@ -370,6 +368,7 @@ export class AttendanceCorrectionService {
             action: 'REJECT_ATTENDANCE_CORRECTION',
             entity: 'attendance_adjustment',
             entityId: id,
+            organizationId: correction.organizationId || session.organizationId || null,
             oldValues: { status: 'PENDING' },
             newValues: {
               status: 'REJECTED',
@@ -423,6 +422,7 @@ export class AttendanceCorrectionService {
           action: 'APPROVE_ATTENDANCE_CORRECTION',
           entity: 'attendance_adjustment',
           entityId: id,
+          organizationId: correction.organizationId || session.organizationId || null,
           oldValues: {
             adjustmentStatus: 'PENDING',
             attendance: oldSnapshot,
@@ -547,6 +547,7 @@ export class AttendanceCorrectionService {
       notes = `${notes} (Phê duyệt: ${processInput.approvalNotes})`.trim();
     }
 
+    const targetOrgId = correction.organizationId || resolvedShift.organizationId;
     const updatedAttendance = await tx.attendance.upsert({
       where: {
         employeeId_workDate: {
@@ -555,6 +556,7 @@ export class AttendanceCorrectionService {
         },
       },
       create: {
+        organizationId: targetOrgId,
         employeeId,
         scheduleId: resolvedShift.scheduleId || null,
         workDate,
@@ -624,8 +626,8 @@ export class AttendanceCorrectionService {
 
     const isHrOrAdmin = session.roles.includes('admin') || session.roles.includes('hr');
     if (!isHrOrAdmin) {
-      const selfEmployeeId = await this.resolveEmployeeId(session);
-      if (correction.employeeId !== selfEmployeeId) {
+      const selfEmployee = await this.resolveEmployeeId(session);
+      if (correction.employeeId !== selfEmployee.id) {
         throw ApiError.forbidden('Bạn chỉ có thể hủy yêu cầu của chính mình.');
       }
     }

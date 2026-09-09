@@ -803,6 +803,8 @@ vi.mock('@/lib/logger', () => ({
 
 describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
   // Shared Test Actors
+  const testOrgId = 'org-e2e-test';
+
   const adminSession: UserSession = {
     userId: 'usr-admin-e2e',
     employeeId: 'emp-admin-e2e',
@@ -811,6 +813,7 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
     roles: ['admin'],
     permissions: ['*'],
     isActive: true,
+    organizationId: testOrgId,
   };
 
   const hrSession: UserSession = {
@@ -821,6 +824,7 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
     roles: ['hr'],
     permissions: ['employee:*', 'attendance:*', 'leave:*', 'payroll:*'],
     isActive: true,
+    organizationId: testOrgId,
   };
 
   let employeeSession: UserSession;
@@ -837,6 +841,24 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
     state.roles.set('hr', { id: 'role-hr', code: 'hr', name: 'Nhân sự' });
     state.roles.set('manager', { id: 'role-manager', code: 'manager', name: 'Quản lý' });
     state.roles.set('employee', { id: 'role-employee', code: 'employee', name: 'Nhân viên' });
+
+    // Seed default department & position for initial employee provisioning
+    state.departments.set('dept-dev', {
+      id: 'dept-dev',
+      organizationId: testOrgId,
+      code: 'DEV',
+      name: 'Phòng Phát Triển',
+      isActive: true,
+      deletedAt: null,
+    });
+    state.positions.set('pos-dev', {
+      id: 'pos-dev',
+      organizationId: testOrgId,
+      code: 'DEV',
+      title: 'Kỹ Sư Phần Mềm',
+      isActive: true,
+      deletedAt: null,
+    });
   });
 
   // ─── STAGE 1: LOGIN & AUTHENTICATION ─────────────────────────────────────
@@ -899,13 +921,14 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
 
       // Provision employee session
       employeeSession = {
-        userId: created.user.id,
+        userId: (created as any).user?.id || (created as any).userId,
         employeeId: created.id,
-        email: created.user.email,
+        email: (created as any).user?.email || newEmpInput.email,
         fullName: 'Nguyễn Văn A',
         roles: ['employee'],
         permissions: ['attendance:self', 'leave:self', 'payroll:self'],
         isActive: true,
+        organizationId: testOrgId,
       };
     });
 
@@ -1314,6 +1337,7 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
           endDate: new Date('2026-09-30'),
           standardWorkDays: 22,
           status: 'DRAFT',
+          organizationId: testOrgId,
         },
       });
       testPayrollPeriodId = period.id;

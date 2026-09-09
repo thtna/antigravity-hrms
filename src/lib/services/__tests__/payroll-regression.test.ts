@@ -603,6 +603,7 @@ describe('PHASE 9 — PAYROLL REGRESSION & MULTI-TENANT MATHEMATICAL INVARIANCE'
     it('[LIFECYCLE-02] handles Rejection: REVIEW -> REJECT_TO_CALCULATED for revisions', async () => {
       const inReviewPeriod = {
         id: 'prd-2026-09',
+        organizationId: 'org-tenant-a',
         code: 'PR-2026-09',
         status: 'REVIEW',
         _count: { payrolls: 5 },
@@ -645,6 +646,7 @@ describe('PHASE 9 — PAYROLL REGRESSION & MULTI-TENANT MATHEMATICAL INVARIANCE'
       // Attempting to APPROVE directly from DRAFT (Invalid transition)
       mockPrisma.payrollPeriod.findUnique.mockResolvedValueOnce({
         id: 'prd-draft',
+        organizationId: 'org-tenant-a',
         code: 'PR-DRAFT',
         status: 'DRAFT',
         _count: { payrolls: 1 },

@@ -59,6 +59,7 @@ import { AttendanceService } from '@/lib/services/attendance.service';
 
 const employeeSession = {
   userId: 'usr-emp-001',
+  organizationId: 'org-test-qr',
   roles: ['employee' as const],
   email: 'emp@antigravity.test',
   fullName: 'Nguyễn Văn A',
@@ -68,6 +69,7 @@ const employeeSession = {
 
 const activeEmployee = {
   id: 'emp-001',
+  organizationId: 'org-test-qr',
   userId: 'usr-emp-001',
   employeeCode: 'EMP-001',
   firstName: 'Văn A',
@@ -78,6 +80,7 @@ const activeEmployee = {
 
 const terminatedEmployee = {
   id: 'emp-002',
+  organizationId: 'org-test-qr',
   userId: 'usr-emp-001',
   employeeCode: 'EMP-002',
   firstName: 'Thị B',

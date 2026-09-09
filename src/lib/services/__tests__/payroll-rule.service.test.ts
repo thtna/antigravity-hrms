@@ -29,6 +29,7 @@ import { UserSession } from '@/types';
 const adminSession: UserSession = {
   userId: 'usr-admin',
   employeeId: 'emp-admin',
+  organizationId: 'org-test-payroll-rule',
   roles: ['admin'],
   email: 'admin@test.com',
   fullName: 'Admin User',
@@ -39,6 +40,7 @@ const adminSession: UserSession = {
 const hrSession: UserSession = {
   userId: 'usr-hr',
   employeeId: 'emp-hr',
+  organizationId: 'org-test-payroll-rule',
   roles: ['hr'],
   email: 'hr@test.com',
   fullName: 'HR User',
@@ -49,6 +51,7 @@ const hrSession: UserSession = {
 const employeeSession: UserSession = {
   userId: 'usr-emp',
   employeeId: 'emp-001',
+  organizationId: 'org-test-payroll-rule',
   roles: ['employee'],
   email: 'emp@test.com',
   fullName: 'Employee One',
@@ -58,6 +61,7 @@ const employeeSession: UserSession = {
 
 const mockDbRule = {
   id: 'rule-001',
+  organizationId: 'org-test-payroll-rule',
   code: 'RULE_VN_2026',
   name: 'Quy Chế Việt Nam 2026',
   description: 'Mô tả quy chế',
@@ -203,7 +207,7 @@ describe('PHASE 14 — PAYROLL RULE SERVICE TEST SUITE', () => {
       const res = await PayrollRuleService.setDefaultRule('rule-002', adminSession);
 
       expect(mockPrisma.payrollRule.updateMany).toHaveBeenCalledWith({
-        where: { isDefault: true },
+        where: { isDefault: true, organizationId: 'org-test-payroll-rule' },
         data: { isDefault: false },
       });
       expect(res.isDefault).toBe(true);

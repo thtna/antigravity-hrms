@@ -24,12 +24,14 @@ export class PayrollRuleService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    // Auto-seed default rules if database has none
-    await this.seedDefaultRulesIfEmpty();
+    // Auto-seed default rules for this tenant if organization has none
+    if (session.organizationId) {
+      await this.seedDefaultRulesIfEmpty(session.organizationId);
+    }
 
     return await prisma.payrollRule.findMany({
       where: {
-        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
       },
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
       include: {
@@ -57,15 +59,17 @@ export class PayrollRuleService {
     return rule;
   }
 
-  static async getDefaultRule(): Promise<PayrollRuleConfig> {
-    await this.seedDefaultRulesIfEmpty();
+  static async getDefaultRule(organizationId?: string): Promise<PayrollRuleConfig> {
+    if (organizationId) {
+      await this.seedDefaultRulesIfEmpty(organizationId);
 
-    const dbDefault = await prisma.payrollRule.findFirst({
-      where: { isDefault: true, isActive: true },
-    });
+      const dbDefault = await prisma.payrollRule.findFirst({
+        where: { organizationId, isDefault: true, isActive: true },
+      });
 
-    if (dbDefault) {
-      return this.mapDbRuleToConfig(dbDefault);
+      if (dbDefault) {
+        return this.mapDbRuleToConfig(dbDefault);
+      }
     }
 
     return VIETNAM_STATUTORY_RULE_2026;
@@ -82,21 +86,23 @@ export class PayrollRuleService {
     }
 
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
-    const isOwnerAllowed = Boolean(
-      options?.allowOwnerOnboarding &&
-        (session.tenantRole === 'OWNER' || (session.roles as string[]).includes('owner') || (session as any).tenantRole === 'owner')
-    );
-
-    if (!isHrOrAdmin && !isOwnerAllowed) {
+    const isOwnerOnboarding = session.tenantRole === 'OWNER' && options?.allowOwnerOnboarding;
+    if (!isHrOrAdmin && !isOwnerOnboarding) {
       throw ApiError.forbidden('Chỉ HR hoặc Quản trị viên mới có quyền tạo quy chế lương.');
     }
 
-    const client = options?.tx || prisma;
+    const targetOrgId = session.organizationId || ((session.roles.includes('super_admin') && (input as any).organizationId) ? (input as any).organizationId : null);
+    if (!targetOrgId) {
+      throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để tạo quy chế lương.');
+    }
 
-    const existingCode = await client.payrollRule.findFirst({
+    const db = options?.tx || prisma;
+
+    // Check duplicate rule code in organization
+    const existingCode = await db.payrollRule.findFirst({
       where: {
         code: input.code,
-        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: targetOrgId,
       },
     });
     if (existingCode) {
@@ -109,7 +115,7 @@ export class PayrollRuleService {
         await tx.payrollRule.updateMany({
           where: {
             isDefault: true,
-            ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+            organizationId: targetOrgId,
           },
           data: { isDefault: false },
         });
@@ -117,6 +123,7 @@ export class PayrollRuleService {
 
       const created = await tx.payrollRule.create({
         data: {
+          organizationId: targetOrgId,
           code: input.code,
           name: input.name,
           description: input.description || null,
@@ -131,7 +138,6 @@ export class PayrollRuleService {
           roundingConfig: input.roundingConfig as any,
           effectiveFrom: new Date(input.effectiveFrom),
           effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
-          ...(session.organizationId ? { organizationId: session.organizationId } : {}),
         },
       });
 
@@ -142,11 +148,10 @@ export class PayrollRuleService {
           action: 'CREATE_PAYROLL_RULE',
           entity: 'PayrollRule',
           entityId: created.id,
-          organizationId: session.organizationId || null,
+          organizationId: targetOrgId,
           newValues: {
             code: created.code,
             name: created.name,
-            isDefault: created.isDefault,
             version: created.version,
           },
         },
@@ -192,7 +197,7 @@ export class PayrollRuleService {
     return await prisma.$transaction(async (tx) => {
       if (input.isDefault) {
         await tx.payrollRule.updateMany({
-          where: { isDefault: true, id: { not: id } },
+          where: { isDefault: true, id: { not: id }, organizationId: existing.organizationId },
           data: { isDefault: false },
         });
       }
@@ -227,6 +232,7 @@ export class PayrollRuleService {
           action: 'UPDATE_PAYROLL_RULE',
           entity: 'PayrollRule',
           entityId: id,
+          organizationId: existing.organizationId,
           oldValues: {
             version: existing.version,
             isDefault: existing.isDefault,
@@ -266,7 +272,7 @@ export class PayrollRuleService {
 
     return await prisma.$transaction(async (tx) => {
       await tx.payrollRule.updateMany({
-        where: { isDefault: true },
+        where: { isDefault: true, organizationId: rule.organizationId },
         data: { isDefault: false },
       });
 
@@ -281,6 +287,7 @@ export class PayrollRuleService {
           action: 'SET_DEFAULT_PAYROLL_RULE',
           entity: 'PayrollRule',
           entityId: id,
+          organizationId: rule.organizationId,
           newValues: { code: updated.code, isDefault: true },
         },
       });
@@ -318,7 +325,7 @@ export class PayrollRuleService {
         rounding: parsed.ruleConfig.roundingConfig as any,
       };
     } else {
-      ruleConfig = await this.getDefaultRule();
+      ruleConfig = await this.getDefaultRule(session.organizationId || undefined);
     }
 
     const calculationResult = PayrollRuleEngine.calculate({
@@ -327,6 +334,23 @@ export class PayrollRuleService {
       adjustments: parsed.adjustments,
       period: parsed.period || new Date().toISOString().slice(0, 7),
       ruleConfig,
+    });
+
+    // Audit Simulation
+    await prisma.auditLog.create({
+      data: {
+        actorId: session.userId,
+        action: 'SIMULATE_PAYROLL',
+        entity: 'PayrollRule',
+        entityId: parsed.ruleId || 'DYNAMIC_CONFIG',
+        organizationId: session.organizationId || null,
+        newValues: {
+          grossSalary: (calculationResult as any).grossSalary,
+          netSalary: (calculationResult as any).netSalary,
+          totalCost: (calculationResult as any).employerTotalCost,
+          ruleCode: ruleConfig.ruleCode,
+        },
+      },
     });
 
     return {
@@ -340,14 +364,19 @@ export class PayrollRuleService {
   }
 
   // ── 6. Seed Default Rules ──────────────────────────────────────────────────
-  static async seedDefaultRulesIfEmpty() {
-    const count = await prisma.payrollRule.count();
+  static async seedDefaultRulesIfEmpty(organizationId?: string) {
+    if (!organizationId) return;
+
+    const count = await prisma.payrollRule.count({
+      where: { organizationId },
+    });
     if (count > 0) return;
 
-    logger.info('[PayrollRuleService] Seeding default reference payroll rules...');
+    logger.info(`[PayrollRuleService] Seeding default reference payroll rules for organization ${organizationId}...`);
 
     await prisma.payrollRule.create({
       data: {
+        organizationId,
         code: VIETNAM_STATUTORY_RULE_2026.ruleCode!,
         name: VIETNAM_STATUTORY_RULE_2026.ruleName!,
         description:
@@ -367,6 +396,7 @@ export class PayrollRuleService {
 
     await prisma.payrollRule.create({
       data: {
+        organizationId,
         code: HOURLY_PARTTIME_RULE.ruleCode!,
         name: HOURLY_PARTTIME_RULE.ruleName!,
         description: 'Quy chế tính lương theo giờ thực tế cho nhân sự bán thời gian / thử việc / CTV.',
@@ -385,6 +415,7 @@ export class PayrollRuleService {
 
     await prisma.payrollRule.create({
       data: {
+        organizationId,
         code: EXPAT_FLAT_TAX_RULE.ruleCode!,
         name: EXPAT_FLAT_TAX_RULE.ruleName!,
         description: 'Quy chế tiền lương áp dụng thuế phẳng 20% cho chuyên gia nước ngoài không cư trú.',

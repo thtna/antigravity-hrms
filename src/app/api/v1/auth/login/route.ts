@@ -80,9 +80,32 @@ export async function POST(
       throw ApiError.forbidden('Tài khoản của bạn đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.');
     }
 
-    // 6. Check Organization Membership & Organization Status (PENDING must not enter dashboard)
-    const primaryMembership = user.organizationMembers?.find((m: any) => m.isDefault) || user.organizationMembers?.[0];
-    if (primaryMembership) {
+    // 6. Check Organization Membership & Organization Status
+    const rawRoles = user.userRoles ? user.userRoles.map((ur) => ur.role.code) : [];
+    const isSuperAdmin = rawRoles.includes('super_admin');
+
+    let verifiedOrganizationId: string | null = null;
+    let verifiedOrgSlug: string | undefined = undefined;
+    let verifiedOrgName: string | undefined = undefined;
+    let verifiedOrgStatus: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED' | 'CLOSED' | undefined = undefined;
+    let verifiedTenantRole: 'OWNER' | 'ADMIN' | 'HR_MANAGER' | 'MANAGER' | 'EMPLOYEE' | undefined = undefined;
+    let onboardingStep = 0;
+    let needsOnboarding = false;
+
+    if (isSuperAdmin) {
+      // Platform SUPER_ADMIN is platform-scoped only.
+      // Even if accidental organization memberships exist, verifiedOrganizationId MUST remain null.
+      verifiedOrganizationId = null;
+    } else {
+      // Tenant user must have an active organization membership
+      const activeMemberships = (user.organizationMembers || []).filter((m: any) => m.isActive);
+      const primaryMembership = activeMemberships.find((m: any) => m.isDefault) || activeMemberships[0];
+
+      if (!primaryMembership) {
+        logger.warn('Login blocked: tenant user has no active organization membership', { email, userId: user.id });
+        throw ApiError.forbidden('Tài khoản của bạn chưa thuộc tổ chức nào hoặc chưa có tư cách thành viên hợp lệ.');
+      }
+
       const orgStatus = primaryMembership.organization?.status;
       if (orgStatus === 'PENDING') {
         logger.warn('Login blocked: organization pending approval', { email, orgId: primaryMembership.organizationId });
@@ -97,22 +120,28 @@ export async function POST(
       if (orgStatus === 'CLOSED') {
         throw ApiError.forbidden('Doanh nghiệp của bạn đã ĐÓNG CỬA (CLOSED).');
       }
-      if (!primaryMembership.isActive) {
-        throw ApiError.forbidden('Tư cách thành viên của bạn trong tổ chức này đã bị vô hiệu hóa.');
-      }
+
+      verifiedOrganizationId = primaryMembership.organizationId;
+      verifiedOrgSlug = primaryMembership.organization?.slug;
+      verifiedOrgName = primaryMembership.organization?.name;
+      verifiedOrgStatus = primaryMembership.organization?.status;
+      verifiedTenantRole = primaryMembership.role;
+
+      onboardingStep = Number((primaryMembership.organization as any)?.onboardingStep ?? 0);
+      const onboardingSkipped = Boolean((primaryMembership.organization as any)?.onboardingSkipped);
+      const isOwner = primaryMembership.role === 'OWNER';
+      needsOnboarding = isOwner && onboardingStep < 9 && !onboardingSkipped;
     }
 
     // 7. Reset rate limit counter on success
     resetRateLimit(rateKey);
 
     // 8. Aggregate roles and permissions
-    const rawRoles = user.userRoles ? user.userRoles.map((ur) => ur.role.code) : [];
-    const tenantRole = primaryMembership?.role;
-    if (tenantRole === 'OWNER' || tenantRole === 'ADMIN') {
+    if (verifiedTenantRole === 'OWNER' || verifiedTenantRole === 'ADMIN') {
       if (!rawRoles.includes('admin')) rawRoles.push('admin');
-    } else if (tenantRole === 'HR_MANAGER') {
+    } else if (verifiedTenantRole === 'HR_MANAGER') {
       if (!rawRoles.includes('hr')) rawRoles.push('hr');
-    } else if (tenantRole === 'MANAGER') {
+    } else if (verifiedTenantRole === 'MANAGER') {
       if (!rawRoles.includes('manager')) rawRoles.push('manager');
     }
 
@@ -137,15 +166,9 @@ export async function POST(
     const permissions = Array.from(permissionSet);
 
     // 9. Construct user session with strict server-side tenant authority
-    // 9. Construct user session with strict server-side tenant authority
     const fullName = user.employee 
       ? `${user.employee.lastName} ${user.employee.firstName}`.trim() 
       : user.email.split('@')[0];
-
-    const onboardingStep = Number((primaryMembership?.organization as any)?.onboardingStep ?? 0);
-    const onboardingSkipped = Boolean((primaryMembership?.organization as any)?.onboardingSkipped);
-    const isOwner = primaryMembership?.role === 'OWNER';
-    const needsOnboarding = isOwner && onboardingStep < 9 && !onboardingSkipped;
 
     const sessionPayload: UserSession = {
       userId: user.id,
@@ -156,11 +179,11 @@ export async function POST(
       roles,
       permissions,
       isActive: user.isActive,
-      organizationId: primaryMembership?.organizationId,
-      organizationSlug: primaryMembership?.organization?.slug,
-      organizationName: primaryMembership?.organization?.name,
-      organizationStatus: primaryMembership?.organization?.status,
-      tenantRole: primaryMembership?.role,
+      organizationId: verifiedOrganizationId,
+      organizationSlug: verifiedOrgSlug,
+      organizationName: verifiedOrgName,
+      organizationStatus: verifiedOrgStatus,
+      tenantRole: verifiedTenantRole,
       onboardingStep,
       needsOnboarding,
     };
@@ -184,7 +207,7 @@ export async function POST(
         entityId: user.id,
         ipAddress: ip,
         userAgent: request.headers.get('user-agent'),
-        organizationId: primaryMembership?.organizationId || 'org_default_tanphong',
+        organizationId: verifiedOrganizationId,
       },
     }).catch((err) => logger.error('Failed to create audit log for login', err));
 
@@ -192,7 +215,7 @@ export async function POST(
       userId: user.id,
       email: user.email,
       roles,
-      organizationId: primaryMembership?.organizationId,
+      organizationId: verifiedOrganizationId,
       needsOnboarding,
     });
 
@@ -207,11 +230,11 @@ export async function POST(
       roles,
       permissions,
       lastLoginAt: user.lastLoginAt,
-      organizationId: primaryMembership?.organizationId,
-      organizationSlug: primaryMembership?.organization?.slug,
-      organizationName: primaryMembership?.organization?.name,
-      organizationStatus: primaryMembership?.organization?.status,
-      tenantRole: primaryMembership?.role,
+      organizationId: verifiedOrganizationId,
+      organizationSlug: verifiedOrgSlug,
+      organizationName: verifiedOrgName,
+      organizationStatus: verifiedOrgStatus,
+      tenantRole: verifiedTenantRole,
       onboardingStep,
       needsOnboarding,
     };

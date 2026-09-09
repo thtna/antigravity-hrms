@@ -37,7 +37,7 @@ export interface UserSession {
   permissions: string[];
   isActive: boolean;
   // Multi-tenant context
-  organizationId?: string;
+  organizationId?: string | null;
   organizationSlug?: string;
   organizationName?: string;
   organizationStatus?: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED' | 'CLOSED';
@@ -57,7 +57,7 @@ export interface SanitizedUser {
   permissions: string[];
   lastLoginAt?: Date | null;
   // Multi-tenant context
-  organizationId?: string;
+  organizationId?: string | null;
   organizationSlug?: string;
   organizationName?: string;
   organizationStatus?: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED' | 'CLOSED';

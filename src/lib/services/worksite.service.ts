@@ -132,11 +132,16 @@ export class WorksiteService {
   static async createWorksite(input: CreateWorksiteInput, session: UserSession) {
     this.ensurePrivileged(session);
 
+    const targetOrgId = session.organizationId || ((session.roles.includes('super_admin') && (input as any).organizationId) ? (input as any).organizationId : null);
+    if (!targetOrgId) {
+      throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để tạo địa điểm làm việc.');
+    }
+
     // Check duplicate name scoped to organization
     const existing = await prisma.worksite.findFirst({
       where: {
         name: { equals: input.name.trim(), mode: 'insensitive' },
-        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: targetOrgId,
       },
     });
 
@@ -146,13 +151,13 @@ export class WorksiteService {
 
     const created = await prisma.worksite.create({
       data: {
+        organizationId: targetOrgId,
         name: input.name.trim(),
         address: input.address.trim(),
         latitude: new Prisma.Decimal(input.latitude),
         longitude: new Prisma.Decimal(input.longitude),
         radiusMeters: input.radiusMeters,
         isActive: input.isActive ?? true,
-        ...(session.organizationId ? { organizationId: session.organizationId } : {}),
       },
     });
 
@@ -162,6 +167,7 @@ export class WorksiteService {
         action: 'CREATE_WORKSITE',
         entity: 'worksite',
         entityId: created.id,
+        organizationId: targetOrgId,
         newValues: {
           name: created.name,
           address: created.address,
@@ -248,6 +254,7 @@ export class WorksiteService {
         action: 'UPDATE_WORKSITE',
         entity: 'worksite',
         entityId: updated.id,
+        organizationId: worksite.organizationId || session.organizationId || null,
         oldValues: {
           name: worksite.name,
           address: worksite.address,
@@ -325,6 +332,7 @@ export class WorksiteService {
         action: 'DELETE_WORKSITE',
         entity: 'worksite',
         entityId: id,
+        organizationId: worksite.organizationId || session.organizationId || null,
         oldValues: {
           name: worksite.name,
           address: worksite.address,

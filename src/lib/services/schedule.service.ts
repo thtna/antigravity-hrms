@@ -22,26 +22,32 @@ export class ScheduleService {
   }
 
   /**
-   * Verify shift exists and is active.
+   * Verify shift exists and is active, optionally verifying tenant ownership.
    */
-  private static async requireActiveShift(shiftId: string) {
+  private static async requireActiveShift(shiftId: string, expectedOrgId?: string) {
     const shift = await prisma.workShift.findUnique({ where: { id: shiftId } });
     if (!shift || shift.deletedAt || !shift.isActive) {
       throw ApiError.badRequest(`Ca làm việc [${shiftId}] không tồn tại hoặc đã bị ngưng hoạt động.`);
+    }
+    if (expectedOrgId && shift.organizationId !== expectedOrgId) {
+      throw ApiError.forbidden('Ca làm việc không thuộc cùng tổ chức với nhân viên/tổ chức hiện tại.');
     }
     return shift;
   }
 
   /**
-   * Verify employee exists and is active.
+   * Verify employee exists and is active, returning verified employee record.
    */
-  private static async requireActiveEmployee(employeeId: string) {
+  private static async requireActiveEmployee(employeeId: string, expectedOrgId?: string) {
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
-      select: { id: true, status: true, deletedAt: true, firstName: true, lastName: true, employeeCode: true },
+      select: { id: true, status: true, deletedAt: true, firstName: true, lastName: true, employeeCode: true, organizationId: true },
     });
     if (!employee || employee.deletedAt || employee.status === 'TERMINATED') {
       throw ApiError.badRequest(`Nhân viên [${employeeId}] không tồn tại hoặc đã nghỉ việc.`);
+    }
+    if (expectedOrgId && employee.organizationId !== expectedOrgId) {
+      throw ApiError.forbidden('Nhân viên không thuộc tổ chức hiện tại.');
     }
     return employee;
   }
@@ -51,8 +57,8 @@ export class ScheduleService {
    */
   static async assignSingleSchedule(input: AssignSingleScheduleInput, session: UserSession) {
     this.requireScheduleAccess(session);
-    await this.requireActiveEmployee(input.employeeId);
-    const shift = await this.requireActiveShift(input.shiftId);
+    const employee = await this.requireActiveEmployee(input.employeeId, session.organizationId || undefined);
+    const shift = await this.requireActiveShift(input.shiftId, employee.organizationId);
 
     // Check for existing schedule on the same date → upsert
     const existing = await prisma.employeeSchedule.findUnique({
@@ -86,6 +92,7 @@ export class ScheduleService {
             action: 'UPDATE_SCHEDULE',
             entity: 'employee_schedules',
             entityId: existing.id,
+            organizationId: employee.organizationId,
             oldValues: { shiftId: existing.shiftId },
             newValues: { shiftId: input.shiftId },
           },
@@ -93,7 +100,7 @@ export class ScheduleService {
       } else {
         result = await tx.employeeSchedule.create({
           data: {
-            organizationId: session.organizationId ?? '__no_org__',
+            organizationId: employee.organizationId,
             employeeId: input.employeeId,
             shiftId: input.shiftId,
             workDate,
@@ -115,6 +122,7 @@ export class ScheduleService {
             action: 'CREATE_SCHEDULE',
             entity: 'employee_schedules',
             entityId: result.id,
+            organizationId: employee.organizationId,
             newValues: { employeeId: input.employeeId, shiftId: input.shiftId, workDate: input.workDate },
           },
         });
@@ -138,11 +146,16 @@ export class ScheduleService {
    */
   static async bulkAssignSchedule(input: BulkAssignScheduleInput, session: UserSession) {
     this.requireScheduleAccess(session);
-    await this.requireActiveShift(input.shiftId);
+    const shift = await this.requireActiveShift(input.shiftId, session.organizationId || undefined);
 
-    // Validate all employees exist
+    // Validate all employees exist and belong to the same organization as the shift
+    const employeeMap = new Map<string, { id: string; organizationId: string }>();
     for (const eid of input.employeeIds) {
-      await this.requireActiveEmployee(eid);
+      const emp = await this.requireActiveEmployee(eid, session.organizationId || shift.organizationId);
+      if (emp.organizationId !== shift.organizationId) {
+        throw ApiError.forbidden('Tất cả nhân viên và ca làm việc phải thuộc cùng một tổ chức.');
+      }
+      employeeMap.set(eid, emp);
     }
 
     const startDate = new Date(input.startDate);
@@ -168,6 +181,7 @@ export class ScheduleService {
 
     await prisma.$transaction(async (tx) => {
       for (const eid of input.employeeIds) {
+        const emp = employeeMap.get(eid)!;
         for (const date of dates) {
           const existing = await tx.employeeSchedule.findUnique({
             where: { employeeId_workDate: { employeeId: eid, workDate: date } },
@@ -186,6 +200,7 @@ export class ScheduleService {
           } else {
             await tx.employeeSchedule.create({
               data: {
+                organizationId: emp.organizationId,
                 employeeId: eid,
                 shiftId: input.shiftId,
                 workDate: date,
@@ -204,6 +219,7 @@ export class ScheduleService {
           action: 'BULK_ASSIGN_SCHEDULE',
           entity: 'employee_schedules',
           entityId: 'bulk',
+          organizationId: shift.organizationId,
           newValues: {
             employeeIds: input.employeeIds,
             shiftId: input.shiftId,
@@ -235,8 +251,8 @@ export class ScheduleService {
    */
   static async assignRecurringPattern(input: AssignRecurringPatternInput, session: UserSession) {
     this.requireScheduleAccess(session);
-    await this.requireActiveEmployee(input.employeeId);
-    const shift = await this.requireActiveShift(input.shiftId);
+    const employee = await this.requireActiveEmployee(input.employeeId, session.organizationId || undefined);
+    const shift = await this.requireActiveShift(input.shiftId, employee.organizationId);
 
     const effectiveFrom = new Date(input.effectiveFrom);
     const effectiveTo = input.effectiveTo ? new Date(input.effectiveTo) : null;
@@ -264,6 +280,7 @@ export class ScheduleService {
         input.daysOfWeek.map((dow) =>
           tx.recurringSchedule.create({
             data: {
+              organizationId: employee.organizationId,
               employeeId: input.employeeId,
               shiftId: input.shiftId,
               dayOfWeek: dow,
@@ -281,6 +298,7 @@ export class ScheduleService {
           action: 'ASSIGN_RECURRING_SCHEDULE',
           entity: 'recurring_schedules',
           entityId: input.employeeId,
+          organizationId: employee.organizationId,
           newValues: {
             shiftCode: shift.code,
             daysOfWeek: input.daysOfWeek,
@@ -398,7 +416,11 @@ export class ScheduleService {
     }
 
     const patterns = await prisma.recurringSchedule.findMany({
-      where: { employeeId, isActive: true },
+      where: {
+        employeeId,
+        isActive: true,
+        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+      },
       include: {
         shift: {
           select: {

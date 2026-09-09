@@ -106,6 +106,7 @@ describe('PHASE 25 — PERFORMANCE & PRODUCTION AUDIT TEST SUITE', () => {
     it('should batch fetch attendance, leaves, bonuses, and KPIs using { in: employeeIds } instead of per-employee loop queries', async () => {
       const mockSession: UserSession = {
         userId: 'usr-admin',
+        organizationId: 'org-test-audit',
         email: 'admin@antigravity.test',
         fullName: 'Admin Tester',
         roles: ['admin', 'hr'],
@@ -116,6 +117,7 @@ describe('PHASE 25 — PERFORMANCE & PRODUCTION AUDIT TEST SUITE', () => {
 
       (prisma.payrollPeriod.findUnique as any).mockResolvedValue({
         id: 'prd-01',
+        organizationId: 'org-test-audit',
         code: '2026-09',
         name: 'Kỳ lương Tháng 09/2026',
         startDate: new Date('2026-09-01'),
@@ -126,6 +128,7 @@ describe('PHASE 25 — PERFORMANCE & PRODUCTION AUDIT TEST SUITE', () => {
 
       (prisma.payrollRule.findFirst as any).mockResolvedValue({
         id: 'rule-01',
+        organizationId: 'org-test-audit',
         isDefault: true,
         isActive: true,
         salaryBasisConfig: { formula: 'STANDARD', standardHoursPerDay: 8 },
@@ -138,9 +141,9 @@ describe('PHASE 25 — PERFORMANCE & PRODUCTION AUDIT TEST SUITE', () => {
 
       // 3 employees to calculate
       (prisma.employee.findMany as any).mockResolvedValue([
-        { id: 'emp-01', contractSalary: 20000000, dependentsCount: 0, insuranceSalary: 20000000 },
-        { id: 'emp-02', contractSalary: 25000000, dependentsCount: 1, insuranceSalary: 25000000 },
-        { id: 'emp-03', contractSalary: 30000000, dependentsCount: 2, insuranceSalary: 30000000 },
+        { id: 'emp-01', organizationId: 'org-test-audit', contractSalary: 20000000, dependentsCount: 0, insuranceSalary: 20000000 },
+        { id: 'emp-02', organizationId: 'org-test-audit', contractSalary: 25000000, dependentsCount: 1, insuranceSalary: 25000000 },
+        { id: 'emp-03', organizationId: 'org-test-audit', contractSalary: 30000000, dependentsCount: 2, insuranceSalary: 30000000 },
       ]);
 
       // Batched returns

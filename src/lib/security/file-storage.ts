@@ -10,6 +10,7 @@
  */
 
 import { StorageManager } from '@/lib/storage/storage-manager';
+import { ApiError } from '@/lib/errors';
 
 /**
  * Ensures storage directories exist
@@ -18,15 +19,22 @@ export async function ensureStorageDirectories(): Promise<void> {
   return Promise.resolve();
 }
 
+export function requireOrganizationId(organizationId?: string): string {
+  if (!organizationId || typeof organizationId !== 'string' || organizationId.trim() === '') {
+    throw ApiError.badRequest('organizationId is required for secure tenant storage operations');
+  }
+  return organizationId.trim();
+}
+
 /**
  * Save an avatar file buffer securely
  */
 export async function saveAvatarFile(
   filename: string,
   buffer: Buffer | Uint8Array,
-  organizationId?: string
+  organizationId: string
 ): Promise<string> {
-  const orgId = organizationId || 'org_default_tanphong';
+  const orgId = requireOrganizationId(organizationId);
   const result = await StorageManager.uploadAvatar({
     organizationId: orgId,
     userId: filename.split('_')[1] || 'user',
@@ -42,10 +50,10 @@ export async function saveAvatarFile(
  */
 export async function readAvatarFile(
   filename: string,
-  organizationId?: string
+  organizationId: string
 ): Promise<Buffer> {
   const provider = StorageManager.getProvider();
-  const orgId = organizationId || 'org_default_tanphong';
+  const orgId = requireOrganizationId(organizationId);
   try {
     const key = `organizations/${orgId}/avatars/${filename}`;
     const res = await provider.download('avatars', key);
@@ -64,9 +72,9 @@ export async function saveDocumentFile(
   docId: string,
   extension: string,
   buffer: Buffer | Uint8Array,
-  organizationId?: string
+  organizationId: string
 ): Promise<{ filePath: string; storedFilename: string }> {
-  const orgId = organizationId || 'org_default_tanphong';
+  const orgId = requireOrganizationId(organizationId);
   const result = await StorageManager.uploadDocument({
     organizationId: orgId,
     employeeId,
@@ -87,9 +95,9 @@ export async function saveDocumentFile(
 export async function readDocumentFile(
   employeeId: string,
   storedFilename: string,
-  organizationId?: string
+  organizationId: string
 ): Promise<Buffer> {
-  const orgId = organizationId || 'org_default_tanphong';
+  const orgId = requireOrganizationId(organizationId);
   const docId = storedFilename.split('.')[0] || storedFilename;
   const res = await StorageManager.downloadDocument({
     organizationId: orgId,
@@ -106,9 +114,9 @@ export async function readDocumentFile(
 export async function deleteDocumentFile(
   employeeId: string,
   storedFilename: string,
-  organizationId?: string
+  organizationId: string
 ): Promise<void> {
-  const orgId = organizationId || 'org_default_tanphong';
+  const orgId = requireOrganizationId(organizationId);
   const docId = storedFilename.split('.')[0] || storedFilename;
   await StorageManager.deleteDocument({
     organizationId: orgId,
