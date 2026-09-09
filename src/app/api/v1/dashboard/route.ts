@@ -4,6 +4,8 @@ import { DashboardService } from '@/lib/services/dashboard.service';
 import { handleApiError, ApiError } from '@/lib/errors';
 import { ApiResponse, RoleCode } from '@/types';
 import { prisma } from '@/lib/db/prisma';
+import { SUPER_ADMIN_LANDING_PATH } from '@/lib/auth/super-admin-landing';
+import { isSuperAdmin } from '@/lib/auth/roles';
 
 /**
  * GET /api/v1/dashboard
@@ -14,6 +16,33 @@ import { prisma } from '@/lib/db/prisma';
 export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<any>>> {
   try {
     const session = await requireAuth();
+
+    if (isSuperAdmin(session)) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          currentRole: 'super_admin',
+          availableRoles: ['super_admin'],
+          redirectTo: SUPER_ADMIN_LANDING_PATH,
+          sessionUser: {
+            fullName: session.fullName,
+            email: session.email,
+            employeeId: session.employeeId,
+            roles: session.roles,
+            tenantRole: session.tenantRole,
+            organizationId: session.organizationId,
+            organizationName: session.organizationName,
+            onboardingStep: session.onboardingStep,
+            needsOnboarding: false,
+          },
+          payload: null,
+        },
+        meta: {
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+
     const { searchParams } = new URL(req.url);
     const requestedRole = searchParams.get('role')?.toLowerCase();
 

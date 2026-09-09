@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ShieldCheck, Lock, Mail, AlertCircle, Loader2, Building2 } from 'lucide-react';
+import { resolvePostLoginRedirect } from '@/lib/auth/super-admin-landing';
 
 function LoginForm() {
   const router = useRouter();
@@ -46,12 +47,7 @@ function LoginForm() {
         return;
       }
 
-      // Successful production login
-      if (data.data?.needsOnboarding) {
-        router.push('/onboarding');
-      } else {
-        router.push(redirect === '/' ? '/dashboard' : redirect);
-      }
+      router.push(resolvePostLoginRedirect(data.data, redirect));
       router.refresh();
     } catch {
       setErrorMessage('Không thể kết nối tới máy chủ. Vui lòng kiểm tra lại kết nối mạng.');

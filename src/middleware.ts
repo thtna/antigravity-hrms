@@ -2,9 +2,20 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
 import { UserSession } from './types';
 import { getAuthSecretKey } from './lib/auth/auth-secret';
+import {
+  SUPER_ADMIN_LANDING_PATH,
+  shouldRedirectSuperAdminToPortal,
+} from './lib/auth/super-admin-landing';
+import { isSuperAdmin as hasSuperAdminRole } from './lib/auth/roles';
 
 function getSessionCookieName(): string {
   return process.env.AUTH_COOKIE_NAME || 'antigravity_session';
+}
+
+function redirectToSuperAdmin(request: NextRequest): NextResponse {
+  return applySecurityHeaders(
+    NextResponse.redirect(new URL(SUPER_ADMIN_LANDING_PATH, request.url))
+  );
 }
 
 /**
@@ -92,9 +103,33 @@ export async function middleware(request: NextRequest) {
     );
   }
 
+  // Root is public, but an already-authenticated platform SUPER_ADMIN should
+  // land on the platform console instead of the employee-oriented dashboard.
+  if (pathname === '/') {
+    const cookieName = getSessionCookieName();
+    const token = request.cookies.get(cookieName)?.value;
+    const secretKey = getAuthSecretKey();
+
+    if (token && secretKey) {
+      try {
+        const { payload } = await jwtVerify(token, secretKey, {
+          algorithms: ['HS256'],
+        });
+        const session = payload as unknown as UserSession;
+
+        if (session.isActive && shouldRedirectSuperAdminToPortal(session, pathname)) {
+          return redirectToSuperAdmin(request);
+        }
+      } catch {
+        // Preserve root as a public route for missing/expired/invalid sessions.
+      }
+    }
+
+    return applySecurityHeaders(NextResponse.next());
+  }
+
   // Allow public routes and static assets
   if (
-    pathname === '/' ||
     pathname === '/login' ||
     pathname === '/register' ||
     pathname === '/forgot-password' ||
@@ -187,10 +222,11 @@ export async function middleware(request: NextRequest) {
       );
     }
 
-    const isSuperAdmin = session.roles.some((r: any) => {
-      const s = String(r).toLowerCase();
-      return s === 'super_admin' || s === 'superadmin';
-    });
+    const isSuperAdmin = hasSuperAdminRole(session);
+
+    if (isSuperAdmin && shouldRedirectSuperAdminToPortal(session, pathname)) {
+      return redirectToSuperAdmin(request);
+    }
 
     // Check organization status: PENDING MUST NOT enter dashboard!
     // Super Admin manages the platform and is exempt from single-tenant active restriction
@@ -298,6 +334,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    '/',
     '/dashboard/:path*',
     '/admin/:path*',
     '/hr/:path*',
