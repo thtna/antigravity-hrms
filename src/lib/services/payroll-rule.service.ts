@@ -12,8 +12,6 @@ import {
 import { PayrollRuleEngine } from '@/lib/payroll/payroll-rule-engine';
 import {
   VIETNAM_STATUTORY_RULE_2026,
-  HOURLY_PARTTIME_RULE,
-  EXPAT_FLAT_TAX_RULE,
 } from '@/lib/payroll/default-rules';
 import { PayrollRuleConfig } from '@/lib/payroll/types';
 
@@ -22,11 +20,6 @@ export class PayrollRuleService {
   static async listRules(session: UserSession) {
     if (!session || !session.userId) {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
-    }
-
-    // Auto-seed default rules for this tenant if organization has none
-    if (session.organizationId) {
-      await this.seedDefaultRulesIfEmpty(session.organizationId);
     }
 
     return await prisma.payrollRule.findMany({
@@ -60,19 +53,19 @@ export class PayrollRuleService {
   }
 
   static async getDefaultRule(organizationId?: string): Promise<PayrollRuleConfig> {
-    if (organizationId) {
-      await this.seedDefaultRulesIfEmpty(organizationId);
-
-      const dbDefault = await prisma.payrollRule.findFirst({
-        where: { organizationId, isDefault: true, isActive: true },
-      });
-
-      if (dbDefault) {
-        return this.mapDbRuleToConfig(dbDefault);
-      }
+    if (!organizationId) {
+      throw ApiError.badRequest('Tổ chức phải cấu hình quy chế lương mặc định trước khi tính lương.');
     }
 
-    return VIETNAM_STATUTORY_RULE_2026;
+    const dbDefault = await prisma.payrollRule.findFirst({
+      where: { organizationId, isDefault: true, isActive: true },
+    });
+
+    if (!dbDefault) {
+      throw ApiError.badRequest('Chưa có quy chế lương mặc định được cấu hình cho tổ chức.');
+    }
+
+    return this.mapDbRuleToConfig(dbDefault);
   }
 
   // ── 2. Create Rule ─────────────────────────────────────────────────────────
@@ -309,7 +302,10 @@ export class PayrollRuleService {
       const dbRule = await prisma.payrollRule.findUnique({
         where: { id: parsed.ruleId },
       });
-      if (!dbRule) {
+      if (
+        !dbRule ||
+        (session.organizationId && (dbRule as any).organizationId && (dbRule as any).organizationId !== session.organizationId)
+      ) {
         throw ApiError.notFound('Không tìm thấy quy chế lương được chọn.');
       }
       ruleConfig = this.mapDbRuleToConfig(dbRule);
@@ -325,7 +321,9 @@ export class PayrollRuleService {
         rounding: parsed.ruleConfig.roundingConfig as any,
       };
     } else {
-      ruleConfig = await this.getDefaultRule(session.organizationId || undefined);
+      throw ApiError.badRequest(
+        'Vui lòng chọn quy chế lương đã cấu hình hoặc cung cấp cấu hình mô phỏng rõ ràng.'
+      );
     }
 
     const calculationResult = PayrollRuleEngine.calculate({
@@ -361,78 +359,6 @@ export class PayrollRuleService {
       },
       result: calculationResult,
     };
-  }
-
-  // ── 6. Seed Default Rules ──────────────────────────────────────────────────
-  static async seedDefaultRulesIfEmpty(organizationId?: string) {
-    if (!organizationId) return;
-
-    const count = await prisma.payrollRule.count({
-      where: { organizationId },
-    });
-    if (count > 0) return;
-
-    logger.info(`[PayrollRuleService] Seeding default reference payroll rules for organization ${organizationId}...`);
-
-    await prisma.payrollRule.create({
-      data: {
-        organizationId,
-        code: VIETNAM_STATUTORY_RULE_2026.ruleCode!,
-        name: VIETNAM_STATUTORY_RULE_2026.ruleName!,
-        description:
-          'Quy chế tiền lương tiêu chuẩn áp dụng Luật Lao Động, Luật BHXH và Luật Thuế TNCN Việt Nam (Lũy tiến 7 bậc, Giảm trừ 11M + 4.4M).',
-        isDefault: true,
-        isActive: true,
-        version: 1,
-        salaryBasisConfig: VIETNAM_STATUTORY_RULE_2026.salaryBasis as any,
-        overtimeConfig: VIETNAM_STATUTORY_RULE_2026.overtime as any,
-        insuranceConfig: VIETNAM_STATUTORY_RULE_2026.insurance as any,
-        taxConfig: VIETNAM_STATUTORY_RULE_2026.tax as any,
-        deductionConfig: VIETNAM_STATUTORY_RULE_2026.deduction as any,
-        roundingConfig: VIETNAM_STATUTORY_RULE_2026.rounding as any,
-        effectiveFrom: new Date('2026-01-01'),
-      },
-    });
-
-    await prisma.payrollRule.create({
-      data: {
-        organizationId,
-        code: HOURLY_PARTTIME_RULE.ruleCode!,
-        name: HOURLY_PARTTIME_RULE.ruleName!,
-        description: 'Quy chế tính lương theo giờ thực tế cho nhân sự bán thời gian / thử việc / CTV.',
-        isDefault: false,
-        isActive: true,
-        version: 1,
-        salaryBasisConfig: HOURLY_PARTTIME_RULE.salaryBasis as any,
-        overtimeConfig: HOURLY_PARTTIME_RULE.overtime as any,
-        insuranceConfig: HOURLY_PARTTIME_RULE.insurance as any,
-        taxConfig: HOURLY_PARTTIME_RULE.tax as any,
-        deductionConfig: HOURLY_PARTTIME_RULE.deduction as any,
-        roundingConfig: HOURLY_PARTTIME_RULE.rounding as any,
-        effectiveFrom: new Date('2026-01-01'),
-      },
-    });
-
-    await prisma.payrollRule.create({
-      data: {
-        organizationId,
-        code: EXPAT_FLAT_TAX_RULE.ruleCode!,
-        name: EXPAT_FLAT_TAX_RULE.ruleName!,
-        description: 'Quy chế tiền lương áp dụng thuế phẳng 20% cho chuyên gia nước ngoài không cư trú.',
-        isDefault: false,
-        isActive: true,
-        version: 1,
-        salaryBasisConfig: EXPAT_FLAT_TAX_RULE.salaryBasis as any,
-        overtimeConfig: EXPAT_FLAT_TAX_RULE.overtime as any,
-        insuranceConfig: EXPAT_FLAT_TAX_RULE.insurance as any,
-        taxConfig: EXPAT_FLAT_TAX_RULE.tax as any,
-        deductionConfig: EXPAT_FLAT_TAX_RULE.deduction as any,
-        roundingConfig: EXPAT_FLAT_TAX_RULE.rounding as any,
-        effectiveFrom: new Date('2026-01-01'),
-      },
-    });
-
-    logger.info('[PayrollRuleService] Default reference rules seeded successfully.');
   }
 
   // ── Helper ────────────────────────────────────────────────────────────────

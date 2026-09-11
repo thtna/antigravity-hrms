@@ -437,6 +437,39 @@ describe('STAGING ONBOARDING STEP 6 REGRESSION & ATOMICITY TEST SUITE', () => {
     expect(audit?.organizationId).toBe('org-tenant-a');
   });
 
+  it('1.1 Missing department/position fails without fallback rows or employee creation', async () => {
+    dbState.departments.delete('dept-a-01');
+    dbState.positions.delete('pos-a-01');
+
+    const initialDepartmentCount = dbState.departments.size;
+    const initialPositionCount = dbState.positions.size;
+    const initialEmployeeCount = dbState.employees.size;
+    const initialUserCount = dbState.users.size;
+    const org = dbState.organizations.get('org-tenant-a');
+    org.onboardingStep = 6;
+
+    await expect(
+      OnboardingService.saveStep(activeOwnerSession, 6, {
+        firstName: 'Văn A',
+        lastName: 'Nguyễn',
+        employeeCode: 'EMP-MISSING-FK',
+        email: 'missing-fk@tenanta.vn',
+        phoneNumber: '0901234567',
+        contractSalary: 25000000,
+      })
+    ).rejects.toThrow('Vui lòng chọn phòng ban và chức vụ đã được cấu hình');
+
+    expect(mockPrisma.department.create).not.toHaveBeenCalled();
+    expect(mockPrisma.position.create).not.toHaveBeenCalled();
+    expect(dbState.departments.size).toBe(initialDepartmentCount);
+    expect(dbState.positions.size).toBe(initialPositionCount);
+    expect(dbState.employees.size).toBe(initialEmployeeCount);
+    expect(dbState.users.size).toBe(initialUserCount);
+    expect(Array.from(dbState.departments.values()).some((d) => d.code === 'BGD')).toBe(false);
+    expect(Array.from(dbState.positions.values()).some((p) => p.code === 'CEO')).toBe(false);
+    expect(dbState.organizations.get('org-tenant-a').onboardingStep).toBe(6);
+  });
+
   // --------------------------------------------------------------------------
   // 2. Cross-Tenant FK Injection Prevention
   // --------------------------------------------------------------------------

@@ -372,6 +372,8 @@ describe('PHASE 7 — EMPTY TENANT & ONBOARDING SERVICE TEST SUITE', () => {
         employeeCode: 'EMP-001',
         email: 'staff01@vietcorp.vn',
         phoneNumber: '0912345678',
+        departmentId: 'dept-01',
+        positionId: 'pos-01',
         contractSalary: 20000000,
       });
 
@@ -384,6 +386,24 @@ describe('PHASE 7 — EMPTY TENANT & ONBOARDING SERVICE TEST SUITE', () => {
           data: expect.objectContaining({ onboardingStep: 7 }),
         })
       );
+    });
+
+    it('Step 6 (Employee): missing department or position fails without fallback business rows', async () => {
+      await expect(
+        OnboardingService.saveStep(ownerSession, 6, {
+          firstName: 'Văn A',
+          lastName: 'Nguyễn',
+          employeeCode: 'EMP-001',
+          email: 'staff01@vietcorp.vn',
+          phoneNumber: '0912345678',
+          contractSalary: 20000000,
+        })
+      ).rejects.toThrow('Vui lòng chọn phòng ban và chức vụ đã được cấu hình');
+
+      expect(mockPrisma.department.create).not.toHaveBeenCalled();
+      expect(mockPrisma.position.create).not.toHaveBeenCalled();
+      expect(mockPrisma.employee.create).not.toHaveBeenCalled();
+      expect(mockPrisma.organization.update).not.toHaveBeenCalled();
     });
 
     it('Step 7 (Attendance Settings): should create worksite and advance to step 8', async () => {

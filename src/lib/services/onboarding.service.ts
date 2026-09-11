@@ -444,46 +444,10 @@ export class OnboardingService {
           throw ApiError.conflict(`Email [${normalizedEmail}] đã được đăng ký cho một tài khoản khác.`);
         }
 
-        // 2. Auto-resolve departmentId and positionId if not provided (executed outside transaction)
-        let targetDeptId = validated.departmentId;
-        if (!targetDeptId) {
-          const firstDept = await prisma.department.findFirst({
-            where: { organizationId: orgId, deletedAt: null },
-          });
-          if (!firstDept) {
-            const fallbackDept = await prisma.department.create({
-              data: {
-                organizationId: orgId,
-                name: 'Ban Giám Đốc',
-                code: 'BGD',
-              },
-            });
-            targetDeptId = fallbackDept.id;
-          } else {
-            targetDeptId = firstDept.id;
-          }
-        }
-
-        let targetPosId = validated.positionId;
-        if (!targetPosId) {
-          const firstPos = await prisma.position.findFirst({
-            where: { organizationId: orgId, deletedAt: null },
-          });
-          if (!firstPos) {
-            const fallbackPos = await prisma.position.create({
-              data: {
-                organizationId: orgId,
-                title: 'Giám Đốc Điều Hành',
-                code: 'CEO',
-                baseSalaryGrade: 15000000,
-                minSalary: 15000000,
-                maxSalary: 50000000,
-              },
-            });
-            targetPosId = fallbackPos.id;
-          } else {
-            targetPosId = firstPos.id;
-          }
+        if (!validated.departmentId || !validated.positionId) {
+          throw ApiError.badRequest(
+            'Vui lòng chọn phòng ban và chức vụ đã được cấu hình trong tổ chức trước khi tạo nhân sự đầu tiên.'
+          );
         }
 
         const employeePayload = CreateEmployeeSchema.parse({
@@ -492,8 +456,8 @@ export class OnboardingService {
           employeeCode: normalizedCode,
           email: normalizedEmail,
           phoneNumber: validated.phoneNumber.trim(),
-          departmentId: targetDeptId,
-          positionId: targetPosId,
+          departmentId: validated.departmentId,
+          positionId: validated.positionId,
           gender: 'OTHER',
           contractSalary: validated.contractSalary,
           hireDate: validated.hireDate || new Date().toISOString().slice(0, 10),
