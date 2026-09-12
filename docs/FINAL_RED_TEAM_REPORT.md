@@ -1,6 +1,9 @@
 # BÁO CÁO TIỀN KIỂM SOÁT AN TOÀN TOÀN DIỆN (FINAL RED-TEAM PRODUCTION PREFLIGHT)
 ## HỆ THỐNG ANTIGRAVITY HRMS — MULTI-TENANT ENTERPRISE SAAS
 
+> [!IMPORTANT]
+> **HISTORICAL PRE-RELEASE SNAPSHOT**: This document preserves the red-team preflight evidence from 06/09/2026. Statements saying the system was waiting for Production deployment were correct at that time and must not be erased. The current authoritative post-release Production state is maintained in `docs/PROJECT_STATE_HANDOFF.md`.
+
 - **Ngày thực hiện kiểm định**: 06/09/2026
 - **Phân loại**: Red-Team Preflight Security, Stability & Invariance Audit (Trước triển khai)
 - **Kiến trúc mục tiêu**: 1 Ứng dụng Next.js (Turbopack) | 1 CSDL Supabase PostgreSQL | Vercel Serverless | Tối đa 5 Tenants Hoạt động Thực tế

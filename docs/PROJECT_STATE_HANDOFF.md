@@ -6,6 +6,68 @@
 
 ---
 
+## 0. POST-RELEASE AUTHORITATIVE BASELINE (PHASE 5K-B2)
+
+This section is the current authoritative state after the September Production release revalidation. Older phase reports remain historical evidence and must not be read as current deployment state when they conflict with this section.
+
+- **Approved release SHA**: `93b8f8de3d480df578638ab47a20094ccce4fe35`
+- **main**: `93b8f8de3d480df578638ab47a20094ccce4fe35`
+- **staging**: `93b8f8de3d480df578638ab47a20094ccce4fe35`
+- **Production deployment**: `READY`
+- **Production root HTTP**: `200`
+- **Production health HTTP**: `200`
+- **X-Vercel-Mitigated**: absent
+- **Production public access**: restored
+- **RELEASE READY FOR NORMAL USE**: `YES`
+
+### Production DB Verified Baseline
+
+The last approved Production DB verification was read-only. Do not access Production DB casually and do not reconstruct, request, print, or guess Production secrets.
+
+| Check | Verified Value |
+| :--- | :--- |
+| Migrations applied | `4` |
+| Failed migrations | `0` |
+| Organizations | `0` |
+| Organization members | `0` |
+| Branches | `0` |
+| Fallback organization | absent |
+| Fallback branch | absent |
+| Platform SUPER_ADMIN count | `1` |
+| Platform SUPER_ADMIN active | `YES` |
+| Platform SUPER_ADMIN organizationId | `NULL` |
+| Platform SUPER_ADMIN membership count | `0` |
+| Platform SUPER_ADMIN employee count | `0` |
+| Fallback defaults removed | `22/22` |
+| Business data baseline | `EMPTY` |
+
+### Completed Release Gates
+
+`5I-G = PASS`; `5J-A = PASS`; `5J-A2 = PASS`; `5J-B = PASS`; `5J-C = PASS`; `5J-D = PASS`; `5J-E = PASS`; `5J-F = PASS`; `5K-A = PASS`; `5K-B1 = PASS`; `5K-B2 = PASS`.
+
+### Verified Behavioral Guarantees
+
+- `GET /api/v1/organization/meta` is zero-write.
+- Payroll rule GET is zero-write.
+- Payroll reads and simulation do not auto-seed payroll rules.
+- Payroll simulation without usable configuration returns HTTP 400 and fails closed.
+- Onboarding Step 6 requires explicit valid `departmentId` and `positionId`.
+- Onboarding Step 6 with missing department/position returns HTTP 400.
+- Onboarding Step 6 with invalid or wrong-tenant FK returns HTTP 400.
+- Onboarding Step 6 with valid explicit department and position succeeds.
+- No `BGD` department or `CEO` position fallback business rows are auto-created.
+
+### Operational Boundaries
+
+- Production DB writes, migrations, seed, env changes, WAF changes, deploys, rollbacks, or promotions require explicit operator authorization.
+- No demo seed is allowed in Production.
+- No fallback tenant defaults are allowed in Production.
+- Platform SUPER_ADMIN remains outside all tenants.
+- Tenant A must never access Tenant B.
+- Untracked operator/helper files must be preserved and must not be committed accidentally.
+
+---
+
 ## 1. THÔNG TIN CƠ BẢN VÀ KIẾN TRÚC HIỆN TẠI
 
 - **Tên dự án**: Antigravity HRMS
@@ -15,7 +77,7 @@
 - **Mô hình SaaS**: Multi-Tenant SaaS (Đa tổ chức dùng chung 1 database / 1 application code base)
 - **Hạn mức nền tảng**: `MAX_TENANTS = 5` (Hệ thống chặn cứng tenant thứ 6 bằng HTTP 400 Bad Request)
 - **Hạ tầng CSDL phân lập**:
-  - **1 Cơ sở dữ liệu Production** (Chưa kết nối / Chưa cấu hình)
+  - **1 Cơ sở dữ liệu Production** đã được xác minh read-only theo baseline ở Mục 0; không truy cập thường quy.
   - **1 Cơ sở dữ liệu Staging** (`antigravity-hrms-staging`, Project Ref: `rdp***tak`)
 - **Cơ chế phân lập dữ liệu (Tenant Isolation)**:
   - Bắt buộc lọc theo `organizationId` lấy từ JWT server-side session tại tầng Guard & Service.
@@ -46,48 +108,50 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 | **Phase 11A.0C** | **Production Storage Hardening**: Xây dựng kiến trúc `StorageProvider Abstraction`, `LocalStorageProvider`, `SupabaseStorageProvider`, `StorageManager`, xác thực Magic Bytes (%PDF-, PNG, JPEG), Signed URL ngắn hạn, bảo mật tài liệu riêng tư. | **PRODUCTION STORAGE READY** |
 | **Phase 11A.0C2** | **Live Supabase Storage Staging Verification**: Kiểm thử thực tế trên Supabase Storage Staging thật (`antigravity-hrms-staging`). Khởi tạo 2 private buckets (`avatars`, `documents`), thực hiện upload/download/signed-url/delete thật, kiểm chứng $A \leftrightarrow B$ DENIED, unauthenticated client signed URL fetch HTTP 200, zero secrets logged. | **LIVE STAGING STORAGE VERIFIED** |
 | **Phase 11A.0E** | **Onboarding Step 6 P2028 Transaction Hardening**: Khắc phục triệt để lỗi Prisma P2028: phân loại rủi ro serverless lifecycle; rút gọn transaction xuống tối thiểu các DB writes nguyên tử; pre-lookup Role và băm mật khẩu ngoài transaction; bảo toàn RBAC bằng cờ `allowOwnerOnboarding`; hoàn thiện cơ chế idempotent retry (409 khi collision); xác nhận rollback an toàn (zero orphan user/partial employee); read-only staging DB clean. | **P2028 TRANSACTION HARDENING VERIFIED** |
+| **Phase 5I-G -> 5J-F** | Release gate sequence completed through controlled Production validation, public access restoration, and post-release smoke verification. | **PASS** |
+| **Phase 5K-A** | Post-release resume revalidation: Git refs, Vercel deployment, Production public root/health, and no drift. | **PASS** |
+| **Phase 5K-B1** | Documentation reconciliation inventory and stale-state analysis, read-only. | **PASS** |
+| **Phase 5K-B2** | Documentation reconciliation write phase completed against the approved 8 documentation files on local `staging`; no commit, push, deploy, Production access, or application code change. | **PASS** |
 
 ---
 
 ## 3. GIAI ĐOẠN HIỆN TẠI (CURRENT PHASE IN PROGRESS)
 
-### **PHASE 11A.0D — REAL EMAIL READINESS**
+### **PHASE 5K-B3 — DOCUMENTATION DIFF CONTENT REVIEW**
 
 - **Mục tiêu**:
-  - Thẩm định luồng gửi email thật qua dịch vụ chuyển phát (`EMAIL_PROVIDER="sendgrid"` hoặc `"smtp"`).
-  - Kiểm tra thực tế chức năng Quên mật khẩu ("Forgot Password") và Đặt lại mật khẩu ("Reset Password") trên môi trường Staging.
-  - Loại bỏ hoàn toàn fallback `console` provider trước khi tiến hành onboarding khách hàng thật.
-- **Trạng thái**: **`SAFEGUARD STOP ACTIVE`** — Đã hoàn thành audit code, bảo mật token mật mã học HMAC-SHA256, rate limiting, UI và API endpoint. Đang dừng an toàn chờ cấu hình credentials email Staging trong `.env.staging`.
+  - Re-run the complete documentation diff content review after the targeted Phase 5K-B3A handoff correction.
+  - Verify the approved 8-file documentation diff remains factually consistent before any commit decision.
+  - Do not mark Phase 5K-B3 as PASS until that review is re-run successfully.
+- **Trạng thái**: **CURRENT REVIEW GATE — RE-RUN REQUIRED AFTER PHASE 5K-B3A**.
 
 ---
 
 ## 4. RÀO CẢN VÀ ĐIỀU KIỆN TIẾP TỤC (CURRENT BLOCKERS)
 
-- **Blocker Storage Staging**: **ĐÃ GIẢI QUYẾT XONG (RESOLVED)**. Credentials Staging đã nạp và kiểm thử thành công 100%.
-- **Blocker Phase 11A.0D**: **SAFEGUARD STOP ACTIVE**. Chưa có biến cấu hình dịch vụ email Staging (`SENDGRID_API_KEY` + `SENDGRID_FROM_EMAIL` hoặc `SMTP_*`) và `NEXT_PUBLIC_APP_URL` trong `.env.staging`.
-- **Production Guard**: Vẫn giữ nguyên trạng thái chặn triển khai Production cho tới khi hoàn tất Phase 11A.0D và nhận lệnh phê duyệt cuối cùng.
+- **Release blocker**: NONE. Production is healthy and ready for normal use.
+- **Documentation blocker**: NONE after Phase 5K-B2. Phase 5K-B3 diff review must be re-run after the targeted handoff correction.
+- **Production guard**: Production remains protected. Any Production DB write, env change, WAF change, deploy, rollback, or promotion requires explicit operator authorization.
+- **Operator/helper files**: Existing untracked helper files must remain uncommitted unless the operator explicitly approves.
 
 ---
 
 ## 5. CÁC GIAI ĐOẠN TIẾP THEO (NEXT PHASES ROADMAP)
 
-1. **PHASE 11A.0D — REAL EMAIL READINESS** (Đang dừng tại Safeguard Stop chờ credentials Staging)
-2. **PHASE 11A.1 — PRODUCTION SECURE ONBOARDING PREFLIGHT**:
-   - Kiểm tra kết nối tới Supabase Production Database thật (khi được cấp credentials Production).
-   - Triển khai Prisma migrations lên Production Database (`prisma migrate deploy`).
-   - Chạy `seedSystemEssentials` (chỉ nạp 4 roles RBAC, `DEMO_MODE=false`, zero demo data).
-3. **PHASE 11A.2 — VERCEL PRODUCTION DEPLOYMENT**:
-   - Cấu hình Environment Variables trên Vercel Dashboard theo kế hoạch Phase 11A.0B.
-   - Thực thi lệnh deploy chính thức lên Production sau khi có lệnh phê duyệt cuối cùng.
+1. **PHASE 5K-B3 — DOCUMENTATION DIFF CONTENT REVIEW**: re-run exact diff review after Phase 5K-B3A correction; do not commit unless the review passes.
+2. **Documentation commit decision**: operator decides whether to commit and push the approved documentation-only diff to `staging`.
+3. **Next product development phase**: must be separately proposed and explicitly approved before any code, DB, env, WAF, or deployment change.
 
 ---
 
-## 6. NGUYÊN TẮC CỐT TỬ: TUYỆT ĐỐI CHƯA DEPLOY PRODUCTION
+## 6. NGUYÊN TẮC CỐT TỬ: PRODUCTION ĐÃ RELEASE, KHÔNG TỰ Ý THAY ĐỔI
 
-- **Production Touched**: **`NO`**
-- **Vercel Production Deploy**: **`ZERO / NOT EXECUTED`**
-- **Production Credentials Loaded**: **`NONE`**
-- **Chỉ thị chấp hành**: Tuyệt đối không tự ý deploy lên Vercel Production hoặc chạy bất kỳ lệnh ghi nào vào Production Database khi chưa có văn bản/lệnh trực tiếp từ Người Phụ Trách.
+- **Production deployed**: **YES**, approved SHA `93b8f8de3d480df578638ab47a20094ccce4fe35`.
+- **Production deployment status**: **READY**.
+- **Production public access**: **RESTORED**.
+- **Production WAF freeze**: removed after validation; health-check rule preserved.
+- **Production DB access**: exceptional only; no casual checks.
+- **Chỉ thị chấp hành**: Không tự ý deploy, rollback, migrate, seed, thay đổi env/WAF, hoặc ghi vào Production Database khi chưa có văn bản/lệnh trực tiếp từ Người Phụ Trách.
 
 ---
 

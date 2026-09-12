@@ -14,7 +14,26 @@ Key principles enforced:
 - **Tenant Isolation**: Every enterprise resource is strictly bound to an `organizationId`.
 - **Hierarchical Governance**: Supports `Organization -> Branch -> Worksite` hierarchy.
 - **Strict Data Integrity**: Single-column unique constraints are converted to composite scoped unique indexes (`[organizationId, code]`, `[organizationId, employeeCode]`, etc.), allowing distinct tenants to manage identical internal codes (e.g. employee "EMP-001" or department "DEPT-IT") without collision.
-- **Zero Data Loss Migration**: All existing records are safely backfilled into a default organization (`org_default_tanphong`, "Tân Phong HRMS").
+- **Historical Zero Data Loss Migration**: Phase 2 backfilled existing local/staging records into a default organization (`org_default_tanphong`, "Tân Phong HRMS"). This was historical migration behavior, not the current Production baseline.
+
+### Current Production Baseline
+
+The current post-release Production baseline is:
+
+- `organizations = 0`
+- `organization_members = 0`
+- `branches = 0`
+- fallback organization = absent
+- fallback branch = absent
+- fallback organization defaults removed = `22/22`
+- business data baseline = EMPTY
+- platform SUPER_ADMIN remains outside all tenants (`organizationId = NULL`, zero memberships, zero employee record)
+
+Production tenant lifecycle remains:
+
+`registration -> PENDING -> Super Admin approval -> ACTIVE -> empty workspace -> tenant creates own data`
+
+The platform supports a maximum of 5 active tenants. Tenant A must never access Tenant B.
 
 ---
 
@@ -113,9 +132,9 @@ All 23 business-scoped models in Antigravity HRMS include `organizationId` with 
 
 ---
 
-### 4. Zero Data Loss Migration Strategy
+### 4. Historical Zero Data Loss Migration Strategy
 
-The migration script `prisma/migrations/20260906000000_phase2_multi_tenant_foundation/migration.sql` was engineered for zero-downtime and non-destructive application on PostgreSQL / Supabase:
+The migration script `prisma/migrations/20260906000000_phase2_multi_tenant_foundation/migration.sql` was engineered for zero-downtime and non-destructive application on PostgreSQL / Supabase. The fallback/default tenant references below describe historical migration and staging/local backfill behavior only; they are not present in the current Production baseline:
 
 1. **Enum Creation**:
    - `OrganizationStatus` and `TenantRole` created idempotently (`DO $$ BEGIN ... EXCEPTION WHEN duplicate_object ... END $$;`).

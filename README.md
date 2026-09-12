@@ -9,6 +9,24 @@
 
 **Antigravity HRMS** is an enterprise-grade Human Resource Management and Payroll software built on a **Modular Monolith** architecture with Next.js 16 (App Router, Turbopack) and PostgreSQL 16. It operates under a strict **Zero-Fake Core Flow** guarantee: all calculations (attendance hours, shift penalties, overtime premiums, leave accruals, KPI performance bonuses, social/health/unemployment insurance deductions, progressive personal income tax, and digital payslips) execute through verified deterministic domain engines without mock data in production pathways.
 
+### Current Production Release Baseline
+
+The current authoritative Production baseline is documented in `docs/PROJECT_STATE_HANDOFF.md`.
+
+- Approved release SHA: `93b8f8de3d480df578638ab47a20094ccce4fe35`.
+- `main` and `staging` both point to the approved release SHA.
+- Production deployment is READY and public smoke tests pass.
+- Production business data baseline is empty; platform SUPER_ADMIN remains outside all tenants.
+
+### Production Safety Boundaries
+
+- Pushing to `main` can deploy Production. Use `staging` as the validation branch.
+- Production DB access is exceptional, not routine.
+- Production DB writes, migrations, seed, env changes, WAF changes, deploys, rollbacks, or promotions require explicit operator authorization.
+- Never run demo seed in Production.
+- Do not commit untracked operator/helper files unless explicitly approved.
+- Do not force push to `main` or `staging`.
+
 ```mermaid
 flowchart LR
     EMP[1. Employee & Org] --> SCH[2. Multi-Shift Schedules]
@@ -171,6 +189,9 @@ antigravity-hrms/
 ---
 
 ### 5.2. Production Deployment via Docker Compose
+
+> [!IMPORTANT]
+> This section is a generic self-hosted runbook. For the current Vercel Production project, follow the explicit release procedure in `docs/PROJECT_STATE_HANDOFF.md` and `docs/DEPLOYMENT.md`; do not trigger Production deployment, env/WAF changes, migrations, or seed without operator approval.
 
 Deploy the complete containerized stack (Next.js Standalone App + PostgreSQL 16 + Redis 7 + One-shot Migrate Job):
 

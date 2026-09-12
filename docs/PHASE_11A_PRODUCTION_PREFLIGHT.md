@@ -1,5 +1,8 @@
 # 🛡️ PHASE 11A — PRODUCTION READ-ONLY PREFLIGHT AUDIT
 
+> [!IMPORTANT]
+> **HISTORICAL PRE-RELEASE SNAPSHOT**: This report records the state observed on `2026-09-07T02:54:00Z` before the approved Production release. Its blockers and pending-migration statements are preserved as historical evidence. The current authoritative post-release state is maintained in `docs/PROJECT_STATE_HANDOFF.md`.
+
 **Timestamp**: `2026-09-07T02:54:00Z`
 **Execution Mode**: `STRICTLY READ-ONLY PREFLIGHT`
 **Status**: `TARGET NOT VERIFIED — STOP TRIGGERED`
