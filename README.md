@@ -7,16 +7,16 @@
 
 ## 1. Executive Summary
 
-**Antigravity HRMS** is an enterprise-grade Human Resource Management and Payroll software built on a **Modular Monolith** architecture with Next.js 16 (App Router, Turbopack) and PostgreSQL 16. It operates under a strict **Zero-Fake Core Flow** guarantee: all calculations (attendance hours, shift penalties, overtime premiums, leave accruals, KPI performance bonuses, social/health/unemployment insurance deductions, progressive personal income tax, and digital payslips) execute through verified deterministic domain engines without mock data in production pathways.
+**Antigravity HRMS** is an enterprise-grade Human Resource Management and Payroll software built on a **Modular Monolith** architecture with Next.js 16 (App Router, Turbopack) and managed Supabase PostgreSQL for the current Vercel deployment. It operates under a strict **Zero-Fake Core Flow** guarantee: all calculations (attendance hours, shift penalties, overtime premiums, leave accruals, KPI performance bonuses, social/health/unemployment insurance deductions, progressive personal income tax, and digital payslips) execute through verified deterministic domain engines without mock data in production pathways.
 
 ### Current Production Release Baseline
 
 The current authoritative Production baseline is documented in `docs/PROJECT_STATE_HANDOFF.md`.
 
-- Approved release SHA: `93b8f8de3d480df578638ab47a20094ccce4fe35`.
-- `main` and `staging` both point to the approved release SHA.
-- Production deployment is READY and public smoke tests pass.
-- Production business data baseline is empty; platform SUPER_ADMIN remains outside all tenants.
+- Current Production SHA and `main`: `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`.
+- `staging` currently remains at `eaff2cb32161249f8037456b8872fe6d8a8547c3`.
+- Production deployment is READY and public smoke tests PASS (`/` and `/api/health` return HTTP 200).
+- The Production DB values in the authoritative handoff are the last previously verified baseline; R5G.3 did not access the DB.
 
 ### Production Safety Boundaries
 
@@ -103,11 +103,12 @@ flowchart LR
 | **Runtime & Language** | Node.js / TypeScript (Strict Mode) | Node 20+ / TypeScript 5.9 |
 | **UI Library** | React | 19.2.8 |
 | **Styling & Theme** | Tailwind CSS v4 / Lucide Icons | Royal Luxury Dark Theme |
-| **Database & ORM** | PostgreSQL 16 / Prisma ORM | Prisma 6.19.3 (3NF Schema, 26 Tables) |
+| **Production/Staging Database & ORM** | Managed Supabase PostgreSQL / Prisma ORM | Prisma 6.19.3; see the last verified DB baseline in `docs/PROJECT_STATE_HANDOFF.md` |
+| **Generic self-hosted database** | Docker Compose PostgreSQL | `postgres:16-alpine` (not the current Vercel/Supabase Production DB) |
 | **Cache & Sessions** | Redis / Jose JWT | Redis 7 Alpine / HS256 Signed Cookies |
 | **Precision Math** | Decimal.js | Decimal v10.6.0 |
 | **Document Processing** | PDFKit / ExcelJS | Vector PDF & OpenXML Excel (.xlsx) |
-| **Test Engine** | Vitest | Vitest 4.1.11 (30 suites, 498 tests) |
+| **Test Engine** | Vitest | Vitest 4.1.11; test totals depend on the checked-out revision |
 | **Containerization** | Docker / Docker Compose | Multi-stage Alpine Standalone (~250MB) |
 
 ---
@@ -122,19 +123,19 @@ antigravity-hrms/
 │   ├── ARCHITECTURE.md         # System architecture & component topology
 │   ├── DATABASE_DESIGN.md      # 3NF database schema & index specification
 │   ├── API_DESIGN.md           # RESTful API endpoints & contract definitions
-│   ├── RBAC_MATRIX.md          # 5-Role permission & data scoping matrix
+│   ├── RBAC_MATRIX.md          # Role permission & data scoping matrix
 │   ├── PAYROLL_ARCHITECTURE.md # Labor Code 2026 mathematical engine design
 │   ├── SECURITY.md             # OWASP Top 10 compliance & security hardening
 │   ├── TESTING.md              # Test pyramid, quality gates & verification suites
 │   └── DEPLOYMENT.md           # Operations, backup/restore & disaster recovery runbook
 ├── prisma/
-│   ├── schema.prisma           # 26 relational models with full constraints
+│   ├── schema.prisma           # Relational models and constraints
 │   ├── migrations/             # Versioned PostgreSQL migration files (20260901000000_init)
-│   └── seed.ts                 # Real-world Vietnamese enterprise seed data
+│   └── seed.ts                 # System essentials / development demo seed dispatcher
 ├── scripts/
 │   └── simulate-enterprise.ts  # Standalone CLI 10-stage enterprise simulation script
 ├── src/
-│   ├── app/                    # Next.js 16 App Router (13 pages, 79 API routes)
+│   ├── app/                    # Next.js 16 App Router pages and API routes
 │   ├── components/             # Reusable UI primitives, AppShell, Navigation, Skeletons
 │   ├── lib/
 │   │   ├── auth/               # Session management, bcrypt passwords, route guards
@@ -174,10 +175,9 @@ antigravity-hrms/
    # Ensure DATABASE_URL and AUTH_SECRET are configured
    ```
 
-3. **Deploy database migrations & seed enterprise data**:
+3. **Initialize an isolated local development database**. Verify that `DATABASE_URL` targets only that local database before any migration or seed. Production migration/seed is not a quickstart step and requires separate Human Owner/operator authorization:
    ```bash
-   npm run db:migrate:prod
-   npm run db:seed
+   npm run db:migrate:dev
    ```
 
 4. **Start development server**:
@@ -222,23 +222,24 @@ Outputs a comprehensive ASCII dashboard displaying employee rosters, attendance 
 
 ## 6. Verification Quality Gates
 
-All pull requests and release candidates must pass the complete quality gate suite:
+Pull requests and release candidates must pass the quality gate commands in the current CI workflow. Passing criteria are outcomes, not fixed historical test or route counts:
 
 | Quality Gate | Command | Passing Threshold |
 | :--- | :--- | :--- |
-| **Unit & Integration Tests** | `npm test -- --run` | 30/30 suites passed, 498/498 tests passed |
+| **Unit & Integration Tests** | `npm test -- --run` | Exit 0; all discovered tests pass |
 | **TypeScript Strict Checking** | `npx tsc --noEmit` | 0 errors (Exit code 0) |
 | **ESLint Static Analysis** | `npm run lint` | 0 errors (Exit code 0) |
-| **Next.js Production Build** | `npm run build` | 79/79 routes compiled in standalone mode |
-| **Database Migration Integrity**| `npm run db:migrate:prod` | All migrations applied without schema drift |
+| **Next.js Production Build** | `npm run build` | Exit 0 |
+| **Docker Compose Configuration** | `docker compose config --quiet` | Exit 0, matching CI validation |
 
+Production DB migration is a controlled release operation requiring separate Human Owner/operator authorization, not a routine PR quality gate.
 ---
 
 ## 7. Security & Compliance
 
 - **Authentication**: Salted Bcrypt (cost factor 12) password hashing with timing attack mitigation.
 - **Session Tokens**: Cryptographically signed `HS256` JWTs inside `HttpOnly`, `SameSite: 'lax'`, `Secure` cookies.
-- **Role-Based Access Control**: 5 system roles (`SUPER_ADMIN`, `HR_ADMIN`, `PAYROLL_OFFICER`, `DEPARTMENT_MANAGER`, `EMPLOYEE`) with data scoping (`GLOBAL`, `DEPARTMENT`, `SELF`).
+- **Role-Based Access Control**: Platform `SUPER_ADMIN` (`super_admin` session role) is separate from tenants. Prisma `TenantRole` membership values are `OWNER`, `ADMIN`, `HR_MANAGER`, `MANAGER`, and `EMPLOYEE`; tenant-scoped access uses the authenticated organization context.
 - **Anti-IDOR Enforcement**: Explicit caller ownership validation on sensitive routes (e.g. `/api/v1/payroll/payslips/[id]/pdf`).
 - **File Upload Security**: Extension whitelisting, MIME validation, binary magic-byte inspection, path traversal neutralization, and size bounds (max 5MB).
 - **Audit Observability**: Centralized, immutable `audit_logs` table tracking 8 critical business events.
