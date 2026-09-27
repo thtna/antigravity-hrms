@@ -7,6 +7,21 @@
 
 ---
 
+## 0. POST-RELEASE PRODUCTION STATUS
+
+This report now includes the verified post-release baseline. The detailed authoritative handoff is `docs/PROJECT_STATE_HANDOFF.md`.
+
+- **Production deployed successfully**: YES, approved SHA `93b8f8de3d480df578638ab47a20094ccce4fe35`.
+- **Production deployment status**: READY.
+- **Production WAF freeze**: removed after validation; no unrelated WAF rule was modified.
+- **Production public smoke test**: PASS (`/` = HTTP 200, `/api/health` = HTTP 200, `X-Vercel-Mitigated` absent).
+- **Release-time Production DB writes during validation**: NONE. The approved DB verification was read-only.
+- **Production DB business data baseline**: EMPTY (`organizations = 0`, `organization_members = 0`, `branches = 0`).
+- **Platform SUPER_ADMIN**: one active platform user, `organizationId = NULL`, zero memberships, zero employee record.
+- **Release ready for normal use**: YES.
+
+---
+
 ## 1. TỔNG QUAN HỆ THỐNG VÀ KẾT QUẢ NGHIỆM THU
 
 Hệ thống **Antigravity HRMS Multi-Tenant SaaS** đã hoàn thành toàn bộ 10 Phase chuyển đổi kiến trúc và kiểm thử chất lượng cao cấp, bảo đảm đáp ứng đầy đủ các tiêu chuẩn nghiêm ngặt về phân lập dữ liệu đa khách hàng (Multi-Tenant Isolation), an toàn bảo mật cấp doanh nghiệp (Enterprise Security), tính bất biến của động cơ tính lương (Mathematical Invariance), triệt tiêu hoàn toàn mã demo trong production, và khả năng vận hành ổn định trên môi trường thực tế.

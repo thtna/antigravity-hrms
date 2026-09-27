@@ -90,7 +90,7 @@ const { dbState, mockPrisma, resetDbState } = vi.hoisted(() => {
     return state;
   }
 
-  let state = createInitialState();
+  const state = createInitialState();
 
   const p: any = {
     organization: {

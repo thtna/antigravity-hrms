@@ -18,6 +18,21 @@
 
 ---
 
+## Production Safety Boundaries
+
+The current authoritative Production state is recorded in `docs/PROJECT_STATE_HANDOFF.md`.
+
+- Pushes to `main` can auto-deploy Production.
+- `staging` is the validation branch.
+- Production DB access is exceptional, not routine.
+- Production DB writes, migrations, seed, env changes, WAF changes, deploys, rollbacks, and promotions require explicit operator authorization.
+- Never run demo seed in Production.
+- Do not commit untracked operator/helper files unless explicitly approved.
+- Do not force push to `main` or `staging`.
+- Production env and WAF changes require an explicit release procedure and post-change verification.
+
+---
+
 ## 1. Installation
 
 ### Prerequisites
@@ -159,9 +174,12 @@ npm run db:reset
 
 ## 4. Seed
 
+> [!IMPORTANT]
+> Do not run demo seed in Production. Production seed must be explicitly authorized and limited to system essentials only. The current Production baseline is empty business data with one platform SUPER_ADMIN outside all tenants.
+
 ### What the Seed Creates
 
-The seed script (`prisma/seed.ts`) creates:
+For local development and controlled non-Production fixtures, the seed script (`prisma/seed.ts`) can create:
 
 | Entity | Details |
 |:---|:---|
@@ -237,6 +255,9 @@ docker compose logs -f app
 ```
 
 ### Production Deploy
+
+> [!IMPORTANT]
+> For this project's Vercel Production release, do not deploy from this runbook without explicit operator approval. Validate on `staging` first, confirm `main` points to the intended release SHA, and preserve untracked helper files.
 
 ```bash
 # Using production override (no exposed DB ports, resource limits, json logs)

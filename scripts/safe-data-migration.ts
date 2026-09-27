@@ -160,7 +160,7 @@ export async function runSafeDataMigration(dryRun: boolean = false): Promise<Mig
     const users = snapshot.users;
     const employees = snapshot.employees;
 
-    let unclassifiedList: any[] = [];
+    const unclassifiedList: any[] = [];
     let demoCount = 0;
     let realCount = 0;
 

@@ -42,6 +42,7 @@ next-env.d.ts
 
 .vercel
 .env*
+!.env.example
 # Local staging/test artifacts
 /storage/
 /backups/

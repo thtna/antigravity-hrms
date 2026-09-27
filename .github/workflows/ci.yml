@@ -63,6 +63,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Create test environment file
+        run: printf 'DEMO_MODE="false"\n' > .env
+
       # ------------------------------------------------------------------
       # 7. Vitest — All test suites must pass
       # ------------------------------------------------------------------
