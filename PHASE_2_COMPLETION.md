@@ -52,6 +52,8 @@
 - [package.json](file:///C:/Users/LNV/.gemini/antigravity-ide/scratch/antigravity-hrms/package.json): Bổ sung `bcryptjs`, `jose`, `vitest` và script `"test": "vitest run"`.
 - [PHASE_2_COMPLETION.md](file:///C:/Users/LNV/.gemini/antigravity-ide/scratch/antigravity-hrms/PHASE_2_COMPLETION.md): Báo cáo nghiệm thu Phase 2.
 
+> Ghi chú trước phát hành Production: Hai route kiểm thử Phase 2 `test-roles` và `test-ownership/[ownerId]` đã được gỡ để tăng cường bảo mật. Các hàm `requireRole` và `verifyOwnershipOrAdmin` vẫn được kiểm thử trực tiếp.
+
 ---
 
 ## 3. DATABASE THAY ĐỔI (DATABASE CHANGES)
@@ -68,6 +70,8 @@
 | `GET` | `/api/v1/auth/me` | `requireAuth` | Lấy profile và danh sách quyền hợp lệ |
 | `GET` | `/api/v1/auth/test-roles` | `requireRole([role])` | Kiểm tra kiểm định vai trò động |
 | `GET` | `/api/v1/auth/test-ownership/:ownerId` | `verifyOwnershipOrAdmin` | Kiểm định chặn truy cập chéo IDOR |
+
+> Hai dòng kiểm thử trên ghi nhận API tại thời điểm nghiệm thu Phase 2; các endpoint đã được gỡ trước phát hành Production để tăng cường bảo mật. Kiểm thử trực tiếp các auth guard vẫn được giữ lại.
 
 ---
 
