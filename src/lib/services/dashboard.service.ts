@@ -862,8 +862,8 @@ export class DashboardService {
     let employee = null;
 
     if (session.employeeId) {
-      employee = await prisma.employee.findUnique({
-        where: { id: session.employeeId },
+      employee = await prisma.employee.findFirst({
+        where: { id: session.employeeId, organizationId: session.organizationId ?? '__no_org__' },
         include: {
           department: { select: { name: true } },
           position: { select: { title: true } },
@@ -873,8 +873,8 @@ export class DashboardService {
 
     // Fallback: If not linked to employee in session, check by userId
     if (!employee && session.userId) {
-      employee = await prisma.employee.findUnique({
-        where: { userId: session.userId },
+      employee = await prisma.employee.findFirst({
+        where: { userId: session.userId, organizationId: session.organizationId ?? '__no_org__' },
         include: {
           department: { select: { name: true } },
           position: { select: { title: true } },
@@ -885,7 +885,7 @@ export class DashboardService {
     // Fallback for testing: first employee
     if (!employee) {
       employee = await prisma.employee.findFirst({
-        where: { deletedAt: null, ...(session?.organizationId ? { organizationId: session.organizationId } : {}) },
+        where: { deletedAt: null, organizationId: session.organizationId ?? '__no_org__' },
         include: {
           department: { select: { name: true } },
           position: { select: { title: true } },
@@ -893,7 +893,7 @@ export class DashboardService {
       });
     }
 
-    if (!employee || (session?.organizationId && (employee as any).organizationId && (employee as any).organizationId !== session.organizationId)) {
+    if (!employee || employee.organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy thông tin nhân viên liên kết với tài khoản này.');
     }
 

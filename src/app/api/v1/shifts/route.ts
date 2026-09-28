@@ -17,7 +17,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<an
     const { searchParams } = new URL(req.url);
     const includeInactive = isPrivileged && searchParams.get('includeInactive') === 'true';
 
-    const shifts = await ShiftService.listShifts(includeInactive);
+    const shifts = await ShiftService.listShifts(includeInactive, session);
     return NextResponse.json({ success: true, data: shifts, meta: { total: shifts.length, timestamp: new Date().toISOString() } });
   } catch (error) {
     return handleApiError(error);

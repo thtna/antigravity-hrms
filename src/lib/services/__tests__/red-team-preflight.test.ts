@@ -345,7 +345,7 @@ describe('FINAL RED-TEAM PRODUCTION PREFLIGHT VERIFICATION', () => {
 
     it('2.1 Employee: Tenant A cannot read, update, or delete Employee of Tenant B', async () => {
       // Mock employee belonging to Tenant B
-      mockPrisma.employee.findUnique.mockResolvedValue({
+      const tenantBEmployee = {
         id: 'emp-b-001',
         organizationId: 'tenant-b-id',
         employeeCode: 'B001',
@@ -356,7 +356,11 @@ describe('FINAL RED-TEAM PRODUCTION PREFLIGHT VERIFICATION', () => {
         insuranceSalary: new Prisma.Decimal(6000000),
         documents: [],
         deletedAt: null,
-      });
+      };
+      mockPrisma.employee.findUnique.mockResolvedValue(tenantBEmployee);
+      mockPrisma.employee.findFirst.mockImplementation(({ where }) =>
+        where.organizationId === 'tenant-b-id' ? tenantBEmployee : null
+      );
 
       // Tenant A read B -> DENIED (404 Not Found)
       await expect(EmployeeService.getEmployeeById('emp-b-001', sessionA)).rejects.toThrow(ApiError);

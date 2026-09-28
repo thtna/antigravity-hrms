@@ -107,7 +107,7 @@ describe('PHASE 4 — DEPARTMENT & POSITION SERVICE TEST SUITE', () => {
 
       (prisma.department.findMany as unknown as Mock).mockResolvedValue(mockDepartments);
 
-      const result = await DepartmentService.listDepartments();
+      const result = await DepartmentService.listDepartments(false, adminSession);
       expect(result.length).toBe(1);
       expect(result[0].manager?.fullName).toBe('Nguyễn A');
       expect(result[0].employeeCount).toBe(12);
@@ -257,7 +257,7 @@ describe('PHASE 4 — DEPARTMENT & POSITION SERVICE TEST SUITE', () => {
 
       (prisma.position.findMany as unknown as Mock).mockResolvedValue(mockPositions);
 
-      const list = await PositionService.listPositions();
+      const list = await PositionService.listPositions(false, adminSession);
       expect(list.length).toBe(1);
       expect(list[0].minSalary).toBe(20000000);
       expect(list[0].maxSalary).toBe(35000000);

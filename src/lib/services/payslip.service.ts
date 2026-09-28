@@ -24,8 +24,8 @@ export class PayslipService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập để truy cập phiếu lương.');
     }
 
-    const payroll = await prisma.payroll.findUnique({
-      where: { id: payrollId },
+    const payroll = await prisma.payroll.findFirst({
+      where: { id: payrollId, organizationId: session.organizationId ?? '__no_org__' },
       include: {
         period: true,
         employee: {
@@ -40,7 +40,7 @@ export class PayslipService {
       },
     });
 
-    if (!payroll || (session?.organizationId && payroll.employee?.organizationId && payroll.employee.organizationId !== session.organizationId)) {
+    if (!payroll) {
       throw ApiError.notFound('Không tìm thấy phiếu lương được yêu cầu.');
     }
 

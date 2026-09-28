@@ -427,8 +427,8 @@ export class PenaltyService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const penalty = await prisma.employeeBonusPenalty.findUnique({
-      where: { id, type: 'PENALTY' },
+    const penalty = await prisma.employeeBonusPenalty.findFirst({
+      where: { id, type: 'PENALTY', organizationId: session.organizationId ?? '__no_org__' },
       include: {
         employee: {
           select: {
@@ -452,7 +452,7 @@ export class PenaltyService {
       },
     });
 
-    if (!penalty || (session?.organizationId && (penalty as any).organizationId && (penalty as any).organizationId !== session.organizationId)) {
+    if (!penalty) {
       throw ApiError.notFound('Không tìm thấy biên bản xử phạt.');
     }
 

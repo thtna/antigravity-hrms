@@ -8,12 +8,12 @@ import { ApiResponse } from '@/types';
 
 export async function GET(request: NextRequest): Promise<NextResponse<ApiResponse<any>>> {
   try {
-    await requireAuth();
+    const session = await requireAuth();
 
     const { searchParams } = new URL(request.url);
     const includeInactive = searchParams.get('includeInactive') === 'true';
 
-    const positions = await PositionService.listPositions(includeInactive);
+    const positions = await PositionService.listPositions(includeInactive, session);
 
     return NextResponse.json({
       success: true,

@@ -9,6 +9,7 @@ vi.mock('@/lib/db/prisma', () => ({
   prisma: {
     employee: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       update: vi.fn(),
     },
     user: {
@@ -133,6 +134,10 @@ describe('PHASE 22 — DOCUMENT & FILE SECURITY TEST SUITE', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (prisma.employee.findFirst as unknown as Mock).mockImplementation(async ({ where }) => {
+      const employee = await (prisma.employee.findUnique as unknown as Mock)({ where: { id: where.id } });
+      return employee?.organizationId === where.organizationId ? employee : null;
+    });
   });
 
   // ── 1. AVATAR UPLOAD VALIDATION & SECURITY ─────────────────────────────────

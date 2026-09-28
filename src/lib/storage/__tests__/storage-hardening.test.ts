@@ -18,7 +18,7 @@
  * 12. SupabaseStorageProvider unit tests
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { LocalStorageProvider } from '../providers/local.provider';
 import { SupabaseStorageProvider } from '../providers/supabase.provider';
 import { StorageManager } from '../storage-manager';
@@ -44,6 +44,7 @@ vi.mock('@/lib/db/prisma', () => ({
   prisma: {
     employee: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       update: vi.fn(),
     },
     user: {
@@ -81,6 +82,10 @@ describe('PHASE 11A.0C — PRODUCTION STORAGE HARDENING & TENANT ISOLATION', () 
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    (prisma.employee.findFirst as unknown as Mock).mockImplementation(async ({ where }) => {
+      const employee = await (prisma.employee.findUnique as unknown as Mock)({ where: { id: where.id } });
+      return employee?.organizationId === where.organizationId ? employee : null;
+    });
     localProvider = new LocalStorageProvider(TEST_STORAGE_DIR);
     StorageManager.setProviderForTesting(localProvider);
   });

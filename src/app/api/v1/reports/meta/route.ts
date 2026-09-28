@@ -11,6 +11,7 @@ import { ApiResponse } from '@/types';
 export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<any>>> {
   try {
     const session = await requireAuth();
+    const organizationId = session.organizationId ?? '__no_org__';
     const isAdminOrHr = session.roles.includes('admin') || session.roles.includes('hr');
     const isManager = session.roles.includes('manager');
 
@@ -18,26 +19,27 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<an
     let departments: Array<{ id: string; code: string; name: string }> = [];
     if (isAdminOrHr) {
       departments = await prisma.department.findMany({
+        where: { organizationId },
         select: { id: true, code: true, name: true },
         orderBy: { name: 'asc' },
       });
     } else if (isManager && session.departmentId) {
       departments = await prisma.department.findMany({
-        where: { id: session.departmentId },
+        where: { id: session.departmentId, organizationId },
         select: { id: true, code: true, name: true },
       });
     }
 
     // 2. Fetch employees scoped by role
-    let employeeWhere: any = {};
+    let employeeWhere: any = { organizationId };
     if (isAdminOrHr) {
       // all active or existing employees
-      employeeWhere = {};
+      employeeWhere = { organizationId };
     } else if (isManager && session.departmentId) {
-      employeeWhere = { departmentId: session.departmentId };
+      employeeWhere = { departmentId: session.departmentId, organizationId };
     } else {
       // Employee only sees self
-      employeeWhere = { id: session.employeeId };
+      employeeWhere = { id: session.employeeId, organizationId };
     }
 
     const rawEmployees = await prisma.employee.findMany({

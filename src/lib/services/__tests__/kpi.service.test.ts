@@ -20,6 +20,7 @@ const mockPrisma = vi.hoisted(() => ({
   },
   employee: {
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
   },
   department: {
     findUnique: vi.fn(),
@@ -159,6 +160,10 @@ describe('PHASE 11 — KPI Engine: KpiService Test Suite', () => {
     vi.clearAllMocks();
     setupTransaction();
     mockPrisma.employee.findUnique.mockResolvedValue(mockEmployee);
+    mockPrisma.employee.findFirst.mockImplementation(async ({ where }) => {
+      const employee = await mockPrisma.employee.findUnique({ where: { id: where.id } });
+      return employee?.organizationId === where.organizationId ? employee : null;
+    });
     mockPrisma.kpi.findFirst.mockImplementation((...args: any[]) =>
       mockPrisma.kpi.findUnique(...args)
     );

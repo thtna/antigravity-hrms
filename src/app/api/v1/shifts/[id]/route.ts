@@ -14,9 +14,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse<ApiResponse<any>>> {
   try {
-    await requireAuth();
+    const session = await requireAuth();
     const { id } = await params;
-    const shift = await ShiftService.getShiftById(id);
+    const shift = await ShiftService.getShiftById(id, session);
     return NextResponse.json({ success: true, data: shift, meta: { timestamp: new Date().toISOString() } });
   } catch (error) {
     return handleApiError(error);

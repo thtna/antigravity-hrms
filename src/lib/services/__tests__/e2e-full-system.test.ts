@@ -721,7 +721,11 @@ vi.mock('@/lib/db/prisma', () => {
           details: p.details || [],
         };
       }),
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn(async ({ where }) => {
+        const pay = state.payrolls.get(where.id);
+        if (pay?.organizationId !== where.organizationId) return null;
+        return prisma.payroll.findUnique({ where: { id: where.id } });
+      }),
       findMany: vi.fn(async ({ where }: any = {}) => {
         let list = Array.from(state.payrolls.values());
         if (where?.employeeId) {
@@ -1391,6 +1395,7 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
       testPayrollId = 'pr-e2e-001';
       state.payrolls.set(testPayrollId, {
         id: testPayrollId,
+        organizationId: testOrgId,
         periodId: testPayrollPeriodId,
         employeeId: testEmployeeId,
         contractSalary: 22000000,

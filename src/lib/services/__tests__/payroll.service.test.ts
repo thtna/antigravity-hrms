@@ -34,6 +34,7 @@ const mockPrisma = vi.hoisted(() => ({
     create: vi.fn(),
     deleteMany: vi.fn(),
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
   },
   payrollDetail: {
     createMany: vi.fn(),
@@ -82,6 +83,10 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
     mockPrisma.payrollPeriod.findFirst.mockImplementation((...args: any[]) =>
       mockPrisma.payrollPeriod.findUnique(...args)
     );
+    mockPrisma.payroll.findFirst.mockImplementation(async ({ where }) => {
+      const payroll = await mockPrisma.payroll.findUnique({ where: { id: where.id } });
+      return payroll?.organizationId === where.organizationId ? payroll : null;
+    });
   });
 
   // ── 1. Create Period ───────────────────────────────────────────────────────

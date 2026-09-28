@@ -669,7 +669,7 @@ export class AttendanceCorrectionService {
     const isManager = session.roles.includes('manager');
 
     const where: Prisma.AttendanceAdjustmentWhereInput = {
-      ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+      organizationId: session.organizationId ?? '__no_org__',
     };
 
     // RBAC scoping
@@ -796,8 +796,8 @@ export class AttendanceCorrectionService {
    * Get single correction by ID with security checks.
    */
   static async getCorrectionById(id: string, session: UserSession) {
-    const correction = await prisma.attendanceAdjustment.findUnique({
-      where: { id },
+    const correction = await prisma.attendanceAdjustment.findFirst({
+      where: { id, organizationId: session.organizationId ?? '__no_org__' },
       include: {
         employee: {
           select: {
@@ -823,7 +823,7 @@ export class AttendanceCorrectionService {
       },
     });
 
-    if (!correction || (session?.organizationId && (correction as any).organizationId && (correction as any).organizationId !== session.organizationId)) {
+    if (!correction) {
       throw ApiError.notFound(`Không tìm thấy yêu cầu điều chỉnh có ID: ${id}`);
     }
 

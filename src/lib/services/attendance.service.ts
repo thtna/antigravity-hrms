@@ -680,8 +680,8 @@ export class AttendanceService {
    * Get single attendance record by ID.
    */
   static async getAttendanceById(id: string, session: UserSession) {
-    const record = await prisma.attendance.findUnique({
-      where: { id },
+    const record = await prisma.attendance.findFirst({
+      where: { id, organizationId: session.organizationId ?? '__no_org__' },
       include: {
         employee: {
           select: {
@@ -701,15 +701,6 @@ export class AttendanceService {
     });
 
     if (!record) {
-      throw ApiError.notFound(`Không tìm thấy bản ghi chấm công có ID: ${id}`);
-    }
-
-    // PHASE 5: Tenant isolation check — fetch org from employee
-    const empOrg = await prisma.employee.findUnique({
-      where: { id: record.employeeId },
-      select: { organizationId: true },
-    });
-    if (!empOrg || empOrg.organizationId !== session.organizationId) {
       throw ApiError.notFound(`Không tìm thấy bản ghi chấm công có ID: ${id}`);
     }
 

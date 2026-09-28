@@ -8,13 +8,13 @@ export class DepartmentService {
   /**
    * List all departments with manager details and count of employees
    */
-  static async listDepartments(includeInactive = false, session?: UserSession) {
+  static async listDepartments(includeInactive: boolean, session: UserSession) {
     const departments = await prisma.department.findMany({
       where: {
         deletedAt: null,
         ...(includeInactive ? {} : { isActive: true }),
         // PHASE 5: Tenant isolation
-        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: session.organizationId ?? '__no_org__',
       },
       include: {
         manager: {
@@ -57,13 +57,13 @@ export class DepartmentService {
   /**
    * Get single department by ID with manager, sub-departments and employee list
    */
-  static async getDepartmentById(id: string, session?: UserSession) {
+  static async getDepartmentById(id: string, session: UserSession) {
     // PHASE 6: findFirst with organizationId enforces tenant isolation at DB level (IDOR fix)
     const department = await prisma.department.findFirst({
       where: {
         id,
         deletedAt: null,
-        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: session.organizationId ?? '__no_org__',
       },
       include: {
         manager: {

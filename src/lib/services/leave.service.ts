@@ -529,8 +529,8 @@ export class LeaveService {
    * Get single leave request by ID.
    */
   static async getLeaveRequestById(id: string, session: UserSession) {
-    const request = await prisma.leaveRequest.findUnique({
-      where: { id },
+    const request = await prisma.leaveRequest.findFirst({
+      where: { id, employee: { organizationId: session.organizationId ?? '__no_org__' } },
       include: {
         employee: {
           select: {
@@ -558,17 +558,6 @@ export class LeaveService {
 
     if (!request) {
       throw ApiError.notFound(`Không tìm thấy đơn yêu cầu có ID: ${id}`);
-    }
-
-    // PHASE 5: Tenant isolation — check employee belongs to org
-    if (session?.organizationId) {
-      const empOrg = await prisma.employee.findUnique({
-        where: { id: request.employeeId },
-        select: { organizationId: true },
-      });
-      if (!empOrg || empOrg.organizationId !== session.organizationId) {
-        throw ApiError.notFound(`Không tìm thấy đơn yêu cầu có ID: ${id}`);
-      }
     }
 
     const isHrOrAdmin = session.roles.includes('admin') || session.roles.includes('hr');

@@ -329,7 +329,9 @@ export class AuditService {
     const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
     const skip = (page - 1) * limit;
 
-    const where: Prisma.AuditLogWhereInput = {};
+    const where: Prisma.AuditLogWhereInput = {
+      organizationId: session.organizationId ?? '__no_org__',
+    };
 
     if (query.action) {
       const normalized = query.action.toUpperCase().trim();

@@ -266,7 +266,7 @@ export class KpiService {
     });
   }
 
-  static async getKpiDefinitions(query: KpiQueryParams, session?: { organizationId?: string | null }) {
+  static async getKpiDefinitions(query: KpiQueryParams, session: UserSession) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
     const skip = (page - 1) * limit;
@@ -274,7 +274,7 @@ export class KpiService {
     const where: Prisma.KpiWhereInput = {
       deletedAt: null,
       // PHASE 5: Tenant isolation
-      ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+      organizationId: session.organizationId ?? '__no_org__',
     };
 
     if (query.search) {
@@ -690,14 +690,15 @@ export class KpiService {
     const selectedPeriod = period || new Date().toISOString().slice(0, 7); // Default current YYYY-MM
 
     const [employee, results] = await Promise.all([
-      prisma.employee.findUnique({
-        where: { id: employeeId },
+      prisma.employee.findFirst({
+        where: { id: employeeId, organizationId: session.organizationId ?? '__no_org__' },
         include: { department: true, position: true },
       }),
       prisma.employeeKpiResult.findMany({
         where: {
           employeeId,
           period: selectedPeriod,
+          organizationId: session.organizationId ?? '__no_org__',
         },
         include: {
           kpi: true,
@@ -754,6 +755,7 @@ export class KpiService {
 
     const whereScope: Prisma.EmployeeKpiResultWhereInput = {
       period: currentPeriod,
+      organizationId: session.organizationId ?? '__no_org__',
     };
 
     if (!isHrOrAdmin && isManager && session.employeeId) {
@@ -769,7 +771,7 @@ export class KpiService {
 
     const [totalActiveKpis, totalAssigned, pendingEvaluations, approvedEvaluations] =
       await Promise.all([
-        prisma.kpi.count({ where: { status: 'ACTIVE', deletedAt: null } }),
+        prisma.kpi.count({ where: { organizationId: session.organizationId ?? '__no_org__', status: 'ACTIVE', deletedAt: null } }),
         prisma.employeeKpiResult.count({ where: whereScope }),
         prisma.employeeKpiResult.count({ where: { ...whereScope, status: 'SUBMITTED' } }),
         prisma.employeeKpiResult.count({ where: { ...whereScope, status: 'APPROVED' } }),
