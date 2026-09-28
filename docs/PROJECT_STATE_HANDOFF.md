@@ -6,23 +6,33 @@
 
 ---
 
-## 0. POST-RELEASE AUTHORITATIVE BASELINE (PHASE 5K-B2)
+## 0. POST-RELEASE AUTHORITATIVE BASELINE (R5G.3)
 
-This section is the current authoritative state after the September Production release revalidation. Older phase reports remain historical evidence and must not be read as current deployment state when they conflict with this section.
+This section is the current authoritative state after the R5G release. Older phase reports remain historical evidence and must not be read as current deployment state when they conflict with this section.
 
-- **Approved release SHA**: `93b8f8de3d480df578638ab47a20094ccce4fe35`
-- **main**: `93b8f8de3d480df578638ab47a20094ccce4fe35`
-- **staging**: `93b8f8de3d480df578638ab47a20094ccce4fe35`
+- **Approved/current Production release SHA**: `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`
+- **main**: `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`
+- **staging**: `eaff2cb32161249f8037456b8872fe6d8a8547c3`
 - **Production deployment**: `READY`
 - **Production root HTTP**: `200`
 - **Production health HTTP**: `200`
 - **X-Vercel-Mitigated**: absent
 - **Production public access**: restored
+- **CI #30**: `SUCCESS`
+- **Docker Build & Publish #7 attempt 2**: `SUCCESS`; multi-platform image published.
+- **R5G.3 Production deployment and public smoke verification**: `PASS`
 - **RELEASE READY FOR NORMAL USE**: `YES`
+
+### R5G Release Closure Evidence
+
+- PR #1 merged into `main` as `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`.
+- Vercel project `antigravity-hrms` has a `READY` Production deployment from `main` at that exact SHA.
+- Auth test route source files `src/app/api/v1/auth/test-roles/route.ts` and `src/app/api/v1/auth/test-ownership/[ownerId]/route.ts` are absent from the merge commit. Unauthenticated public GETs returned `401` via middleware, so direct live `404` route-absence proof remains partial.
+- Docker #7 attempt 1 was cancelled after hitting the 30-minute workflow timeout while ARM64/QEMU made no progress; attempt 2 succeeded unchanged, so no Docker workflow remediation was required for this release. The exact deep cause of the first timeout is not proven.
 
 ### Production DB Verified Baseline
 
-The last approved Production DB verification was read-only. Do not access Production DB casually and do not reconstruct, request, print, or guess Production secrets.
+R5G.3 did not access Production DB. The values below remain the last previously verified read-only baseline, not a new R5G.3 verification. Do not access Production DB casually and do not reconstruct, request, print, or guess Production secrets.
 
 | Check | Verified Value |
 | :--- | :--- |
@@ -115,22 +125,17 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 
 ---
 
-## 3. GIAI ĐOẠN HIỆN TẠI (CURRENT PHASE IN PROGRESS)
+## 3. TRẠNG THÁI RELEASE HIỆN HÀNH (CURRENT RELEASE STATE)
 
-### **PHASE 5K-B3 — DOCUMENTATION DIFF CONTENT REVIEW**
-
-- **Mục tiêu**:
-  - Re-run the complete documentation diff content review after the targeted Phase 5K-B3A handoff correction.
-  - Verify the approved 8-file documentation diff remains factually consistent before any commit decision.
-  - Do not mark Phase 5K-B3 as PASS until that review is re-run successfully.
-- **Trạng thái**: **CURRENT REVIEW GATE — RE-RUN REQUIRED AFTER PHASE 5K-B3A**.
+- **R5G Production release**: complete and healthy; deployment `READY`, public root and health HTTP 200.
+- **Next product/development mutation approved**: NONE. Any new scope requires separate Human Owner approval.
 
 ---
 
 ## 4. RÀO CẢN VÀ ĐIỀU KIỆN TIẾP TỤC (CURRENT BLOCKERS)
 
 - **Release blocker**: NONE. Production is healthy and ready for normal use.
-- **Documentation blocker**: NONE after Phase 5K-B2. Phase 5K-B3 diff review must be re-run after the targeted handoff correction.
+- **Documentation control**: Propose reconciliation when the handoff becomes stale; file mutation requires a Human Owner-approved gate. Determine document commit/push status from Git, not from this handoff.
 - **Production guard**: Production remains protected. Any Production DB write, env change, WAF change, deploy, rollback, or promotion requires explicit operator authorization.
 - **Operator/helper files**: Existing untracked helper files must remain uncommitted unless the operator explicitly approves.
 
@@ -138,15 +143,14 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 
 ## 5. CÁC GIAI ĐOẠN TIẾP THEO (NEXT PHASES ROADMAP)
 
-1. **PHASE 5K-B3 — DOCUMENTATION DIFF CONTENT REVIEW**: re-run exact diff review after Phase 5K-B3A correction; do not commit unless the review passes.
-2. **Documentation commit decision**: operator decides whether to commit and push the approved documentation-only diff to `staging`.
-3. **Next product development phase**: must be separately proposed and explicitly approved before any code, DB, env, WAF, or deployment change.
+1. **Next product/development phase**: propose a bounded scope and obtain separate Human Owner approval before any code, DB, env, WAF, or deployment change.
+2. **Documentation reconciliation when needed**: verify the live state and Git status, then request explicit approval before editing, committing, or pushing.
 
 ---
 
 ## 6. NGUYÊN TẮC CỐT TỬ: PRODUCTION ĐÃ RELEASE, KHÔNG TỰ Ý THAY ĐỔI
 
-- **Production deployed**: **YES**, approved SHA `93b8f8de3d480df578638ab47a20094ccce4fe35`.
+- **Production deployed**: **YES**, current SHA `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`.
 - **Production deployment status**: **READY**.
 - **Production public access**: **RESTORED**.
 - **Production WAF freeze**: removed after validation; health-check rule preserved.
@@ -155,7 +159,7 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 
 ---
 
-## 7. TRẠNG THÁI TEST & BUILD MỚI NHẤT (EMPIRICAL BENCHMARKS)
+## 7. HISTORICAL EMPIRICAL BENCHMARK — VERIFIED 08/09/2026
 
 *Dữ liệu được thẩm tra thực tế tại ngày 08/09/2026:*
 
@@ -196,13 +200,10 @@ Tất cả báo cáo chi tiết nằm trong thư mục [`docs/`](file:///C:/User
 
 ---
 
-## 9. CƠ CHẾ CẬP NHẬT TỰ ĐỘNG
+## 9. CƠ CHẾ ĐỀ XUẤT CẬP NHẬT TÀI LIỆU
 
 > [!NOTE]
 > **QUY TẮC BẮT BUỘC ĐỐI VỚI AI AGENT**:
-> Sau khi hoàn thành bất kỳ Phase mới nào (ví dụ: hoàn tất Phase 11A.0C2 hoặc Phase 11A.0D), tác tử AI phụ trách **PHẢI TỰ ĐỘNG CẬP NHẬT TÀI LIỆU NÀY**:
-> 1. Chuyển Phase vừa hoàn thành vào Mục 2 ("TRẠNG THÁI CÁC GIAI ĐOẠN ĐÃ ĐẠT CHUẨN").
-> 2. Cập nhật Mục 3 ("GIAI ĐOẠN HIỆN TẠI") sang Phase tiếp theo.
-> 3. Cập nhật số liệu tests (`npm test`), build (`npm run build`) tại Mục 7.
-> 4. Bổ sung tên báo cáo nghiệm thu mới vào Mục 8.
-> 5. Giữ vững nguyên tắc: **Tuyệt đối không đưa credentials hoặc secrets vào tài liệu.**
+> Sau mỗi phase, AI Agent phải phát hiện khi handoff có thể đã lỗi thời và đề xuất documentation reconciliation. Mọi file mutation chỉ được thực hiện trong gate có Human Owner approval; không tự ý stage, commit hoặc push.
+> Khi đề xuất, đối chiếu release state, historical phase records, benchmark dates và danh mục báo cáo; không biến số liệu lịch sử thành kết quả mới.
+> **Tuyệt đối không đưa credentials hoặc secrets vào tài liệu.**
