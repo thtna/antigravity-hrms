@@ -6,33 +6,49 @@
 
 ---
 
-## 0. POST-RELEASE AUTHORITATIVE BASELINE (R5G.3)
+## 0. R5G STABLE RELEASE BASELINE & VERIFIED DEPLOYMENT SNAPSHOT
 
-This section is the current authoritative state after the R5G release. Older phase reports remain historical evidence and must not be read as current deployment state when they conflict with this section.
+This section is authoritative for the stable application release lineage and dated verification evidence. Older phase reports remain historical evidence, not live deployment-state checks.
 
-- **Approved/current Production release SHA**: `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`
-- **main**: `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`
-- **staging**: `eaff2cb32161249f8037456b8872fe6d8a8547c3`
+### Stable Application/Code Release Baseline
+
+- **Application/code release baseline**: `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`. PR #1 delivered the approved product/security changes. This remains the R5G application/code baseline until a new product/code release is separately approved; documentation-only merges do not redefine it.
+
+### R5G.11 Verified Deployment Snapshot (28/09/2026)
+
+- **main at verification**: `aaacbb6cfa1c95a8571e0b2cf412804aa6e6da7b`
+- **remote staging at verification**: `967a22f886edd962c798edf5a8d2adcd5fa0c854`
 - **Production deployment**: `READY`
 - **Production root HTTP**: `200`
 - **Production health HTTP**: `200`
 - **X-Vercel-Mitigated**: absent
 - **Production public access**: restored
-- **CI #30**: `SUCCESS`
-- **Docker Build & Publish #7 attempt 2**: `SUCCESS`; multi-platform image published.
-- **R5G.3 Production deployment and public smoke verification**: `PASS`
-- **RELEASE READY FOR NORMAL USE**: `YES`
+- **CI #33**: `SUCCESS`
+- **Docker Build & Publish #8**: `SUCCESS`
+- **Docker image digest**: `sha256:1f0e017b42221db6e8cbcbe8f978432edde92112777847737c32bd42a46c0b5c`
+- **R5G.11 Production deployment and public smoke verification**: `PASS`
+- **Release ready for normal use at verification**: `YES`
 
-### R5G Release Closure Evidence
+The Git and Vercel SHAs above are verified snapshots, not permanent current-ref invariants. Before any future operational action, read live `main`, `staging`, and Production deployment SHAs again from GitHub/Vercel.
+
+### Release Lineage
+
+- PR #1 merged the application/security release as `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`.
+- PR #2 merged documentation-only reconciliation as `aaacbb6cfa1c95a8571e0b2cf412804aa6e6da7b`; its documentation commit/head was `967a22f886edd962c798edf5a8d2adcd5fa0c854`.
+- Comparing the application baseline `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50` with the R5G.11 deployment snapshot `aaacbb6cfa1c95a8571e0b2cf412804aa6e6da7b` changes only `README.md`, `docs/PRODUCTION_READINESS.md`, and `docs/PROJECT_STATE_HANDOFF.md`. No application source or workflow changed between those snapshots.
+
+### R5G.3 Release Closure Evidence (Historical)
 
 - PR #1 merged into `main` as `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`.
-- Vercel project `antigravity-hrms` has a `READY` Production deployment from `main` at that exact SHA.
+- R5G.3 verified a `READY` Production deployment from `main` at that exact SHA in Vercel project `antigravity-hrms`.
+- **CI #30**: `SUCCESS`; **Docker Build & Publish #7 attempt 2**: `SUCCESS`; multi-platform image published.
+- **R5G.3 Production deployment and public smoke verification**: `PASS`.
 - Auth test route source files `src/app/api/v1/auth/test-roles/route.ts` and `src/app/api/v1/auth/test-ownership/[ownerId]/route.ts` are absent from the merge commit. Unauthenticated public GETs returned `401` via middleware, so direct live `404` route-absence proof remains partial.
 - Docker #7 attempt 1 was cancelled after hitting the 30-minute workflow timeout while ARM64/QEMU made no progress; attempt 2 succeeded unchanged, so no Docker workflow remediation was required for this release. The exact deep cause of the first timeout is not proven.
 
 ### Production DB Verified Baseline
 
-R5G.3 did not access Production DB. The values below remain the last previously verified read-only baseline, not a new R5G.3 verification. Do not access Production DB casually and do not reconstruct, request, print, or guess Production secrets.
+Neither R5G.3 nor R5G.11 accessed or revalidated Production DB. The values below remain the last previously verified read-only baseline, not a new verification by either phase. Do not access Production DB casually and do not reconstruct, request, print, or guess Production secrets.
 
 | Check | Verified Value |
 | :--- | :--- |
@@ -150,8 +166,8 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 
 ## 6. NGUYÊN TẮC CỐT TỬ: PRODUCTION ĐÃ RELEASE, KHÔNG TỰ Ý THAY ĐỔI
 
-- **Production deployed**: **YES**, current SHA `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`.
-- **Production deployment status**: **READY**.
+- **Production deployed**: **YES**. The stable application/code baseline is `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`; the latest recorded R5G.11 verified deployment snapshot is `aaacbb6cfa1c95a8571e0b2cf412804aa6e6da7b`. Check GitHub/Vercel for the live current deployment SHA before any operational action.
+- **R5G.11 snapshot deployment status**: **READY**.
 - **Production public access**: **RESTORED**.
 - **Production WAF freeze**: removed after validation; health-check rule preserved.
 - **Production DB access**: exceptional only; no casual checks.

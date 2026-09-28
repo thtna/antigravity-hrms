@@ -9,14 +9,14 @@
 
 **Antigravity HRMS** is an enterprise-grade Human Resource Management and Payroll software built on a **Modular Monolith** architecture with Next.js 16 (App Router, Turbopack) and managed Supabase PostgreSQL for the current Vercel deployment. It operates under a strict **Zero-Fake Core Flow** guarantee: all calculations (attendance hours, shift penalties, overtime premiums, leave accruals, KPI performance bonuses, social/health/unemployment insurance deductions, progressive personal income tax, and digital payslips) execute through verified deterministic domain engines without mock data in production pathways.
 
-### Current Production Release Baseline
+### Stable Production Release Baseline
 
-The current authoritative Production baseline is documented in `docs/PROJECT_STATE_HANDOFF.md`.
+The authoritative release lineage and last verified Production DB baseline are documented in `docs/PROJECT_STATE_HANDOFF.md`.
 
-- Current Production SHA and `main`: `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`.
-- `staging` currently remains at `eaff2cb32161249f8037456b8872fe6d8a8547c3`.
-- Production deployment is READY and public smoke tests PASS (`/` and `/api/health` return HTTP 200).
-- The Production DB values in the authoritative handoff are the last previously verified baseline; R5G.3 did not access the DB.
+- **Stable R5G application/code release baseline (PR #1)**: `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`. This identifies the approved product/security code; later documentation-only commits and merges do not redefine it.
+- **R5G.11 verified Production deployment snapshot (28/09/2026)**: `aaacbb6cfa1c95a8571e0b2cf412804aa6e6da7b` on `main`. At that snapshot, Production was `READY`, `/` and `/api/health` returned HTTP 200, `X-Vercel-Mitigated` was absent, CI #33 was `SUCCESS`, and Docker Build & Publish #8 was `SUCCESS`.
+- The R5G.11 deployment SHA is a dated verification snapshot, not a permanent current-`main` or current-Production SHA invariant. Read live `main`, `staging`, and Vercel Production deployment SHAs before operational decisions.
+- The Production DB values in the authoritative handoff remain the last previously verified baseline. Neither R5G.3 nor R5G.11 accessed or revalidated Production DB.
 
 ### Production Safety Boundaries
 

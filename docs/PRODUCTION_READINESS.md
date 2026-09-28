@@ -2,7 +2,7 @@
 ## ANTIGRAVITY HRMS — SAAS MULTI-TENANT ENTERPRISE PLATFORM
 
 **Ngày nghiệm thu gốc**: 06/09/2026
-**Trạng thái post-release hiện hành**: cập nhật qua R5G.3 ngày 27/09/2026 (Mục 0); các kết quả nghiệm thu bên dưới vẫn là bằng chứng lịch sử.
+**R5G.11 post-merge verification snapshot**: 28/09/2026 (Mục 0); nghiệm thu gốc ngày 06/09/2026 và các kết quả bên dưới vẫn là bằng chứng lịch sử.
 **Trạng thái tổng thể**: **PRODUCTION READY (100% PASS — ĐÃ KIỂM THỬ THỰC TẾ)**
 **Môi trường thực thi**: Windows x64 / Node.js LTS / Next.js 16.3.4 (Turbopack) / PostgreSQL (Prisma ORM) / Vitest 4.1.11
 
@@ -10,16 +10,17 @@
 
 ## 0. POST-RELEASE PRODUCTION STATUS
 
-This report includes the current R5G.3 post-release baseline. The detailed authoritative handoff is `docs/PROJECT_STATE_HANDOFF.md`.
+This report distinguishes the stable R5G application/code release baseline from the dated R5G.11 Production deployment snapshot. The detailed authoritative handoff is `docs/PROJECT_STATE_HANDOFF.md`. Re-read live deployment identity for future release operations.
 
-- **Production deployed successfully**: YES, current SHA `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50` from `main`.
-- **Production deployment status**: READY.
-- **Production WAF freeze**: removed after validation; no unrelated WAF rule was modified.
-- **Production public smoke test**: PASS (`/` = HTTP 200, `/api/health` = HTTP 200, `X-Vercel-Mitigated` absent).
-- **CI #30**: SUCCESS.
-- **Docker Build & Publish #7 attempt 2**: SUCCESS; multi-platform image published.
-- **Auth test routes**: removed from source at the deployed SHA. Unauthenticated public GETs returned HTTP 401 via middleware; direct live HTTP 404 absence proof is not established.
-- **R5G.3 Production DB access and writes**: NONE. The DB values below are the last previously verified baseline, not revalidated in R5G.3.
+- **Stable application/code release baseline (PR #1)**: `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`; documentation-only merges do not redefine it.
+- **R5G.11 verified Production deployment snapshot (28/09/2026)**: `aaacbb6cfa1c95a8571e0b2cf412804aa6e6da7b` from `main`, not a permanent current-SHA invariant.
+- **R5G.11 Production deployment status**: READY.
+- **R5G.11 public smoke test**: PASS (`/` = HTTP 200, `/api/health` = HTTP 200, `X-Vercel-Mitigated` absent).
+- **CI #33**: SUCCESS.
+- **Docker Build & Publish #8**: SUCCESS; digest `sha256:1f0e017b42221db6e8cbcbe8f978432edde92112777847737c32bd42a46c0b5c`.
+- **R5G.3 historical evidence**: Production WAF freeze was removed after validation without modifying unrelated WAF rules; CI #30 and Docker Build & Publish #7 attempt 2 succeeded, and Production public smoke passed.
+- **Auth test routes (R5G.3 evidence)**: removed from source at the PR #1 application baseline. Unauthenticated public GETs returned HTTP 401 via middleware; direct live HTTP 404 absence proof is not established.
+- **Production DB verification**: Neither R5G.3 nor R5G.11 accessed or revalidated Production DB. The values below are the last previously verified baseline.
 - **Last previously verified Production DB business data baseline**: EMPTY (`organizations = 0`, `organization_members = 0`, `branches = 0`).
 - **Last previously verified Platform SUPER_ADMIN baseline**: one active platform user, `organizationId = NULL`, zero memberships, zero employee record.
 - **Release ready for normal use**: YES.
