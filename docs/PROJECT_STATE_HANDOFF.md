@@ -69,7 +69,33 @@ Neither R5G.3 nor R5G.11 accessed or revalidated Production DB. The values below
 
 ### Completed Release Gates
 
-`5I-G = PASS`; `5J-A = PASS`; `5J-A2 = PASS`; `5J-B = PASS`; `5J-C = PASS`; `5J-D = PASS`; `5J-E = PASS`; `5J-F = PASS`; `5K-A = PASS`; `5K-B1 = PASS`; `5K-B2 = PASS`.
+`5I-G = PASS`; `5J-A = PASS`; `5J-A2 = PASS`; `5J-B = PASS`; `5J-C = PASS`; `5J-D = PASS`; `5J-E = PASS`; `5J-F = PASS`; `5K-A = PASS`; `5K-B1 = PASS`; `5K-B2 = PASS`; `R5G15A4B-S1 = PASS`; `R5G15A4B-S2 = PASS`.
+
+### R5G15A4B Sub-Gate Verification Evidence (Storage Hardening & Staging Runtime Rehearsal)
+
+- **Authoritative Source Commit**: `1da40441eed9f93e598b9bcbe1dabf4f70df2478` on branch `staging`.
+- **CI Quality Gate #38**: `PASS`
+- **R5G15A4B-S1 (Source Remediation & Unit Suite)**: `PASS`
+  - Hardened `SupabaseStorageProvider.deleteWithDetails` with strict HTTP status parsing (`100..599`), property-presence validation, symmetric error signal contradiction scanning, and 2xx body status range enforcement.
+  - Added targeted test suite `[SUPABASE-DEL-01]` through `[SUPABASE-DEL-30]`, `[SVC-DEL-01]`, `[SVC-DEL-02]` (50/50 passing).
+- **R5G15A4B-S2 (Staging Storage Runtime Revision 7 Rehearsal)**: `PASS with eventual delete settlement evidence.`
+  - Target bucket: `documents` (PRIVATE) on `antigravity-hrms-staging` (`rdpufonfascxgbydvtak.supabase.co`).
+  - Target tenant: `588234eb-53f0-424b-835c-fc0f24d406a3`.
+  - Target object key: `organizations/588234eb-53f0-424b-835c-fc0f24d406a3/employees/rev7-runtime-641d2286-f8d7-4ef6-bcf1-b96a4b04952d/doc-rev7-641d2286-f8d7-4ef6-bcf1-b96a4b04952d.pdf`.
+  - Upload synthetic 303-byte PDF (`adcbda4582b892d43918b43c021f2ffc187f34a8df1770ef1727189fc5de0177`): `PASS`.
+  - Authenticated download (303 bytes, exact SHA-256 match): `PASS`.
+  - Signed URL creation and fetch (HTTP 200, 303 bytes, exact SHA-256 match): `PASS`.
+  - Pre-delete parent list: item count = 1, exact match count = 1.
+  - Exactly one `deleteWithDetails()` call executed (`DELETE_CALL_COUNT_TOTAL = 1`): HTTP 200, `responseOk: YES`, `redirectDetected: NO`, `errorCode: NONE`, `errorClass: NONE`, `errorSignalConflict: NO`, `classifiedSuccess: YES`.
+  - **Settlement Evidence**: Immediate post-delete read remained HTTP 200; a later independent read-only settlement probe authoritatively proved NoSuchKey/404 and zero parent-list matches. The cause of settlement delay remains UNPROVEN.
+  - Consistency metrics: `DELETE_EVENTUALLY_SETTLED = YES`, `DELETE_SETTLEMENT_MODEL = EVENTUAL`, `OBJECT_LEAK_LEFT_BEHIND = NO`, `SECOND_DELETE_REQUIRED = NO`, `CLEANUP_REQUIRED = NO`, `ROOT_CAUSE_OF_DELAY = UNPROVEN`.
+  - Scope safeguards: No second delete, no automatic retry, no automatic cleanup, no DB/Data API/RLS/Production mutation. No credentials, authorization values, tokens, or signed URL values were exposed in the Rev7 verification outputs reviewed.
+- **R5G15A4B Status Boundary**:
+  - `R5G15A4B-S1 = PASS`
+  - `R5G15A4B-S2 = PASS`
+  - `R5G15A4B_FINAL = INCOMPLETE / UNPROVEN`
+  - `PRODUCTION_CONTAINMENT_READY = INCOMPLETE / UNPROVEN`
+  - `CUSTOMER_HANDOFF_READY = INCOMPLETE / UNPROVEN`
 
 ### Verified Behavioral Guarantees
 

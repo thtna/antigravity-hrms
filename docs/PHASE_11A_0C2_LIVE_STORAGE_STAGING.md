@@ -184,3 +184,28 @@ Production touched          = NO
 > ---
 > **GIAI ĐOẠN TIẾP THEO**:
 > **PHASE 11A.0D — REAL EMAIL READINESS** (Kiểm tra và chuẩn bị cấu hình dịch vụ email thực tế SendGrid/SMTP trước khi triển khai).
+
+---
+
+## 11. ADDENDUM / REVALIDATION (2026-09-29) — R5G15A4B-S2 STAGING STORAGE RUNTIME (REVISION 7)
+
+> **KẾT QUẢ TIỂU PHÂN HỆ S2**: **R5G15A4B-S2 PASS with eventual delete settlement evidence.**
+> **MÔ HÌNH NHẤT QUÁN**: `DELETE_SETTLEMENT_MODEL = EVENTUAL` | `ROOT_CAUSE_OF_DELAY = UNPROVEN`
+
+1. **Bối cảnh kiểm thử**:
+   - Source Commit: `1da40441eed9f93e598b9bcbe1dabf4f70df2478` (CI Quality Gate #38: `PASS`).
+   - Đối tượng kiểm thử: `organizations/588234eb-53f0-424b-835c-fc0f24d406a3/employees/rev7-runtime-641d2286-f8d7-4ef6-bcf1-b96a4b04952d/doc-rev7-641d2286-f8d7-4ef6-bcf1-b96a4b04952d.pdf`
+   - Bucket: `documents` (PRIVATE) trên `antigravity-hrms-staging` (`rdpufonfascxgbydvtak.supabase.co`).
+   - Payload: 303 bytes (SHA-256: `adcbda4582b892d43918b43c021f2ffc187f34a8df1770ef1727189fc5de0177`).
+2. **Vòng đời đối tượng**:
+   - Upload: `PASS` | Download: `PASS` (303 bytes, exact SHA-256 match).
+   - Signed URL creation & fetch: `PASS` (HTTP 200, 303 bytes, exact SHA-256 match).
+   - Pre-delete parent list: item count = 1, exact match count = 1.
+   - Single `deleteWithDetails()` (`DELETE_CALL_COUNT_TOTAL = 1`): HTTP 200, `responseOk: YES`, `redirectDetected: NO`, `errorCode: NONE`, `errorClass: NONE`, `errorSignalConflict: NO`, `classifiedSuccess: YES`.
+3. **Bằng chứng giải tỏa (Settlement Evidence)**:
+   - Immediate post-delete read remained HTTP 200; a later independent read-only settlement probe authoritatively proved NoSuchKey/404 and zero parent-list matches. The cause of settlement delay remains UNPROVEN.
+   - `DELETE_EVENTUALLY_SETTLED = YES` | `OBJECT_LEAK_LEFT_BEHIND = NO` | `SECOND_DELETE_REQUIRED = NO` | `CLEANUP_REQUIRED = NO`.
+4. **Ranh giới an toàn**:
+   - Không thực hiện delete lần 2, không retry tự động, không cleanup tự động.
+   - Không ghi/sửa Database, Prisma, RLS, Data API, Production.
+   - No credentials, authorization values, tokens, or signed URL values were exposed in the Rev7 verification outputs reviewed.
