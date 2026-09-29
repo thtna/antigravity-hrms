@@ -77,6 +77,7 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
 
   const employeeSession: UserSession = {
     userId: 'usr-emp',
+    organizationId: 'org-test-dashboard',
     employeeId: 'emp-dev-1',
     departmentId: 'dept-tech',
     fullName: 'Phạm Văn An',
@@ -88,6 +89,10 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrisma.employee.findFirst.mockImplementation(async ({ where }) => {
+      const employee = await mockPrisma.employee.findUnique({ where: { id: where.id } });
+      return employee?.organizationId === where.organizationId ? employee : null;
+    });
   });
 
   // ── 1. Admin/HR Dashboard Tests ──────────────────────────────────────────
@@ -379,6 +384,7 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
       // 1. Employee Record
       mockPrisma.employee.findUnique.mockResolvedValue({
         id: 'emp-dev-1',
+        organizationId: 'org-test-dashboard',
         employeeCode: 'EMP-0004',
         firstName: 'An',
         lastName: 'Phạm',
@@ -617,6 +623,7 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
     it('handles employee with zero attendance and zero payroll smoothly', async () => {
       mockPrisma.employee.findUnique.mockResolvedValue({
         id: 'emp-fresh',
+        organizationId: 'org-test-dashboard',
         employeeCode: 'EMP-9999',
         firstName: 'Mới',
         lastName: 'Nhân Viên',
@@ -637,6 +644,7 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
 
       const freshSession: UserSession = {
         userId: 'usr-fresh',
+        organizationId: 'org-test-dashboard',
         employeeId: 'emp-fresh',
         fullName: 'Nhân Viên Mới',
         email: 'fresh@antigravity.internal',

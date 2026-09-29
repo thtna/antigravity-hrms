@@ -253,8 +253,8 @@ export class DocumentService {
       throw ApiError.unauthorized('Yêu cầu xác thực tài khoản. Vui lòng đăng nhập để tải tài liệu.');
     }
 
-    const employee = await prisma.employee.findUnique({
-      where: { id: employeeId },
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, organizationId: session.organizationId ?? '__no_org__' },
       select: {
         id: true,
         userId: true,
@@ -328,8 +328,8 @@ export class DocumentService {
       throw ApiError.unauthorized('Yêu cầu xác thực tài khoản.');
     }
 
-    const employee = await prisma.employee.findUnique({
-      where: { id: employeeId },
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, organizationId: session.organizationId ?? '__no_org__' },
       select: {
         id: true,
         userId: true,
@@ -405,8 +405,8 @@ export class DocumentService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const employee = await prisma.employee.findUnique({
-      where: { id: employeeId },
+    const employee = await prisma.employee.findFirst({
+      where: { id: employeeId, organizationId: session.organizationId ?? '__no_org__' },
       select: {
         id: true,
         userId: true,

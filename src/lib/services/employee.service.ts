@@ -127,8 +127,8 @@ export class EmployeeService {
    * Get single employee by ID with IDOR / Data Scoping validation
    */
   static async getEmployeeById(id: string, session: UserSession) {
-    const employee = await prisma.employee.findUnique({
-      where: { id },
+    const employee = await prisma.employee.findFirst({
+      where: { id, organizationId: session.organizationId ?? '__no_org__' },
       include: {
         department: true,
         position: true,

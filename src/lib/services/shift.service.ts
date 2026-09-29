@@ -74,12 +74,12 @@ export class ShiftService {
   /**
    * List all work shifts
    */
-  static async listShifts(includeInactive = false, session?: UserSession) {
+  static async listShifts(includeInactive: boolean, session: UserSession) {
     const shifts = await prisma.workShift.findMany({
       where: {
         deletedAt: null,
         ...(includeInactive ? {} : { isActive: true }),
-        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: session.organizationId ?? '__no_org__',
       },
       include: {
         _count: {
@@ -104,9 +104,9 @@ export class ShiftService {
   /**
    * Get single shift by ID
    */
-  static async getShiftById(id: string, session?: UserSession) {
-    const shift = await prisma.workShift.findUnique({
-      where: { id },
+  static async getShiftById(id: string, session: UserSession) {
+    const shift = await prisma.workShift.findFirst({
+      where: { id, organizationId: session.organizationId ?? '__no_org__', deletedAt: null },
       include: {
         _count: {
           select: {
@@ -117,7 +117,7 @@ export class ShiftService {
       },
     });
 
-    if (!shift || shift.deletedAt || (session?.organizationId && (shift as any).organizationId && (shift as any).organizationId !== session.organizationId)) {
+    if (!shift) {
       throw ApiError.notFound(`Không tìm thấy ca làm việc với ID: ${id}`);
     }
 

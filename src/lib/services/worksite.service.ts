@@ -30,14 +30,14 @@ export class WorksiteService {
   /**
    * Retrieve list of worksites with search, status filtering, and assigned employee counts.
    */
-  static async getWorksites(query: WorksiteQueryParams, session?: UserSession) {
+  static async getWorksites(query: WorksiteQueryParams, session: UserSession) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 50;
     const skip = (page - 1) * limit;
 
     const where: Prisma.WorksiteWhereInput = {
       // PHASE 5: Tenant isolation
-      ...(session ? { organizationId: session.organizationId ?? '__no_org__' } : {}),
+      organizationId: session.organizationId ?? '__no_org__',
     };
 
     if (query.search) {
@@ -95,9 +95,9 @@ export class WorksiteService {
   /**
    * Get single worksite by ID.
    */
-  static async getWorksiteById(id: string, session?: UserSession) {
-    const worksite = await prisma.worksite.findUnique({
-      where: { id },
+  static async getWorksiteById(id: string, session: UserSession) {
+    const worksite = await prisma.worksite.findFirst({
+      where: { id, organizationId: session.organizationId ?? '__no_org__' },
       include: {
         _count: {
           select: {
@@ -109,7 +109,7 @@ export class WorksiteService {
       },
     });
 
-    if (!worksite || (session?.organizationId && (worksite as any).organizationId && (worksite as any).organizationId !== session.organizationId)) {
+    if (!worksite) {
       throw ApiError.notFound('Địa điểm làm việc không tồn tại.');
     }
 

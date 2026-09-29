@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockPrisma = vi.hoisted(() => ({
   payrollPeriod: {
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
     update: vi.fn(),
   },
   payroll: {
@@ -78,6 +79,10 @@ const employeeSession: UserSession = {
 describe('PHASE 16 — PAYROLL WORKFLOW & APPROVAL SERVICE TEST SUITE', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrisma.payrollPeriod.findFirst.mockImplementation(async ({ where }) => {
+      const period = await mockPrisma.payrollPeriod.findUnique({ where: { id: where.id } });
+      return period?.organizationId === where.organizationId ? period : null;
+    });
   });
 
   // ── 1. Immutability Guard ──────────────────────────────────────────────────
@@ -376,15 +381,19 @@ describe('PHASE 16 — PAYROLL WORKFLOW & APPROVAL SERVICE TEST SUITE', () => {
   // ── 4. History Queries ─────────────────────────────────────────────────────
   describe('4. getApprovalHistory & listAdjustments', () => {
     it('returns approval history ordered by date', async () => {
+      mockPrisma.payrollPeriod.findUnique.mockResolvedValue({ id: 'period-01', organizationId: 'org-test-workflow' });
       mockPrisma.payrollApproval.findMany.mockResolvedValue([
         { id: 'appr-01', stage: 'REVIEW_TO_APPROVED', decision: 'APPROVE' },
         { id: 'appr-00', stage: 'CALCULATED_TO_REVIEW', decision: 'SUBMIT_REVIEW' },
       ]);
 
-      const history = await PayrollWorkflowService.getApprovalHistory('period-01', hrSession);
+      const history = await PayrollWorkflowService.getApprovalHistory('period-01', {
+        ...hrSession,
+        organizationId: 'org-test-workflow',
+      });
       expect(history.length).toBe(2);
       expect(mockPrisma.payrollApproval.findMany).toHaveBeenCalledWith({
-        where: { periodId: 'period-01' },
+        where: { periodId: 'period-01', organizationId: 'org-test-workflow' },
         orderBy: { actionAt: 'desc' },
         include: expect.any(Object),
       });

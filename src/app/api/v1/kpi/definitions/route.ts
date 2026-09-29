@@ -24,7 +24,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<un
     };
 
     const validatedQuery = await validateRequest(KpiQuerySchema, queryObj);
-    const result = await KpiService.getKpiDefinitions(validatedQuery);
+    const result = await KpiService.getKpiDefinitions(validatedQuery, session);
 
     return NextResponse.json({
       success: true,

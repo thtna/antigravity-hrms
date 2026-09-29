@@ -33,6 +33,7 @@ import { UserSession } from '@/types';
 
 const adminSession: UserSession = {
   userId: 'usr-admin',
+  organizationId: 'org-test-penalty',
   employeeId: 'emp-admin',
   roles: ['admin'],
   email: 'admin@test.com',
@@ -93,6 +94,7 @@ const mockEmployee = {
 
 const mockPenalty = {
   id: 'pen-001',
+  organizationId: 'org-test-penalty',
   employeeId: 'emp-001',
   type: 'PENALTY',
   category: 'LATE',
@@ -124,6 +126,10 @@ describe('PHASE 13 — PENALTY SERVICE TEST SUITE', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockPrisma));
+    mockPrisma.employeeBonusPenalty.findFirst.mockImplementation(async ({ where }) => {
+      const penalty = await mockPrisma.employeeBonusPenalty.findUnique({ where: { id: where.id } });
+      return penalty?.organizationId === where.organizationId ? penalty : null;
+    });
   });
 
   // ── 1. createPenalty Tests ─────────────────────────────────────────────────

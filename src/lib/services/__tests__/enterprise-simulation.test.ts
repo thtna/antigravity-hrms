@@ -32,6 +32,7 @@ import { PenaltyService } from '../penalty.service';
 import { PayrollService } from '../payroll.service';
 import { PayrollWorkflowService } from '../payroll-workflow.service';
 import { PayslipService } from '../payslip.service';
+import { prisma } from '@/lib/db/prisma';
 import { PayrollCalculationEngine } from '@/lib/payroll/payroll-calculation-engine';
 import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
 
@@ -586,6 +587,11 @@ vi.mock('@/lib/db/prisma', () => {
             { id: 'd-7', itemCode: 'PIT', itemName: 'Thuế TNCN', itemType: 'STATUTORY_DEDUCTION', amount: pay.pitTax, description: 'Thuế thu nhập cá nhân lũy tiến' },
           ],
         };
+      }),
+      findFirst: vi.fn(async ({ where }) => {
+        const pay = state.payrolls.get(where.id);
+        if (pay?.organizationId !== where.organizationId) return null;
+        return prisma.payroll.findUnique({ where: { id: where.id } });
       }),
       create: vi.fn(async ({ data }) => {
         const id = data.id || uid('pay');

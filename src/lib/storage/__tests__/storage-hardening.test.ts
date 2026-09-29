@@ -18,10 +18,11 @@
  * 12. SupabaseStorageProvider unit tests
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { LocalStorageProvider } from '../providers/local.provider';
 import { SupabaseStorageProvider } from '../providers/supabase.provider';
 import { StorageManager } from '../storage-manager';
+import { logger } from '@/lib/logger';
 import {
   buildTenantDocumentKey,
   buildTenantAvatarKey,
@@ -44,6 +45,7 @@ vi.mock('@/lib/db/prisma', () => ({
   prisma: {
     employee: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
       update: vi.fn(),
     },
     user: {
@@ -81,6 +83,10 @@ describe('PHASE 11A.0C — PRODUCTION STORAGE HARDENING & TENANT ISOLATION', () 
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    (prisma.employee.findFirst as unknown as Mock).mockImplementation(async ({ where }) => {
+      const employee = await (prisma.employee.findUnique as unknown as Mock)({ where: { id: where.id } });
+      return employee?.organizationId === where.organizationId ? employee : null;
+    });
     localProvider = new LocalStorageProvider(TEST_STORAGE_DIR);
     StorageManager.setProviderForTesting(localProvider);
   });
@@ -443,6 +449,343 @@ describe('PHASE 11A.0C — PRODUCTION STORAGE HARDENING & TENANT ISOLATION', () 
 
       vi.unstubAllGlobals();
     });
+
+    describe('SupabaseStorageProvider — Delete Observability & Idempotency', () => {
+      let provider: SupabaseStorageProvider;
+
+      beforeEach(() => {
+        provider = new SupabaseStorageProvider({
+          supabaseUrl: 'https://test-project.supabase.co',
+          serviceRoleKey: 'test-service-role-key-256',
+        });
+      });
+
+      afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+      });
+
+      it('[SUPABASE-DEL-01] DELETE 2xx success returns success and does not emit warning', async () => {
+        const warnSpy = vi.spyOn(logger, 'warn');
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, text: vi.fn().mockResolvedValue('') }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.success).toBe(true);
+        expect(details.errorCode).toBe('NONE');
+        expect(details.errorSignalConflict).toBe('NO');
+        expect(warnSpy).not.toHaveBeenCalled();
+        await expect(provider.delete('documents', 'key.pdf')).resolves.toBeUndefined();
+      });
+
+      it('[SUPABASE-DEL-02] HTTP 400 + NoSuchKey + statusCode "404" => valid idempotent success', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 400, text: vi.fn().mockResolvedValue(JSON.stringify({ code: 'NoSuchKey', statusCode: '404' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.success).toBe(true);
+        expect(details.errorCode).toBe('NoSuchKey');
+        expect(details.bodyStatusParseValid).toBe('YES');
+        expect(details.bodyStatusCode).toBe(404);
+        expect(details.errorSignalConflict).toBe('NO');
+        await expect(provider.delete('documents', 'key.pdf')).resolves.toBeUndefined();
+      });
+
+      it('[SUPABASE-DEL-03] HTTP 400 alone without NoSuchKey => OTHER => failure', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 400, text: vi.fn().mockResolvedValue(JSON.stringify({ error: 'Bad Request' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.success).toBe(false);
+        expect(details.errorClass).toBe('OTHER');
+        await expect(provider.delete('documents', 'key.pdf')).rejects.toThrow(ApiError);
+      });
+
+      it('[SUPABASE-DEL-04] NoSuchKey from message only (without code) => OTHER => failure', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 400, text: vi.fn().mockResolvedValue(JSON.stringify({ message: 'Object not found: NoSuchKey' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorCode).toBe('OTHER');
+        expect(details.success).toBe(false);
+        await expect(provider.delete('documents', 'key.pdf')).rejects.toThrow(ApiError);
+      });
+
+      it('[SUPABASE-DEL-05] HTTP 401 transport precedence throws unauthorized', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 401, text: vi.fn().mockResolvedValue(JSON.stringify({ message: 'jwt expired' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.success).toBe(false);
+        expect(details.errorClass).toBe('InvalidJWT');
+        await expect(provider.delete('documents', 'key.pdf')).rejects.toThrow(ApiError);
+      });
+
+      it('[SUPABASE-DEL-06] HTTP 403 transport precedence throws forbidden', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 403, text: vi.fn().mockResolvedValue('')
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.success).toBe(false);
+        expect(details.errorClass).toBe('AccessDenied');
+        await expect(provider.delete('documents', 'key.pdf')).rejects.toThrow(ApiError);
+      });
+
+      it('[SUPABASE-DEL-07] Generic HTTP 500 without structured code => SERVER_ERROR => failure', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 500, text: vi.fn().mockResolvedValue('')
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.success).toBe(false);
+        expect(details.errorClass).toBe('SERVER_ERROR');
+        await expect(provider.delete('documents', 'key.pdf')).rejects.toThrow(ApiError);
+      });
+
+      it('[SUPABASE-DEL-08] DELETE HTTP 3xx redirect marks redirectDetected and throws', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 302, text: vi.fn().mockResolvedValue('')
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.redirectDetected).toBe(true);
+        await expect(provider.delete('documents', 'key.pdf')).rejects.toThrow(ApiError);
+      });
+
+      it('[SUPABASE-DEL-09] DELETE network exception classifies as NETWORK_ERROR and throws', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Connection reset')));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorCode).toBe('NETWORK_ERROR');
+        await expect(provider.delete('documents', 'key.pdf')).rejects.toThrow(ApiError);
+      });
+
+      it('[SUPABASE-DEL-10] body statusCode / httpStatusCode conflict prevents idempotent success', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 400, text: vi.fn().mockResolvedValue(JSON.stringify({ code: 'NoSuchKey', statusCode: 404, httpStatusCode: 400 }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.bodyStatusConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-11] no raw body or full key leakage into logger.warn on delete failure', async () => {
+        const warnSpy = vi.spyOn(logger, 'warn');
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 400, text: vi.fn().mockResolvedValue(JSON.stringify({ code: 'InvalidRequest', upstream_token: 'secret-token', path: '/var/obj' }))
+        }));
+
+        await provider.deleteWithDetails('documents', 'secret-contract.pdf');
+        const serializedLog = JSON.stringify(warnSpy.mock.calls);
+        expect(serializedLog).not.toContain('secret-token');
+        expect(serializedLog).not.toContain('secret-contract.pdf');
+      });
+
+      it('[SUPABASE-DEL-12] HTTP 200 + code NoSuchKey => success false, emits sanitized warning without body/key leak', async () => {
+        const warnSpy = vi.spyOn(logger, 'warn');
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ code: 'NoSuchKey', raw_field: 'leak_secret' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'secret-key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith(
+          '[SupabaseStorageProvider] Storage delete failed or conflicted',
+          expect.objectContaining({
+            status: 200,
+            errorCode: 'NoSuchKey',
+            errorSignalConflict: 'YES',
+            bucket: 'documents',
+          })
+        );
+        const serializedLog = JSON.stringify(warnSpy.mock.calls);
+        expect(serializedLog).not.toContain('leak_secret');
+        expect(serializedLog).not.toContain('secret-key.pdf');
+      });
+
+      it('[SUPABASE-DEL-13] HTTP 200 + body statusCode 404 => conflict => success = false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ statusCode: 404 }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-14] NoSuchKey message mentioning bucket generically MUST NOT false-conflict', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 404, text: vi.fn().mockResolvedValue(JSON.stringify({
+            code: 'NoSuchKey',
+            statusCode: 404,
+            message: 'The object in this bucket has been deleted.'
+          }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('NO');
+        expect(details.success).toBe(true);
+      });
+
+      it('[SUPABASE-DEL-15] NoSuchKey + explicit "bucket not found" => errorSignalConflict = YES => failure', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 404, text: vi.fn().mockResolvedValue(JSON.stringify({
+            code: 'NoSuchKey',
+            statusCode: 404,
+            message: 'Error: bucket not found for object'
+          }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-16] HTTP 401 + AccessDenied => errorSignalConflict = YES', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 401, text: vi.fn().mockResolvedValue(JSON.stringify({ code: 'AccessDenied' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-17] HTTP 403 + InvalidJWT => errorSignalConflict = YES', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 403, text: vi.fn().mockResolvedValue(JSON.stringify({ code: 'InvalidJWT' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-18] HTTP 500 + InvalidRequest => errorSignalConflict = YES', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 500, text: vi.fn().mockResolvedValue(JSON.stringify({ code: 'InvalidRequest' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-19] HTTP 200 + statusCode "invalid" => bodyStatusParseValid = NO => success = false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ statusCode: 'invalid' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.bodyStatusParseValid).toBe('NO');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-20] HTTP 200 + statusCode 999 => bodyStatusParseValid = NO => success = false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ statusCode: 999 }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.bodyStatusParseValid).toBe('NO');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-21] HTTP 400 + NoSuchKey with malformed body status => bodyStatusParseValid = NO => NOT idempotent success', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 400, text: vi.fn().mockResolvedValue(JSON.stringify({ code: 'NoSuchKey', statusCode: 'bad_number' }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.bodyStatusParseValid).toBe('NO');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-22] HTTP 404 + NoSuchKey + error "AccessDenied" => conflict YES => success false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 404, text: vi.fn().mockResolvedValue(JSON.stringify({
+            code: 'NoSuchKey',
+            statusCode: 404,
+            error: 'AccessDenied'
+          }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-23] HTTP 404 + NoSuchKey + error "InvalidRequest" => conflict YES => success false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 404, text: vi.fn().mockResolvedValue(JSON.stringify({
+            code: 'NoSuchKey',
+            statusCode: 404,
+            error: 'InvalidRequest'
+          }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-24] HTTP 404 + NoSuchKey + error "bucket_not_found" => conflict YES => success false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 404, text: vi.fn().mockResolvedValue(JSON.stringify({
+            code: 'NoSuchKey',
+            statusCode: 404,
+            error: 'bucket_not_found'
+          }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-25] HTTP 200 + { statusCode: null } => bodyStatusParseValid = NO => success = false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ statusCode: null }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.bodyStatusParseValid).toBe('NO');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-26] HTTP 200 + { httpStatusCode: null } => bodyStatusParseValid = NO => success = false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ httpStatusCode: null }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.bodyStatusParseValid).toBe('NO');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-27] HTTP 400 + NoSuchKey + statusCode 404 + httpStatusCode null => bodyStatusParseValid = NO => success = false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: false, status: 400, text: vi.fn().mockResolvedValue(JSON.stringify({
+            code: 'NoSuchKey',
+            statusCode: 404,
+            httpStatusCode: null
+          }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.bodyStatusParseValid).toBe('NO');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-28] HTTP 200 + { statusCode: 302 } => success = false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ statusCode: 302 }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-29] HTTP 200 + { statusCode: 199 } => success = false', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ statusCode: 199 }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('YES');
+        expect(details.success).toBe(false);
+      });
+
+      it('[SUPABASE-DEL-30] HTTP 200 + { statusCode: 204 } => normal success = true', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true, status: 200, text: vi.fn().mockResolvedValue(JSON.stringify({ statusCode: 204 }))
+        }));
+        const details = await provider.deleteWithDetails('documents', 'key.pdf');
+        expect(details.errorSignalConflict).toBe('NO');
+        expect(details.bodyStatusParseValid).toBe('YES');
+        expect(details.success).toBe(true);
+        await expect(provider.delete('documents', 'key.pdf')).resolves.toBeUndefined();
+      });
+    });
   });
 
   // --------------------------------------------------------------------------
@@ -512,6 +855,60 @@ describe('PHASE 11A.0C — PRODUCTION STORAGE HARDENING & TENANT ISOLATION', () 
       await expect(
         DocumentService.getEmployeeDocumentSignedUrl('emp-b-01', 'doc-secret-b', tenantASession)
       ).rejects.toThrow(/không tồn tại/); // Handled as 404 for anti-enumeration
+    });
+
+    it('[SVC-DEL-01] DocumentService delete blocks DB update when file storage delete throws', async () => {
+      const mockEmployee = {
+        id: 'emp-del-01',
+        organizationId: 'org-tenant-a',
+        documents: [{ id: 'doc-to-delete', name: 'Contract.pdf', storedFilename: 'doc-to-delete.pdf' }],
+      };
+      (prisma.employee.findUnique as any).mockResolvedValue(mockEmployee);
+      const updateSpy = vi.spyOn(prisma.employee, 'update');
+
+      const mockStorageProvider = {
+        upload: vi.fn(),
+        download: vi.fn(),
+        delete: vi.fn().mockRejectedValue(ApiError.internal('Physical storage delete failed')),
+        exists: vi.fn(),
+        getSignedUrl: vi.fn(),
+      };
+      const getProviderSpy = vi.spyOn(StorageManager, 'getProvider').mockReturnValue(mockStorageProvider as any);
+
+      try {
+        await expect(
+          DocumentService.deleteEmployeeDocument('emp-del-01', 'doc-to-delete', tenantASession)
+        ).rejects.toThrow('Physical storage delete failed');
+
+        expect(updateSpy).not.toHaveBeenCalled();
+      } finally {
+        updateSpy.mockRestore();
+        getProviderSpy.mockRestore();
+      }
+    });
+
+    it('[SVC-DEL-02] DocumentService delete permits DB metadata update when storage delete succeeds idempotently', async () => {
+      const mockEmployee = {
+        id: 'emp-del-02',
+        organizationId: 'org-tenant-a',
+        documents: [{ id: 'doc-already-gone', name: 'OldContract.pdf', storedFilename: 'doc-already-gone.pdf' }],
+      };
+      (prisma.employee.findUnique as any).mockResolvedValue(mockEmployee);
+      const updateSpy = vi.spyOn(prisma.employee, 'update').mockResolvedValue({} as any);
+
+      const mockStorageProvider = {
+        upload: vi.fn(), download: vi.fn(), delete: vi.fn().mockResolvedValue(undefined), exists: vi.fn(), getSignedUrl: vi.fn(),
+      };
+      const getProviderSpy = vi.spyOn(StorageManager, 'getProvider').mockReturnValue(mockStorageProvider as any);
+
+      try {
+        const res = await DocumentService.deleteEmployeeDocument('emp-del-02', 'doc-already-gone', tenantASession);
+        expect(res.success).toBe(true);
+        expect(updateSpy).toHaveBeenCalled();
+      } finally {
+        updateSpy.mockRestore();
+        getProviderSpy.mockRestore();
+      }
     });
   });
 });

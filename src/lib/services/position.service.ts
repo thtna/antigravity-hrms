@@ -9,13 +9,13 @@ export class PositionService {
   /**
    * List all positions with salary range and employee count
    */
-  static async listPositions(includeInactive = false, session?: UserSession) {
+  static async listPositions(includeInactive: boolean, session: UserSession) {
     const positions = await prisma.position.findMany({
       where: {
         deletedAt: null,
         ...(includeInactive ? {} : { isActive: true }),
         // PHASE 5: Tenant isolation
-        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: session.organizationId ?? '__no_org__',
       },
       include: {
         _count: {
@@ -39,13 +39,13 @@ export class PositionService {
   /**
    * Get single position with employee list
    */
-  static async getPositionById(id: string, session?: UserSession) {
+  static async getPositionById(id: string, session: UserSession) {
     // PHASE 6: IDOR fix — findFirst with organizationId enforces tenant scoping at DB level
     const position = await prisma.position.findFirst({
       where: {
         id,
         deletedAt: null,
-        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: session.organizationId ?? '__no_org__',
       },
       include: {
         employees: {

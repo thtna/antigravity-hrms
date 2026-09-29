@@ -374,11 +374,11 @@ export class PayrollWorkflowService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const period = await prisma.payrollPeriod.findUnique({
-      where: { id: periodId },
+    const period = await prisma.payrollPeriod.findFirst({
+      where: { id: periodId, organizationId: session.organizationId ?? '__no_org__' },
       select: { id: true, organizationId: true },
     });
-    if (!period || (session.organizationId && period.organizationId !== session.organizationId)) {
+    if (!period) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
     }
 
@@ -403,11 +403,11 @@ export class PayrollWorkflowService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const period = await prisma.payrollPeriod.findUnique({
-      where: { id: periodId },
+    const period = await prisma.payrollPeriod.findFirst({
+      where: { id: periodId, organizationId: session.organizationId ?? '__no_org__' },
       select: { id: true, organizationId: true },
     });
-    if (!period || (session.organizationId && period.organizationId !== session.organizationId)) {
+    if (!period) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
     }
 

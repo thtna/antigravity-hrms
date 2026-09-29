@@ -364,8 +364,8 @@ export class BonusService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const bonus = await prisma.employeeBonusPenalty.findUnique({
-      where: { id },
+    const bonus = await prisma.employeeBonusPenalty.findFirst({
+      where: { id, organizationId: session.organizationId ?? '__no_org__' },
       include: {
         employee: {
           select: {
@@ -384,17 +384,6 @@ export class BonusService {
 
     if (!bonus) {
       throw ApiError.notFound('Không tìm thấy thông tin khoản thưởng.');
-    }
-
-    // PHASE 5: Tenant isolation
-    if (session?.organizationId) {
-      const empOrg = await prisma.employee.findUnique({
-        where: { id: bonus.employeeId },
-        select: { organizationId: true },
-      });
-      if (!empOrg || empOrg.organizationId !== session.organizationId) {
-        throw ApiError.notFound('Không tìm thấy thông tin khoản thưởng.');
-      }
     }
 
     // RBAC check

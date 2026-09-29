@@ -81,7 +81,7 @@ describe('PHASE 8 — WORKSITE MANAGEMENT SERVICE TEST SUITE', () => {
         isActive: 'ALL',
         page: 1,
         limit: 50,
-      });
+      }, adminSession);
 
       expect(result.items).toHaveLength(1);
       expect(result.items[0].name).toBe(mockWorksite.name);
@@ -93,9 +93,9 @@ describe('PHASE 8 — WORKSITE MANAGEMENT SERVICE TEST SUITE', () => {
     });
 
     it('should get single worksite by ID', async () => {
-      mockPrisma.worksite.findUnique.mockResolvedValue(mockWorksite);
+      mockPrisma.worksite.findFirst.mockResolvedValue(mockWorksite);
 
-      const result = await WorksiteService.getWorksiteById('ws-001');
+      const result = await WorksiteService.getWorksiteById('ws-001', adminSession);
 
       expect(result.id).toBe('ws-001');
       expect(result.name).toBe(mockWorksite.name);
@@ -103,9 +103,9 @@ describe('PHASE 8 — WORKSITE MANAGEMENT SERVICE TEST SUITE', () => {
     });
 
     it('should throw 404 when worksite not found', async () => {
-      mockPrisma.worksite.findUnique.mockResolvedValue(null);
+      mockPrisma.worksite.findFirst.mockResolvedValue(null);
 
-      await expect(WorksiteService.getWorksiteById('ws-notfound')).rejects.toThrow(
+      await expect(WorksiteService.getWorksiteById('ws-notfound', adminSession)).rejects.toThrow(
         'Địa điểm làm việc không tồn tại.'
       );
     });

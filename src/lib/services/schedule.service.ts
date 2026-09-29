@@ -342,7 +342,7 @@ export class ScheduleService {
     }
 
     const where: Prisma.EmployeeScheduleWhereInput = {
-      ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+      organizationId: session.organizationId ?? '__no_org__',
     };
     if (targetEmployeeId) where.employeeId = targetEmployeeId;
     if (params.departmentId) {
@@ -419,7 +419,7 @@ export class ScheduleService {
       where: {
         employeeId,
         isActive: true,
-        ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+        organizationId: session.organizationId ?? '__no_org__',
       },
       include: {
         shift: {

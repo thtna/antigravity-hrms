@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockPrisma = vi.hoisted(() => ({
   payroll: {
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
     findMany: vi.fn(),
   },
   employee: {
@@ -25,6 +26,7 @@ import { UserSession } from '@/types';
 describe('Phase 17 — Payslip Service & PDF Engine', () => {
   const employee1Session: UserSession = {
     userId: 'usr-emp-1',
+    organizationId: 'org-test-payslip',
     employeeId: 'emp-1',
     fullName: 'Nguyễn Văn A',
     roles: ['employee'],
@@ -35,6 +37,7 @@ describe('Phase 17 — Payslip Service & PDF Engine', () => {
 
   const employee2Session: UserSession = {
     userId: 'usr-emp-2',
+    organizationId: 'org-test-payslip',
     employeeId: 'emp-2',
     fullName: 'Trần Thị B',
     roles: ['employee'],
@@ -45,6 +48,7 @@ describe('Phase 17 — Payslip Service & PDF Engine', () => {
 
   const hrSession: UserSession = {
     userId: 'usr-hr',
+    organizationId: 'org-test-payslip',
     employeeId: 'emp-hr',
     fullName: 'Nhân Sự HR',
     roles: ['hr'],
@@ -55,6 +59,7 @@ describe('Phase 17 — Payslip Service & PDF Engine', () => {
 
   const adminSession: UserSession = {
     userId: 'usr-admin',
+    organizationId: 'org-test-payslip',
     employeeId: 'emp-admin',
     fullName: 'Quản Trị Viên',
     roles: ['admin'],
@@ -65,6 +70,7 @@ describe('Phase 17 — Payslip Service & PDF Engine', () => {
 
   const samplePayrollRecord = {
     id: 'pay-1',
+    organizationId: 'org-test-payslip',
     periodId: 'period-2026-09',
     employeeId: 'emp-1',
     contractSalary: 30000000,
@@ -120,6 +126,10 @@ describe('Phase 17 — Payslip Service & PDF Engine', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrisma.payroll.findFirst.mockImplementation(async ({ where }) => {
+      const payroll = await mockPrisma.payroll.findUnique({ where: { id: where.id } });
+      return payroll?.organizationId === where.organizationId ? payroll : null;
+    });
   });
 
   describe('1. Access Control & Anti-IDOR (Employee Chỉ Xem Của Chính Mình)', () => {

@@ -152,8 +152,8 @@ export class PayrollService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const period = await prisma.payrollPeriod.findUnique({
-      where: { id: periodId },
+    const period = await prisma.payrollPeriod.findFirst({
+      where: { id: periodId, organizationId: session.organizationId ?? '__no_org__' },
       include: {
         payrollRule: true,
         payrolls: {
@@ -175,11 +175,6 @@ export class PayrollService {
     });
 
     if (!period) {
-      throw ApiError.notFound('Không tìm thấy kỳ tính lương yêu cầu.');
-    }
-
-    // PHASE 5: Tenant isolation
-    if (session?.organizationId && (period as any).organizationId && (period as any).organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương yêu cầu.');
     }
 
@@ -617,8 +612,8 @@ export class PayrollService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const payslip = await prisma.payroll.findUnique({
-      where: { id: payrollId },
+    const payslip = await prisma.payroll.findFirst({
+      where: { id: payrollId, organizationId: session.organizationId ?? '__no_org__' },
       include: {
         period: {
           select: {
@@ -652,17 +647,6 @@ export class PayrollService {
 
     if (!payslip) {
       throw ApiError.notFound('Không tìm thấy phiếu lương.');
-    }
-
-    // PHASE 5: Tenant isolation — verify employee belongs to session org
-    if (session?.organizationId) {
-      const empCheck = await prisma.employee.findUnique({
-        where: { id: payslip.employeeId },
-        select: { organizationId: true },
-      });
-      if (!empCheck || empCheck.organizationId !== session.organizationId) {
-        throw ApiError.notFound('Không tìm thấy phiếu lương.');
-      }
     }
 
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');

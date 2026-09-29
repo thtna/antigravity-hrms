@@ -193,7 +193,7 @@ describe('PHASE 5 — WORK SHIFT & SCHEDULE TEST SUITE', () => {
       it('returns only active shifts by default', async () => {
         mockPrisma.workShift.findMany.mockResolvedValue([activeShift]);
 
-        const result = await ShiftService.listShifts(false);
+        const result = await ShiftService.listShifts(false, adminSession);
 
         expect(mockPrisma.workShift.findMany).toHaveBeenCalledWith(
           expect.objectContaining({ where: expect.objectContaining({ isActive: true }) })
@@ -204,7 +204,7 @@ describe('PHASE 5 — WORK SHIFT & SCHEDULE TEST SUITE', () => {
 
       it('returns all shifts (including inactive) when includeInactive=true', async () => {
         mockPrisma.workShift.findMany.mockResolvedValue([activeShift]);
-        await ShiftService.listShifts(true);
+        await ShiftService.listShifts(true, adminSession);
         expect(mockPrisma.workShift.findMany).toHaveBeenCalledWith(
           expect.objectContaining({ where: expect.objectContaining({ deletedAt: null }) })
         );
@@ -539,9 +539,12 @@ describe('PHASE 5 — WORK SHIFT & SCHEDULE TEST SUITE', () => {
     });
 
     it('getShiftById throws 404 for soft-deleted shift', async () => {
-      mockPrisma.workShift.findUnique.mockResolvedValue({ ...activeShift, deletedAt: new Date() });
+      mockPrisma.workShift.findFirst.mockResolvedValue(null);
 
-      await expect(ShiftService.getShiftById('shift-deleted')).rejects.toMatchObject({ statusCode: 404 });
+      await expect(ShiftService.getShiftById('shift-deleted', adminSession)).rejects.toMatchObject({ statusCode: 404 });
+      expect(mockPrisma.workShift.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ deletedAt: null, organizationId: 'org-test-shift' }) })
+      );
     });
   });
 

@@ -406,7 +406,7 @@ export class QrAttendanceService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền xem lịch sử mã QR.');
     }
 
-    const where: any = {};
+    const where: any = { organizationId: session.organizationId ?? '__no_org__' };
     if (params.isUsed === 'true') where.isUsed = true;
     if (params.isUsed === 'false') where.isUsed = false;
 

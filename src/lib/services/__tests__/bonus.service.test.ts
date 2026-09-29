@@ -43,6 +43,7 @@ const adminSession: UserSession = {
 
 const hrSession: UserSession = {
   userId: 'usr-hr',
+  organizationId: 'org-test-bonus',
   employeeId: 'emp-hr',
   roles: ['hr'],
   email: 'hr@test.com',
@@ -81,6 +82,7 @@ const mockDepartment = {
 
 const mockEmployee = {
   id: 'emp-001',
+  organizationId: 'org-test-bonus',
   employeeCode: 'EMP001',
   firstName: 'Van A',
   lastName: 'Nguyen',
@@ -93,6 +95,7 @@ const mockEmployee = {
 
 const mockBonus = {
   id: 'bon-001',
+  organizationId: 'org-test-bonus',
   employeeId: 'emp-001',
   type: 'BONUS',
   category: 'PROJECT',
@@ -121,6 +124,10 @@ describe('PHASE 12 — BONUS SYSTEM TEST SUITE', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     setupTransaction();
+    mockPrisma.employeeBonusPenalty.findFirst.mockImplementation(async ({ where }) => {
+      const bonus = await mockPrisma.employeeBonusPenalty.findUnique({ where: { id: where.id } });
+      return bonus?.organizationId === where.organizationId ? bonus : null;
+    });
   });
 
   // ── 1. Create Bonus ────────────────────────────────────────────────────────
