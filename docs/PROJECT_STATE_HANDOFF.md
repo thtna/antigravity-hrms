@@ -96,6 +96,46 @@ Neither R5G.3 nor R5G.11 accessed or revalidated Production DB. The values below
   - `R5G15A4B_FINAL = INCOMPLETE / UNPROVEN`
   - `PRODUCTION_CONTAINMENT_READY = INCOMPLETE / UNPROVEN`
   - `CUSTOMER_HANDOFF_READY = INCOMPLETE / UNPROVEN`
+  - `NEXT_CANONICAL_GATE = UNPROVEN`
+
+### R5G15A4B Post-Push Verification Snapshot (30/09/2026)
+
+- **Documentation Commit Pushed to Staging**: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2` (`docs: record R5G15A4B storage verification`).
+  - Remote staging before push: `1da40441eed9f93e598b9bcbe1dabf4f70df2478`.
+  - Remote staging after push: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2`.
+  - Live `refs/heads/main` observed before push: `acc3702abbb9b833d01f99d148a3117d6d14a041` (cached `origin/main` was stale and must not be treated as authoritative).
+- **Execution & Safety Guards**:
+  - `PRE_PUSH_GUARD = PASS`
+  - `PUSH_EXECUTED = YES` (`PUSH_COUNT = 1`, `EXPECTED_COMMIT_REACHED_REMOTE = YES`)
+  - `FORCE_PUSH_EXECUTED = NO`
+  - `MAIN_PUSH_EXECUTED = NO`
+  - `PRODUCTION_DEPLOY_EXECUTED = NO`
+  - `VERCEL_SETTING_MUTATION_EXECUTED = NO`
+- **Pre-Push Baseline Verification**:
+  - Branch: `staging` | Local HEAD: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2`
+  - Staged tracked count = 0 | Unstaged tracked count = 0
+  - Untracked count = 57 | Untracked fingerprint = `17F37294D7AE11B7E289BF9E420B99838489DDF793127BBEAF42795CF2D3F778` (baseline match = YES)
+  - `DIFF_CHECK_RESULT = PASS` | `CACHED_DIFF_CHECK_RESULT = PASS`
+- **GitHub CI**:
+  - Target SHA: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2` | Branch: `staging` | Event: `push`
+  - Workflow: `CI` | Run number: `41` | Run ID: `36667125364`
+  - Status: `completed` | Conclusion: `success` | Quality Gate: `success`
+- **Vercel Git Deployment Evidence**:
+  - Vercel Git deployment/status evidence for the exact staging commit = `SUCCESS`.
+  - Vercel Preview Comments: `completed` / `success`.
+  - Commit status context: `Vercel – antigravity-hrms` (description: `Deployment has completed`).
+  - Multiple Vercel status contexts were present for this commit.
+- **Control Deviation Record**:
+  - During read-only investigation, unapproved transcript-content reads occurred.
+  - Subsequent Git State Revalidation proved: 0 tracked modifications, 57 untracked files with exact fingerprint match, and the frozen repository content baseline was unchanged. No repository-content mutation was evidenced from these deviations.
+- **Invariants & Scope Boundary**:
+  - Successful staging CI and Vercel status evidence do not alter the recorded R5G15A4B-S2 runtime evidence or infer Production readiness.
+  - `R5G15A4B-S1 = PASS`
+  - `R5G15A4B-S2 = PASS`
+  - `R5G15A4B_FINAL = INCOMPLETE / UNPROVEN`
+  - `PRODUCTION_CONTAINMENT_READY = INCOMPLETE / UNPROVEN`
+  - `CUSTOMER_HANDOFF_READY = INCOMPLETE / UNPROVEN`
+  - `NEXT_CANONICAL_GATE = UNPROVEN`
 
 ### Verified Behavioral Guarantees
 

@@ -209,3 +209,47 @@ Production touched          = NO
    - Không thực hiện delete lần 2, không retry tự động, không cleanup tự động.
    - Không ghi/sửa Database, Prisma, RLS, Data API, Production.
    - No credentials, authorization values, tokens, or signed URL values were exposed in the Rev7 verification outputs reviewed.
+
+---
+
+## 12. ADDENDUM / POST-PUSH VERIFICATION (2026-09-30) — STAGING DOCUMENTATION PUSH & SIDE EFFECTS
+
+> **MỤC ĐÍCH**: Ghi nhận bằng chứng push commit tài liệu lên remote `staging` và các side effect tự động (GitHub CI and Vercel Git deployment/status evidence) đã được kiểm chứng độc lập.
+> **NGUYÊN TẮC BẢO TOÀN**: Thành công của GitHub CI and Vercel Git deployment/status evidence for the staging commit KHÔNG làm thay đổi kết quả kiểm thử runtime R5G15A4B-S2 và KHÔNG suy diễn độ sẵn sàng cho Production.
+
+1. **Remote Documentation Push**:
+   - Commit: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2` (`docs: record R5G15A4B storage verification`).
+   - Remote staging trước push: `1da40441eed9f93e598b9bcbe1dabf4f70df2478`.
+   - Remote staging sau push: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2`.
+   - Live `refs/heads/main` ghi nhận trước push: `acc3702abbb9b833d01f99d148a3117d6d14a041` (cached `origin/main` bị stale, không coi là authoritative).
+   - `PRE_PUSH_GUARD = PASS` | `PUSH_EXECUTED = YES` | `PUSH_COUNT = 1` | `EXPECTED_COMMIT_REACHED_REMOTE = YES`.
+   - `FORCE_PUSH_EXECUTED = NO` | `MAIN_PUSH_EXECUTED = NO` | `PRODUCTION_DEPLOY_EXECUTED = NO` | `VERCEL_SETTING_MUTATION_EXECUTED = NO`.
+
+2. **Pre-Push Baseline & Local Verification**:
+   - Branch = `staging` | Local HEAD = `48c5243391e82b8a68e67c12eaa7652e4dcf11c2`.
+   - Staged tracked = 0 | Unstaged tracked = 0 | Untracked count = 57.
+   - Untracked fingerprint = `17F37294D7AE11B7E289BF9E420B99838489DDF793127BBEAF42795CF2D3F778` (baseline match = YES).
+   - `DIFF_CHECK_RESULT = PASS` | `CACHED_DIFF_CHECK_RESULT = PASS`.
+
+3. **GitHub CI Verification**:
+   - Target SHA: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2` | Branch: `staging` | Event: `push`.
+   - Workflow: `CI` | Run number: `41` | Run ID: `36667125364`.
+   - Status: `completed` | Conclusion: `success` | Quality Gate: `success`.
+
+4. **Vercel Git Deployment Evidence**:
+   - Vercel Git deployment/status evidence for the exact staging commit = `SUCCESS`.
+   - Vercel Preview Comments: `completed` / `success`.
+   - Commit status context: `Vercel – antigravity-hrms` (description: `Deployment has completed`).
+   - Multiple Vercel status contexts were present for the same commit (không suy diễn lý do có nhiều contexts; không bịa deployment ID khi không có bằng chứng trực tiếp).
+
+5. **Ghi nhận Control Deviation**:
+   - During read-only investigation, unapproved transcript-content reads occurred.
+   - Subsequent Git State Revalidation proved: 0 tracked modifications, 57 untracked files with exact fingerprint match, and the frozen repository content baseline was unchanged. No repository-content mutation was evidenced from these deviations.
+
+6. **Ranh giới trạng thái bất biến (Critical Status Invariants)**:
+   - `R5G15A4B-S1 = PASS`
+   - `R5G15A4B-S2 = PASS`
+   - `R5G15A4B_FINAL = INCOMPLETE / UNPROVEN`
+   - `PRODUCTION_CONTAINMENT_READY = INCOMPLETE / UNPROVEN`
+   - `CUSTOMER_HANDOFF_READY = INCOMPLETE / UNPROVEN`
+   - `NEXT_CANONICAL_GATE = UNPROVEN`
