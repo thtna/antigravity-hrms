@@ -18,6 +18,17 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    files: [
+      "scripts/staging-m4-runner.js",
+      "scripts/staging-migrate-status.js",
+      "scripts/verify-post-m4.js",
+      "staging-migrate-status.js",
+    ],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     ".next/**",
