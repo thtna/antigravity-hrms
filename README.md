@@ -151,7 +151,7 @@ antigravity-hrms/
 ├── Dockerfile                  # Multi-stage production container build
 ├── docker-compose.yml          # Production Docker Compose orchestration
 ├── docker-compose.prod.yml     # Production hardened overrides
-├── docker-entrypoint.sh        # Startup script (DB check -> migrate -> seed -> exec)
+├── docker-entrypoint.sh        # Startup script (DB check -> exec)
 ├── FINAL_RELEASE_REPORT.md     # Official Phase 28 release audit report
 └── package.json                # Dependencies, scripts & engine requirements
 ```
@@ -179,6 +179,8 @@ antigravity-hrms/
    ```bash
    npm run db:migrate:dev
    ```
+
+> Fresh database prerequisite: schema migration alone does not initialize system roles or administrator access. Complete an explicitly authorized system-essentials seed and a separately approved admin/bootstrap procedure before application startup. If no approved bootstrap procedure is available, STOP; this quickstart is not a bootstrap procedure.
 
 4. **Start development server**:
    ```bash
