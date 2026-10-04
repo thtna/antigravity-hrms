@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { getBusinessDateString } from '@/lib/time/business-time';
 import { X, Loader2, AlertCircle, CalendarDays, Clock, CheckCircle2, LogOut, ArrowRightFromLine } from 'lucide-react';
 
 type LeaveRequestType = 'LEAVE' | 'LATE_REQUEST' | 'EARLY_LEAVE';
@@ -37,7 +38,7 @@ const REQUEST_TYPES: { type: LeaveRequestType; label: string; desc: string; icon
   },
 ];
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => getBusinessDateString();
 
 export function LeaveRequestModal({ isOpen, onClose, onSuccess }: LeaveRequestModalProps) {
   const [step, setStep] = useState<'type' | 'form'>('type');

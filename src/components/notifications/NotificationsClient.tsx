@@ -28,6 +28,10 @@ import { SkeletonCard } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToastHelpers } from '@/components/ui/toast';
+import {
+  formatClientBusinessInstantDate,
+  formatClientBusinessInstantTime,
+} from '@/lib/time/client-business-instant';
 
 interface NotificationItem {
   id: string;
@@ -413,12 +417,9 @@ export function NotificationsClient() {
                     <div className="flex items-center gap-3 pt-1 text-[11px] text-slate-500">
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {new Date(item.createdAt).toLocaleString('vi-VN', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          day: '2-digit',
-                          month: '2-digit',
-                          year: 'numeric',
+                        {formatClientBusinessInstantDate(item.createdAt)}{' '}
+                        {formatClientBusinessInstantTime(item.createdAt, {
+                          precision: 'minute',
                         })}
                       </span>
                     </div>

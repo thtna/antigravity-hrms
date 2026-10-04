@@ -4,7 +4,9 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { formatCurrencyVND, formatDateVN } from '@/lib/utils';
+import { formatCurrencyVND } from '@/lib/utils';
+import { formatClientBusinessDate } from '@/lib/time/client-business-date-display';
+import { formatClientBusinessInstantDate } from '@/lib/time/client-business-instant';
 import { 
   X, 
   Mail, 
@@ -127,7 +129,7 @@ export function EmployeeDetailModal({
                 <Calendar className="h-4 w-4 text-slate-500 shrink-0" />
                 <div>
                   <span className="text-xs text-slate-500 block">Ngày sinh</span>
-                  <span className="font-medium text-slate-200">{formatDateVN(employee.dob) || 'N/A'}</span>
+                  <span className="font-medium text-slate-200">{formatClientBusinessDate(employee.dob) || 'N/A'}</span>
                 </div>
               </div>
 
@@ -161,7 +163,7 @@ export function EmployeeDetailModal({
               </div>
               <div>
                 <span className="text-xs text-slate-500 block">Ngày bắt đầu làm việc</span>
-                <span className="font-medium text-slate-200">{formatDateVN(employee.hireDate)}</span>
+                <span className="font-medium text-slate-200">{formatClientBusinessDate(employee.hireDate)}</span>
               </div>
               <div>
                 <span className="text-xs text-slate-500 block">Loại hợp đồng</span>
@@ -240,7 +242,7 @@ export function EmployeeDetailModal({
                       <div>
                         <span className="font-medium text-slate-200 block text-xs">{doc.name}</span>
                         <span className="text-[10px] text-slate-500">
-                          {doc.type} • Tải lên: {formatDateVN(doc.uploadedAt)}
+                          {doc.type} • Tải lên: {formatClientBusinessInstantDate(doc.uploadedAt)}
                         </span>
                       </div>
                     </div>
@@ -265,7 +267,7 @@ export function EmployeeDetailModal({
         {/* Modal Footer */}
         <div className="flex items-center justify-between border-t border-slate-800/80 bg-slate-950/40 p-4">
           <span className="text-xs text-slate-500">
-            Ngày tạo: {formatDateVN(employee.createdAt)}
+            Ngày tạo: {formatClientBusinessInstantDate(employee.createdAt)}
           </span>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={onClose} className="border-slate-700">

@@ -34,9 +34,10 @@ import { AppShell } from '@/components/layout/AppShell';
 import { SkeletonTable, SkeletonCard, SkeletonStatCard } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useToastHelpers } from '@/components/ui/toast';
+import { getBusinessDateString } from '@/lib/time/business-time';
 
 export default function KpiPage() {
-  const currentPeriod = new Date().toISOString().slice(0, 7);
+  const currentPeriod = getBusinessDateString().slice(0, 7);
 
   const [activeTab, setActiveTab] = useState<'scorecard' | 'assignments' | 'definitions'>('scorecard');
   const [period, setPeriod] = useState(currentPeriod);

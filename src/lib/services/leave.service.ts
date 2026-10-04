@@ -9,6 +9,11 @@ import {
   LeaveQueryParams,
 } from '@/lib/validations/leave';
 import { Prisma } from '@prisma/client';
+import {
+  addBusinessDays,
+  getBusinessDateString,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
 
 export class LeaveService {
   /**
@@ -62,8 +67,8 @@ export class LeaveService {
   ) {
     const employeeId = await this.resolveEmployeeId(session, targetEmployeeId);
 
-    const startDate = new Date(input.startDate);
-    const endDate = new Date(input.endDate);
+    const startDate = parseBusinessDate(input.startDate);
+    const endDate = parseBusinessDate(input.endDate);
 
     // Date validation
     if (endDate.getTime() < startDate.getTime()) {
@@ -71,9 +76,7 @@ export class LeaveService {
     }
 
     // Disallow requests too far in the past (> 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    thirtyDaysAgo.setHours(0, 0, 0, 0);
+    const thirtyDaysAgo = parseBusinessDate(addBusinessDays(getBusinessDateString(), -30));
 
     if (startDate.getTime() < thirtyDaysAgo.getTime()) {
       throw ApiError.badRequest('Không thể tạo đơn xin nghỉ phép/ngoại lệ quá 30 ngày trong quá khứ.');
@@ -464,12 +467,12 @@ export class LeaveService {
 
     if (query.startDate || query.endDate) {
       if (query.startDate && query.endDate) {
-        where.startDate = { lte: new Date(query.endDate) };
-        where.endDate = { gte: new Date(query.startDate) };
+        where.startDate = { lte: parseBusinessDate(query.endDate) };
+        where.endDate = { gte: parseBusinessDate(query.startDate) };
       } else if (query.startDate) {
-        where.endDate = { gte: new Date(query.startDate) };
+        where.endDate = { gte: parseBusinessDate(query.startDate) };
       } else if (query.endDate) {
-        where.startDate = { lte: new Date(query.endDate) };
+        where.startDate = { lte: parseBusinessDate(query.endDate) };
       }
     }
 

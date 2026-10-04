@@ -11,6 +11,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { AuditService } from './audit.service';
 import crypto from 'crypto';
+import { parseBusinessDate } from '@/lib/time/business-time';
 
 export interface CreateEmployeeOptions {
   tx?: Prisma.TransactionClient;
@@ -200,6 +201,8 @@ export class EmployeeService {
       throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để tạo nhân viên.');
     }
     const db = options.tx || prisma;
+    const dob = input.dob ? parseBusinessDate(input.dob) : new Date('1995-01-01');
+    const hireDate = parseBusinessDate(input.hireDate);
 
     // 1. Check duplicate employee code within the same organization
     const existingCode = await db.employee.findFirst({
@@ -311,13 +314,13 @@ export class EmployeeService {
           lastName: input.lastName.trim(),
           avatarUrl: input.avatarUrl || null,
           gender: input.gender,
-          dob: input.dob ? new Date(input.dob) : new Date('1995-01-01'),
+          dob,
           identityCard: input.identityCard?.trim() || null,
           phoneNumber: input.phoneNumber.trim(),
           departmentId: input.departmentId,
           positionId: input.positionId,
           worksiteId: input.worksiteId || null,
-          hireDate: new Date(input.hireDate),
+          hireDate,
           contractType: input.contractType,
           contractSalary: new Prisma.Decimal(input.contractSalary),
           hourlyRate: new Prisma.Decimal(hourlyRate),
@@ -586,7 +589,7 @@ export class EmployeeService {
       if (input.lastName) updateData.lastName = input.lastName.trim();
       if (input.avatarUrl !== undefined) updateData.avatarUrl = input.avatarUrl || null;
       if (input.gender) updateData.gender = input.gender;
-      if (input.dob) updateData.dob = new Date(input.dob);
+      if (input.dob) updateData.dob = parseBusinessDate(input.dob);
       if (input.identityCard !== undefined) updateData.identityCard = input.identityCard || null;
       if (input.phoneNumber) updateData.phoneNumber = input.phoneNumber.trim();
       if (input.departmentId) updateData.department = { connect: { id: input.departmentId } };
@@ -594,7 +597,7 @@ export class EmployeeService {
       if (input.worksiteId !== undefined) {
         updateData.worksite = input.worksiteId ? { connect: { id: input.worksiteId } } : { disconnect: true };
       }
-      if (input.hireDate) updateData.hireDate = new Date(input.hireDate);
+      if (input.hireDate) updateData.hireDate = parseBusinessDate(input.hireDate);
       if (input.contractType) updateData.contractType = input.contractType;
       if (input.contractSalary !== undefined) updateData.contractSalary = new Prisma.Decimal(input.contractSalary);
       if (input.hourlyRate !== undefined) updateData.hourlyRate = new Prisma.Decimal(input.hourlyRate);

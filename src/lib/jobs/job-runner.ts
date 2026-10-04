@@ -13,6 +13,12 @@
 import { prisma } from '@/lib/db/prisma';
 import { logger } from '@/lib/logger';
 import { CachedLookupService } from '@/lib/cache/cache-manager';
+import {
+  addBusinessDays,
+  formatBusinessDate,
+  getBusinessDateString,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
 
 export interface JobExecutionResult {
   jobName: string;
@@ -106,19 +112,15 @@ JobRunner.register(
   'DAILY_ATTENDANCE_RECONCILIATION',
   'Tự động đối soát ca làm việc và ghi nhận vắng mặt không phép (ABSENT) cho các ca không có check-in',
   async (params?: { targetDate?: string; organizationId?: string }) => {
-    const now = new Date();
-    // Default to yesterday
-    const target = params?.targetDate
-      ? new Date(params.targetDate)
-      : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-
-    const dayStart = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate(), 0, 0, 0, 0));
-    const dayEnd = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate(), 23, 59, 59, 999));
+    const targetDate = params?.targetDate
+      ? formatBusinessDate(parseBusinessDate(params.targetDate))
+      : addBusinessDays(getBusinessDateString(), -1);
+    const targetDateCarrier = parseBusinessDate(targetDate);
 
     // 1. Fetch all schedules for target date
     const schedules = await prisma.employeeSchedule.findMany({
       where: {
-        workDate: { gte: dayStart, lte: dayEnd },
+        workDate: targetDateCarrier,
         status: 'SCHEDULED',
         ...(params?.organizationId ? { organizationId: params.organizationId } : {}),
       },
@@ -131,7 +133,7 @@ JobRunner.register(
     });
 
     if (schedules.length === 0) {
-      return { reconciledDate: dayStart.toISOString().slice(0, 10), processed: 0, markedAbsent: 0 };
+      return { reconciledDate: targetDate, processed: 0, markedAbsent: 0 };
     }
 
     const scheduledEmployeeIds = schedules.map((s) => s.employeeId);
@@ -141,7 +143,7 @@ JobRunner.register(
       prisma.attendance.findMany({
         where: {
           employeeId: { in: scheduledEmployeeIds },
-          workDate: { gte: dayStart, lte: dayEnd },
+          workDate: targetDateCarrier,
         },
         select: { employeeId: true },
       }),
@@ -149,8 +151,8 @@ JobRunner.register(
         where: {
           employeeId: { in: scheduledEmployeeIds },
           status: 'APPROVED',
-          startDate: { lte: dayEnd },
-          endDate: { gte: dayStart },
+          startDate: { lte: targetDateCarrier },
+          endDate: { gte: targetDateCarrier },
         },
         select: { employeeId: true },
       }),
@@ -195,7 +197,7 @@ JobRunner.register(
     }
 
     return {
-      reconciledDate: dayStart.toISOString().slice(0, 10),
+      reconciledDate: targetDate,
       totalScheduled: schedules.length,
       alreadyAttended: attendedSet.size,
       onApprovedLeave: onLeaveSet.size,

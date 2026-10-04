@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { X, UserPlus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { formatBonusVnd } from '@/lib/kpi/kpi-calculator';
+import { getBusinessDateString } from '@/lib/time/business-time';
 
 interface KpiDefinitionItem {
   id: string;
@@ -36,7 +37,7 @@ export function KpiAssignmentModal({
   onSuccess,
   defaultPeriod,
 }: KpiAssignmentModalProps) {
-  const currentPeriod = defaultPeriod || new Date().toISOString().slice(0, 7);
+  const currentPeriod = defaultPeriod || getBusinessDateString().slice(0, 7);
 
   const [kpis, setKpis] = useState<KpiDefinitionItem[]>([]);
   const [employees, setEmployees] = useState<EmployeeItem[]>([]);

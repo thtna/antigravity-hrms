@@ -34,6 +34,11 @@ import {
   Info,
 } from 'lucide-react';
 import { TenantListItem, TenantMetrics, MAX_TENANTS } from '@/lib/services/super-admin.service';
+import {
+  formatClientBusinessInstantDate,
+  formatClientBusinessInstantDateTime,
+  formatClientBusinessInstantTime,
+} from '@/lib/time/client-business-instant';
 
 export default function SuperAdminPage() {
   const { success: toastSuccess, error: toastError } = useToastHelpers();
@@ -455,15 +460,10 @@ export default function SuperAdminPage() {
 
                       {/* Created At */}
                       <td className="py-3.5 px-4 text-slate-300">
-                        {new Date(t.createdAt).toLocaleDateString('vi-VN', {
-                          year: 'numeric',
-                          month: '2-digit',
-                          day: '2-digit',
-                        })}
+                        {formatClientBusinessInstantDate(t.createdAt)}
                         <div className="text-[10px] text-slate-500">
-                          {new Date(t.createdAt).toLocaleTimeString('vi-VN', {
-                            hour: '2-digit',
-                            minute: '2-digit',
+                          {formatClientBusinessInstantTime(t.createdAt, {
+                            precision: 'minute',
                           })}
                         </div>
                       </td>
@@ -678,7 +678,7 @@ export default function SuperAdminPage() {
                               )}
                             </div>
                             <span className="text-slate-500 text-[10px]">
-                              {new Date(log.createdAt).toLocaleString('vi-VN')}
+                              {formatClientBusinessInstantDateTime(log.createdAt)}
                             </span>
                           </div>
                         ))}

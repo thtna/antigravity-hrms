@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { ManagerDashboardData } from '@/lib/services/dashboard.service';
+import { formatClientBusinessInstantTime } from '@/lib/time/client-business-instant';
 import { StatCard } from './StatCard';
 import { SvgBarChart } from './SvgCharts';
 import {
@@ -162,7 +163,11 @@ export function ManagerDashboardView({ data }: ManagerDashboardViewProps) {
                     </td>
                     <td className="py-2.5 text-slate-300">{member.positionTitle}</td>
                     <td className="py-2.5 font-mono text-slate-300">
-                      {member.checkInTime ? new Date(member.checkInTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                      {member.checkInTime
+                        ? formatClientBusinessInstantTime(member.checkInTime, {
+                            precision: 'minute',
+                          })
+                        : '—'}
                       {member.lateMinutes > 0 && (
                         <span className="ml-1.5 text-[10px] text-amber-400 font-sans">
                           (+{member.lateMinutes}p)

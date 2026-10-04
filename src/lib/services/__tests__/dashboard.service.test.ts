@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockPrisma = vi.hoisted(() => ({
   employee: {
@@ -92,6 +92,55 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
     mockPrisma.employee.findFirst.mockImplementation(async ({ where }) => {
       const employee = await mockPrisma.employee.findUnique({ where: { id: where.id } });
       return employee?.organizationId === where.organizationId ? employee : null;
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe('R2A-DERIVED-D1 Vietnam business calendar helpers', () => {
+    it('derives today, current month, and past dates from Vietnam business time', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+
+      const service = DashboardService as any;
+      const today = service.getTodayRange();
+      const month = service.getCurrentMonthRange();
+      const pastDays = service.getPastDays(3);
+
+      expect(today.dateStr).toBe('2026-10-01');
+      expect(today.startOfToday.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+      expect(today.endOfToday.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+      expect(month.periodStr).toBe('2026-10');
+      expect(month.startOfMonth.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+      expect(month.endOfMonth.toISOString()).toBe('2026-10-31T00:00:00.000Z');
+      expect(pastDays.map((day: any) => day.dateStr)).toEqual([
+        '2026-09-29',
+        '2026-09-30',
+        '2026-10-01',
+      ]);
+    });
+
+    it('uses the Vietnam business year at the January rollover', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2025-12-31T18:00:00.000Z'));
+
+      const yearStart = (DashboardService as any).getBusinessYearStart();
+
+      expect(yearStart.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+    });
+
+    it('groups DATE carriers deterministically and instant fallbacks by Vietnam date', () => {
+      const service = DashboardService as any;
+
+      expect(service.getAttendanceRecordBusinessDate({
+        workDate: new Date('2026-10-01T00:00:00.000Z'),
+        checkInTime: new Date('2026-09-30T18:00:00.000Z'),
+      })).toBe('2026-10-01');
+      expect(service.getAttendanceRecordBusinessDate({
+        checkInTime: new Date('2026-09-30T18:00:00.000Z'),
+      })).toBe('2026-10-01');
     });
   });
 

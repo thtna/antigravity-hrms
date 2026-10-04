@@ -22,6 +22,7 @@ import {
   Step8PayrollSchema,
 } from '@/lib/validations/onboarding';
 import { CreateEmployeeSchema } from '@/lib/validations/employee';
+import { getBusinessDateString } from '@/lib/time/business-time';
 
 export interface OnboardingStatusResult {
   organization: {
@@ -349,7 +350,7 @@ export class OnboardingService {
             gracePeriodLate: validated.gracePeriodLate,
             gracePeriodEarly: validated.gracePeriodEarly,
             standardWorkHours: validated.standardWorkHours,
-            effectiveFrom: validated.effectiveFrom || new Date().toISOString().slice(0, 10),
+            effectiveFrom: validated.effectiveFrom || getBusinessDateString(),
             isActive: true,
           },
           session
@@ -460,7 +461,7 @@ export class OnboardingService {
           positionId: validated.positionId,
           gender: 'OTHER',
           contractSalary: validated.contractSalary,
-          hireDate: validated.hireDate || new Date().toISOString().slice(0, 10),
+          hireDate: validated.hireDate || getBusinessDateString(),
         });
 
         // 3. Pre-lookup system role outside transaction (Requirement 4)

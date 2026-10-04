@@ -1,6 +1,13 @@
 import { prisma } from '@/lib/db/prisma';
 import { UserSession } from '@/types';
 import { ApiError } from '@/lib/errors';
+import {
+  addBusinessDays,
+  BUSINESS_TIME_ZONE,
+  formatBusinessDate,
+  getBusinessDateString,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
 
 export type ReportType =
   | 'attendance'
@@ -63,19 +70,27 @@ export interface ReportResult {
 function safeDateStr(val: any): string {
   if (!val) return '';
   if (typeof val === 'string') return val.slice(0, 10);
-  if (val instanceof Date) return val.toISOString().slice(0, 10);
+  if (val instanceof Date) return formatBusinessDate(val);
   return String(val);
 }
 
 function safeTimeStr(val: any): string {
   if (!val) return '—';
   if (val instanceof Date) {
-    return val.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    return val.toLocaleTimeString('vi-VN', {
+      timeZone: BUSINESS_TIME_ZONE,
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
   if (typeof val === 'string') {
     const d = new Date(val);
     if (!isNaN(d.getTime())) {
-      return d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleTimeString('vi-VN', {
+        timeZone: BUSINESS_TIME_ZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+      });
     }
     return val;
   }
@@ -140,12 +155,14 @@ export class ReportService {
     // PHASE 5: Tenant scope — never trust client; derive from JWT session
     const orgId = session.organizationId ?? '__no_org__';
 
-    const now = new Date();
-    const defaultStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const defaultEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+    const currentPeriod = getBusinessDateString().slice(0, 7);
+    const defaultStart = parseBusinessDate(`${currentPeriod}-01`);
+    const nextMonthStart = new Date(defaultStart.getTime());
+    nextMonthStart.setUTCMonth(nextMonthStart.getUTCMonth() + 1);
+    const defaultEnd = parseBusinessDate(addBusinessDays(nextMonthStart, -1));
 
-    const startDate = options.startDate ? new Date(options.startDate) : defaultStart;
-    const endDate = options.endDate ? new Date(options.endDate) : defaultEnd;
+    const startDate = options.startDate ? parseBusinessDate(options.startDate) : defaultStart;
+    const endDate = options.endDate ? parseBusinessDate(options.endDate) : defaultEnd;
 
     switch (options.type) {
       case 'attendance':

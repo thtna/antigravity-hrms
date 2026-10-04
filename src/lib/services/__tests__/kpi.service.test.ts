@@ -248,6 +248,75 @@ describe('PHASE 11 — KPI Engine: KpiService Test Suite', () => {
   });
 
   describe('2. KpiService.updateKpiDefinition', () => {
+    it.each([
+      { role: 'admin', session: adminSession },
+      { role: 'hr', session: hrSession },
+    ])('allows $role to use a code that exists only in another tenant', async ({ session }) => {
+      const code = 'SHARED_KPI_CODE';
+      const foreignKpi = { ...mockKpi, id: 'kpi-foreign', organizationId: 'org-foreign', code };
+      mockPrisma.kpi.findUnique.mockResolvedValue(mockKpi);
+      mockPrisma.kpi.findFirst.mockImplementation(async ({ where }: {
+        where: { code: string; organizationId?: string };
+      }) => (
+        foreignKpi.code === where.code &&
+        (!where.organizationId || foreignKpi.organizationId === where.organizationId)
+          ? foreignKpi
+          : null
+      ));
+      mockPrisma.kpi.update.mockResolvedValue({ ...mockKpi, code });
+      mockPrisma.auditLog.create.mockResolvedValue({});
+
+      const updated = await KpiService.updateKpiDefinition(mockKpi.id, { code }, session);
+
+      expect(mockPrisma.kpi.findFirst).toHaveBeenCalledExactlyOnceWith({
+        where: { code, organizationId: session.organizationId },
+      });
+      expect(mockPrisma.$transaction).toHaveBeenCalledOnce();
+      expect(mockPrisma.kpi.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: mockKpi.id },
+        data: { code },
+      }));
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledOnce();
+      expect(updated.code).toBe(code);
+    });
+
+    it.each([
+      { role: 'admin', session: adminSession },
+      { role: 'hr', session: hrSession },
+    ])('rejects $role updating to a duplicate code in the same tenant without side effects', async ({ session }) => {
+      const code = 'DUPLICATE_KPI_CODE';
+      mockPrisma.kpi.findUnique.mockResolvedValue(mockKpi);
+      mockPrisma.kpi.findFirst.mockResolvedValue({ ...mockKpi, id: 'kpi-other', code });
+
+      await expect(
+        KpiService.updateKpiDefinition(mockKpi.id, { code }, session)
+      ).rejects.toMatchObject({ statusCode: 409, errorCode: 'CONFLICT' });
+
+      expect(mockPrisma.kpi.findFirst).toHaveBeenCalledExactlyOnceWith({
+        where: { code, organizationId: session.organizationId },
+      });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.kpi.update).not.toHaveBeenCalled();
+      expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('does not perform a duplicate lookup when the code is unchanged', async () => {
+      mockPrisma.kpi.findUnique.mockResolvedValue(mockKpi);
+      mockPrisma.kpi.update.mockResolvedValue(mockKpi);
+      mockPrisma.auditLog.create.mockResolvedValue({});
+
+      const updated = await KpiService.updateKpiDefinition(
+        mockKpi.id,
+        { code: mockKpi.code },
+        adminSession
+      );
+
+      expect(mockPrisma.kpi.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.kpi.update).toHaveBeenCalledOnce();
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledOnce();
+      expect(updated.code).toBe(mockKpi.code);
+    });
+
     it('updates KPI fields and creates audit log', async () => {
       mockPrisma.kpi.findUnique.mockResolvedValue(mockKpi);
       mockPrisma.kpi.update.mockResolvedValue({

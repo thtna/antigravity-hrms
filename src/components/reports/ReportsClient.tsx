@@ -33,6 +33,11 @@ import { ReportType, ReportResult, ReportColumn } from '@/lib/services/report.se
 import { SkeletonTable } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useToastHelpers } from '@/components/ui/toast';
+import { getBusinessDateString } from '@/lib/time/business-time';
+import {
+  getClientBusinessMonthRange,
+  getClientBusinessWeekToDateRange,
+} from '@/lib/time/client-business-time';
 
 interface DepartmentMeta {
   id: string;
@@ -169,29 +174,23 @@ export function ReportsClient() {
 
   // Preset Date Range Helpers
   const handleDatePreset = (preset: 'today' | 'this_week' | 'this_month' | 'last_month') => {
-    const now = new Date();
-    const toDateString = (d: Date) => d.toISOString().slice(0, 10);
+    const today = getBusinessDateString();
 
     if (preset === 'today') {
-      const todayStr = toDateString(now);
-      setStartDate(todayStr);
-      setEndDate(todayStr);
+      setStartDate(today);
+      setEndDate(today);
     } else if (preset === 'this_week') {
-      const start = new Date(now);
-      const day = start.getDay();
-      const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-      start.setDate(diff);
-      setStartDate(toDateString(start));
-      setEndDate(toDateString(now));
+      const range = getClientBusinessWeekToDateRange();
+      setStartDate(range.startDate);
+      setEndDate(range.endDate);
     } else if (preset === 'this_month') {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      setStartDate(toDateString(start));
-      setEndDate(toDateString(now));
+      const range = getClientBusinessMonthRange();
+      setStartDate(range.startDate);
+      setEndDate(today);
     } else if (preset === 'last_month') {
-      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const end = new Date(now.getFullYear(), now.getMonth(), 0);
-      setStartDate(toDateString(start));
-      setEndDate(toDateString(end));
+      const range = getClientBusinessMonthRange(undefined, -1);
+      setStartDate(range.startDate);
+      setEndDate(range.endDate);
     }
   };
 
@@ -229,7 +228,7 @@ export function ReportsClient() {
       const a = document.createElement('a');
       a.href = url;
       const ext = format === 'excel' ? 'xlsx' : 'pdf';
-      a.download = `BaoCao_${selectedType.toUpperCase()}_${new Date().toISOString().slice(0, 10)}.${ext}`;
+      a.download = `BaoCao_${selectedType.toUpperCase()}_${getBusinessDateString()}.${ext}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
