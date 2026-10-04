@@ -8,6 +8,42 @@
 
 ## 0. R5G STABLE RELEASE BASELINE & VERIFIED DEPLOYMENT SNAPSHOT
 
+### Current Production Release Closure Snapshot (04/10/2026)
+
+This snapshot is the latest verified Production release state. Older R5G/R7 records below remain historical evidence and must not be reinterpreted as the current live deployment state.
+
+- **PRODUCTION_RELEASE_CLOSURE_AUDIT**: `PASS / VERIFIED`.
+- **Release PR**: PR #5 — `Release: promote validated staging checkpoint to main`.
+- **PR #5 state**: `MERGED`.
+- **Production/main release SHA**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Production release tree**: `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Staging HEAD at closure**: `fb884fee763a4aa54a9b3f71488c09f23803d5f2`.
+- **Staging tree at closure**: `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Main/Staging source-content drift**: `NO`; their Git histories differ, but their verified trees are identical.
+- **CI #44**: `SUCCESS`.
+- **CI Quality Gate**: `SUCCESS`.
+- **Docker Build & Publish #11**: `SUCCESS`.
+- **Vercel Production deployment status**: `4 / 4 READY`.
+- **Vercel commit status contexts**: `4 / 4 SUCCESS`.
+- **Canonical Vercel project**: `antigravity-hrms`.
+- **Canonical Production deployment ID**: `dpl_3KyVMKAd5QuQqVzY2mveiXXJWEfn`.
+- **Canonical Production domain**: `antigravity-hrms-six.vercel.app`.
+- **Canonical deployment source**: `git`.
+- **Canonical deployment branch**: `main`.
+- **Canonical deployment Git SHA**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Production `/` smoke test**: HTTP `200 OK`.
+- **Production `/login` smoke test**: HTTP `200 OK`.
+- **Production `/api/health` smoke test**: HTTP `200 OK`.
+- **Health response**: application reports `HEALTHY`, version `1.0.0`.
+- **Runtime errors observed in closure audit window**: `NONE`.
+- **Observed returned runtime status-code group**: HTTP `200`.
+- **Manual Production deployment**: `NO`; Production deployment was triggered by the approved `main` merge through Git integration.
+- **Force push**: `NO`.
+- **Production DB access during release closure**: `NO`.
+- **Production DB mutation during release closure**: `NO`.
+- `/api/health` verifies application/process responsiveness only. It does **not** query the database and therefore does not prove Production DB connectivity, migration state, seed/bootstrap completion, or business-data correctness.
+- Any future Production DB access, migration, seed, environment change, WAF change, rollback, promotion, or deployment still requires separate explicit Human Owner authorization.
+
 This section is authoritative for the stable application release lineage and dated verification evidence. Older phase reports remain historical evidence, not live deployment-state checks.
 
 ### Stable Application/Code Release Baseline
@@ -308,8 +344,20 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 
 ## 3. TRẠNG THÁI RELEASE HIỆN HÀNH (CURRENT RELEASE STATE)
 
-- **R5G Production release**: complete and healthy; deployment `READY`, public root and health HTTP 200.
-- **Next product/development mutation approved**: NONE. Any new scope requires separate Human Owner approval.
+- **Current Production release**: `PASS / VERIFIED`.
+- **Current Production/main SHA**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Current Production release tree**: `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Release PR**: PR #5 merged successfully into `main`.
+- **CI #44**: `SUCCESS`.
+- **Docker Build & Publish #11**: `SUCCESS`.
+- **Vercel Production**: 4/4 deployments `READY` for the exact release SHA.
+- **Canonical Production project**: `antigravity-hrms`.
+- **Canonical Production domain**: `antigravity-hrms-six.vercel.app`.
+- **Runtime verification**: `/`, `/login`, and `/api/health` returned HTTP 200.
+- **Runtime errors during closure audit window**: none observed.
+- **Main/Staging content drift at closure**: `NO`; both resolve to tree `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Production database boundary**: Production DB was not accessed or mutated by this release-closure audit; database state is not revalidated by the HTTP health endpoint.
+- **Next product/development mutation approved**: `NONE`. Any new scope requires separate Human Owner approval.
 
 ---
 
@@ -331,12 +379,19 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 
 ## 6. NGUYÊN TẮC CỐT TỬ: PRODUCTION ĐÃ RELEASE, KHÔNG TỰ Ý THAY ĐỔI
 
-- **Production deployed**: **YES**. The stable application/code baseline is `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`; the latest recorded R5G.11 verified deployment snapshot is `aaacbb6cfa1c95a8571e0b2cf412804aa6e6da7b`. Check GitHub/Vercel for the live current deployment SHA before any operational action.
-- **R5G.11 snapshot deployment status**: **READY**.
-- **Production public access**: **RESTORED**.
-- **Production WAF freeze**: removed after validation; health-check rule preserved.
+- **Production deployed**: **YES**.
+- **Current verified Production/main SHA**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Current verified Production tree**: `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Current Production deployment status**: **4 / 4 Vercel projects READY**.
+- **Canonical Production domain**: `antigravity-hrms-six.vercel.app`.
+- **Production runtime closure**: `/` = HTTP 200, `/login` = HTTP 200, `/api/health` = HTTP 200.
+- **Current release CI**: CI #44 `SUCCESS`; Docker Build & Publish #11 `SUCCESS`.
+- **Current release closure audit**: `PASS / VERIFIED`.
+- Older R5G release SHAs and deployment snapshots remain historical evidence only. They do not override the current verified Production release above.
+- `/api/health` proves application/process responsiveness only and does not establish Production database connectivity or business-data state.
 - **Production DB access**: exceptional only; no casual checks.
-- **Chỉ thị chấp hành**: Không tự ý deploy, rollback, migrate, seed, thay đổi env/WAF, hoặc ghi vào Production Database khi chưa có văn bản/lệnh trực tiếp từ Người Phụ Trách.
+- **Production DB mutation**: not performed by the release closure audit.
+- **Chỉ thị chấp hành**: Không tự ý deploy, rollback, migrate, seed, thay đổi env/WAF, hoặc ghi vào Production Database khi chưa có lệnh/phê duyệt riêng trực tiếp từ Human Owner.
 
 ---
 
