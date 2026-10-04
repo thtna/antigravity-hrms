@@ -1,4 +1,17 @@
 import { z } from 'zod';
+import { parseBusinessDate } from '@/lib/time/business-time';
+
+const businessDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày phải có định dạng YYYY-MM-DD')
+  .refine((value) => {
+    try {
+      parseBusinessDate(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Ngày không tồn tại trong lịch');
 
 export const Step1BusinessSchema = z.object({
   name: z.string().min(2, 'Tên doanh nghiệp phải có ít nhất 2 ký tự'),
@@ -41,7 +54,7 @@ export const Step5ShiftSchema = z.object({
   gracePeriodLate: z.coerce.number().min(0).default(15),
   gracePeriodEarly: z.coerce.number().min(0).default(15),
   standardWorkHours: z.coerce.number().min(1).max(24).default(8),
-  effectiveFrom: z.string().optional(),
+  effectiveFrom: businessDateSchema.optional(),
 });
 
 export const Step6EmployeeSchema = z.object({
@@ -54,7 +67,7 @@ export const Step6EmployeeSchema = z.object({
   positionId: z.string().optional().nullable(),
   branchId: z.string().optional().nullable(),
   contractSalary: z.coerce.number().min(0).default(10000000),
-  hireDate: z.string().optional(),
+  hireDate: businessDateSchema.optional(),
 });
 
 export const Step7AttendanceSchema = z.object({

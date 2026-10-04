@@ -1,4 +1,17 @@
 import { z } from 'zod';
+import { getBusinessDateString, parseBusinessDate } from '@/lib/time/business-time';
+
+const businessDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày phải có định dạng YYYY-MM-DD')
+  .refine((value) => {
+    try {
+      parseBusinessDate(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Ngày không tồn tại trong lịch');
 
 export const EmployeeDocumentSchema = z.object({
   id: z.string().uuid().default(() => crypto.randomUUID()),
@@ -25,12 +38,12 @@ export const CreateEmployeeSchema = z.object({
     .regex(/^(0|\+84)[3|5|7|8|9][0-9]{8}$/, 'Số điện thoại không hợp lệ tại Việt Nam'),
   avatarUrl: z.string().url('Đường dẫn ảnh đại diện không hợp lệ').optional().or(z.literal('')),
   gender: z.enum(['MALE', 'FEMALE', 'OTHER']).default('MALE'),
-  dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày sinh định dạng YYYY-MM-DD').optional(),
+  dob: businessDateSchema.optional(),
   identityCard: z.string().min(9, 'Số CCCD/Hộ chiếu tối thiểu 9 ký tự').max(20).optional().or(z.literal('')),
   departmentId: z.string().min(1, 'Vui lòng chọn phòng ban'),
   positionId: z.string().min(1, 'Vui lòng chọn chức vụ'),
   worksiteId: z.string().optional().or(z.literal('')),
-  hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày tuyển dụng định dạng YYYY-MM-DD').default(() => new Date().toISOString().split('T')[0]),
+  hireDate: businessDateSchema.default(() => getBusinessDateString()),
   contractType: z.enum(['PROBATION', 'FIXED_TERM', 'INDEFINITE']).default('PROBATION'),
   contractSalary: z.coerce.number().min(0, 'Lương cơ bản không được âm').default(0),
   hourlyRate: z.coerce.number().min(0, 'Lương theo giờ không được âm').default(0),
