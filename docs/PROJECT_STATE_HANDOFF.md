@@ -44,6 +44,56 @@ This snapshot is the latest verified Production release state. Older R5G/R7 reco
 - `/api/health` verifies application/process responsiveness only. It does **not** query the database and therefore does not prove Production DB connectivity, migration state, seed/bootstrap completion, or business-data correctness.
 - Any future Production DB access, migration, seed, environment change, WAF change, rollback, promotion, or deployment still requires separate explicit Human Owner authorization.
 
+### Phase 11A.0D Real Email Staging E2E Closure Snapshot (05/10/2026)
+
+- **PHASE_11A_0D_FULL_E2E**: `PASS / VERIFIED`.
+- **Execution environment**: `STAGING ONLY`.
+- **Production touched by this E2E gate**: `NO`.
+- **Read-only reconciliation before execution**:
+  - Live `main`: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+  - Live `staging`: `4a680c673434a6aae5db29bd0e78f9144712bf90`.
+  - Canonical Vercel Production deployment remained `READY` at the exact `main` SHA above.
+  - Latest staging Preview remained `READY` at the exact staging SHA above.
+  - Supabase staging project `antigravity-hrms-staging`, ref `rdpufonfascxgbydvtak`, remained `ACTIVE_HEALTHY`.
+  - Production DB was not accessed or revalidated.
+- **Staging test tenant owner**: `namcharm040889+r5g15a4c-owner@gmail.com`.
+- **Staging test tenant**: `R5G15A4C Staging Test Tenant`.
+- **Live staging tenant state before execution**:
+  - user active = `YES`
+  - deleted = `NO`
+  - membership = `OWNER`
+  - membership active = `YES`
+  - application role = `Administrator`
+  - organization status = `ACTIVE`
+  - onboarding step = `9`
+- **Email provider**: `sendgrid`.
+- **Verified sender**: `nguyennam040889.dongsaigon@gmail.com`.
+- **Fresh Forgot Password retry request**: `PASS / VERIFIED`.
+- **Fresh email received**: `PASS / VERIFIED`.
+- **Fresh email timestamp**: `2026-10-04T19:03:21Z`.
+- **Fresh email location in Gmail**: `SPAM`.
+- **Reset link reached Staging**: `PASS / VERIFIED`.
+- **Password reset**: `PASS / VERIFIED`.
+  - Staging runtime: `POST /api/v1/auth/reset-password` = HTTP `200`.
+  - Runtime logged `Password reset successfully completed for user`.
+- **New-password login**: `PASS / VERIFIED`.
+  - Staging runtime: `POST /api/v1/auth/login` = HTTP `200`.
+  - Runtime logged successful login for the exact staging tenant owner.
+- **Old-password login**: `FAIL AS EXPECTED / VERIFIED`.
+  - Staging runtime: `POST /api/v1/auth/login` = HTTP `400`.
+  - Runtime logged `Login failed: invalid password`.
+- **Token reuse**: `BLOCKED / VERIFIED`.
+  - Reuse attempt reached Staging `POST /api/v1/auth/reset-password`.
+  - Response = HTTP `400`.
+  - UI reported reset link expired after the 15-minute TTL.
+- **Token-reuse evidence qualification**:
+  - The live E2E proves that the previously used reset URL could not perform another reset.
+  - The observed reuse failure occurred after the token TTL had also elapsed.
+  - Therefore this live test must NOT be represented as isolated causal proof that password-hash-bound one-time invalidation alone caused the rejection.
+  - Source code separately implements password-hash binding and atomic old-hash protection against token reuse/races.
+- **Old reset tokens**: `DO NOT REUSE`.
+- **Phase result**: `PHASE_11A_0D_FULL_E2E = PASS / VERIFIED`.
+
 This section is authoritative for the stable application release lineage and dated verification evidence. Older phase reports remain historical evidence, not live deployment-state checks.
 
 ### Stable Application/Code Release Baseline
@@ -334,6 +384,7 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 | **Phase 11A.0B** | **Production Environment Plan**: Phân loại 4 nhóm biến môi trường; phát hiện và phân tích rào cản `PRODUCTION BLOCKER FOR FILE UPLOADS` trên Vercel do cơ chế `fs/promises`. | **PRODUCTION ENV PLAN COMPLETED** |
 | **Phase 11A.0C** | **Production Storage Hardening**: Xây dựng kiến trúc `StorageProvider Abstraction`, `LocalStorageProvider`, `SupabaseStorageProvider`, `StorageManager`, xác thực Magic Bytes (%PDF-, PNG, JPEG), Signed URL ngắn hạn, bảo mật tài liệu riêng tư. | **PRODUCTION STORAGE READY** |
 | **Phase 11A.0C2** | **Live Supabase Storage Staging Verification**: Kiểm thử thực tế trên Supabase Storage Staging thật (`antigravity-hrms-staging`). Khởi tạo 2 private buckets (`avatars`, `documents`), thực hiện upload/download/signed-url/delete thật, kiểm chứng $A \leftrightarrow B$ DENIED, unauthenticated client signed URL fetch HTTP 200, zero secrets logged. | **LIVE STAGING STORAGE VERIFIED** |
+| **Phase 11A.0D** | **Real Email Staging E2E**: xác minh Forgot Password bằng email thật qua SendGrid trên Staging, reset link đúng Staging, reset password thành công, mật khẩu mới đăng nhập PASS, mật khẩu cũ bị từ chối, và reset URL cũ không thể thực hiện reset lại. | **LIVE STAGING REAL EMAIL / PASSWORD RESET E2E VERIFIED** |
 | **Phase 11A.0E** | **Onboarding Step 6 P2028 Transaction Hardening**: Khắc phục triệt để lỗi Prisma P2028: phân loại rủi ro serverless lifecycle; rút gọn transaction xuống tối thiểu các DB writes nguyên tử; pre-lookup Role và băm mật khẩu ngoài transaction; bảo toàn RBAC bằng cờ `allowOwnerOnboarding`; hoàn thiện cơ chế idempotent retry (409 khi collision); xác nhận rollback an toàn (zero orphan user/partial employee); read-only staging DB clean. | **P2028 TRANSACTION HARDENING VERIFIED** |
 | **Phase 5I-G -> 5J-F** | Release gate sequence completed through controlled Production validation, public access restoration, and post-release smoke verification. | **PASS** |
 | **Phase 5K-A** | Post-release resume revalidation: Git refs, Vercel deployment, Production public root/health, and no drift. | **PASS** |
@@ -358,6 +409,13 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 - **Main/Staging content drift at closure**: `NO`; both resolve to tree `d82487cab83cd237ae7c2d3f2de8487350b47674`.
 - **Production database boundary**: Production DB was not accessed or mutated by this release-closure audit; database state is not revalidated by the HTTP health endpoint.
 - **Next product/development mutation approved**: `NONE`. Any new scope requires separate Human Owner approval.
+- **Current operational phase closure**: `Phase 11A.0D — Real Email Staging E2E = PASS / VERIFIED`.
+- **Current open product-development phase**: `NOT YET SELECTED`.
+- **SuperAdmin candidate**: `namcharm040889@gmail.com`.
+- **SuperAdmin role assignment**: `NOT APPROVED / NOT PERFORMED`.
+- **PROJECT_SPEC authority status**: `MISSING / UNPROVEN`.
+- **Residual untracked operator/evidence artifacts**: `56`; preserve and do not touch without separate approval.
+- **Next mutation approved**: `NONE`.
 
 ---
 
@@ -367,13 +425,21 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 - **Documentation control**: Propose reconciliation when the handoff becomes stale; file mutation requires a Human Owner-approved gate. Determine document commit/push status from Git, not from this handoff.
 - **Production guard**: Production remains protected. Any Production DB write, env change, WAF change, deploy, rollback, or promotion requires explicit operator authorization.
 - **Operator/helper files**: Existing untracked helper files must remain uncommitted unless the operator explicitly approves.
+- **Phase 11A.0D blocker**: `CLOSED / PASS / VERIFIED`.
+- **Current product-development blocker**: no new phase has been selected or approved.
+- **SuperAdmin staging assignment**: remains a separate DB mutation gate; `NOT APPROVED / NOT PERFORMED`.
+- **PROJECT_SPEC.md**: `MISSING / UNPROVEN`; do not create or promote a substitute without a separate governance decision.
+- **Residual untracked artifacts**: `56`; preserve untouched.
 
 ---
 
 ## 5. CÁC GIAI ĐOẠN TIẾP THEO (NEXT PHASES ROADMAP)
 
-1. **Next product/development phase**: propose a bounded scope and obtain separate Human Owner approval before any code, DB, env, WAF, or deployment change.
-2. **Documentation reconciliation when needed**: verify the live state and Git status, then request explicit approval before editing, committing, or pushing.
+1. **Phase 11A.0D**: `COMPLETED / PASS / VERIFIED`.
+2. **Canonical documentation reconciliation**: this gate records the verified Phase 11A.0D closure only; commit/push require separate Human Owner approval.
+3. **Staging SuperAdmin readiness/mutation**: may be proposed separately if the Human Owner wants to proceed; role assignment is not authorized by this documentation gate.
+4. **New product-development phase selection**: perform read-only gap analysis against current source/runtime/tests and architecture, then propose a bounded scope. Do not return to stale `Phase 0 (HIỆN TẠI)`.
+5. **Security findings**: do not fold unrelated security remediation into this documentation gate; any such work requires separate triage and approval.
 
 ---
 
