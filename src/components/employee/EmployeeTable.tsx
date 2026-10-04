@@ -3,7 +3,8 @@
 import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { formatCurrencyVND, formatDateVN } from '@/lib/utils';
+import { formatCurrencyVND } from '@/lib/utils';
+import { formatClientBusinessDate } from '@/lib/time/client-business-date-display';
 import { 
   Eye, 
   Edit, 
@@ -181,7 +182,7 @@ export function EmployeeTable({
                       : 'Vô thời hạn'}
                   </span>
                   <span className="text-[11px] text-slate-500">
-                    Vào làm: {formatDateVN(emp.hireDate)}
+                    Vào làm: {formatClientBusinessDate(emp.hireDate)}
                   </span>
                 </td>
 

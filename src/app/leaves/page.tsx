@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { LeaveRequestModal } from '@/components/leaves/LeaveRequestModal';
 import { LeaveProcessModal } from '@/components/leaves/LeaveProcessModal';
+import { formatClientBusinessDate } from '@/lib/time/client-business-date-display';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface LeaveItem {
@@ -81,13 +82,6 @@ const STATUS_BADGE_CLASSES: Record<string, string> = {
   REJECTED: 'border-red-500/40 text-red-300 bg-red-500/10',
   CANCELLED: 'border-slate-500/40 text-slate-400 bg-slate-500/10',
 };
-
-// ─── Helper ──────────────────────────────────────────────────────────────────
-function formatDate(str?: string | null) {
-  if (!str) return 'N/A';
-  const d = new Date(str);
-  return isNaN(d.getTime()) ? str : d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 function LeavesContent() {
@@ -298,8 +292,8 @@ function LeavesContent() {
                   : 'Nhân viên';
                 const dateStr =
                   item.startDate === item.endDate
-                    ? formatDate(item.startDate)
-                    : `${formatDate(item.startDate)} → ${formatDate(item.endDate)}`;
+                    ? formatClientBusinessDate(item.startDate)
+                    : `${formatClientBusinessDate(item.startDate)} → ${formatClientBusinessDate(item.endDate)}`;
 
                 return (
                   <div

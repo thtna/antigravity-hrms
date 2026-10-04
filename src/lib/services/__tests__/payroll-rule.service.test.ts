@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockPrisma = vi.hoisted(() => ({
   payrollRule: {
@@ -24,7 +24,12 @@ vi.mock('@/lib/logger', () => ({
 
 import { PayrollRuleService } from '../payroll-rule.service';
 import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { PayrollRuleEngine } from '@/lib/payroll/payroll-rule-engine';
 import { UserSession } from '@/types';
+import {
+  CreatePayrollRuleSchema,
+  UpdatePayrollRuleSchema,
+} from '@/lib/validations/payroll-rule';
 
 const adminSession: UserSession = {
   userId: 'usr-admin',
@@ -78,6 +83,18 @@ const mockDbRule = {
   effectiveTo: null,
 };
 
+const validRuleInput = () => ({
+  code: 'DATE_RULE',
+  name: 'Quy Chế Ngày Nghiệp Vụ',
+  isDefault: false,
+  salaryBasisConfig: VIETNAM_STATUTORY_RULE_2026.salaryBasis as any,
+  overtimeConfig: VIETNAM_STATUTORY_RULE_2026.overtime as any,
+  insuranceConfig: VIETNAM_STATUTORY_RULE_2026.insurance as any,
+  taxConfig: VIETNAM_STATUTORY_RULE_2026.tax as any,
+  deductionConfig: VIETNAM_STATUTORY_RULE_2026.deduction as any,
+  roundingConfig: VIETNAM_STATUTORY_RULE_2026.rounding as any,
+});
+
 describe('PHASE 14 — PAYROLL RULE SERVICE TEST SUITE', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -85,6 +102,10 @@ describe('PHASE 14 — PAYROLL RULE SERVICE TEST SUITE', () => {
     mockPrisma.payrollRule.findFirst.mockImplementation((...args: any[]) =>
       mockPrisma.payrollRule.findUnique(...args)
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('0. Read Paths Do Not Seed Rules', () => {
@@ -217,7 +238,7 @@ describe('PHASE 14 — PAYROLL RULE SERVICE TEST SUITE', () => {
       expect(res.version).toBe(2);
       expect(mockPrisma.payrollRule.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'rule-001' },
+          where: { id: 'rule-001', organizationId: hrSession.organizationId },
           data: expect.objectContaining({
             version: 2,
             name: 'Tên Đã Cập Nhật',
@@ -366,5 +387,199 @@ describe('PHASE 14 — PAYROLL RULE SERVICE TEST SUITE', () => {
       expect(sim.result).toBeDefined();
       expect(mockPrisma.payrollRule.create).not.toHaveBeenCalled();
     });
+
+    it('defaults simulation period from the Vietnam business month at year rollover', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2025-12-31T18:00:00.000Z'));
+      const ruleId = '00000000-0000-4000-8000-000000000001';
+      mockPrisma.payrollRule.findUnique.mockResolvedValue({ ...mockDbRule, id: ruleId });
+
+      const sim = await PayrollRuleService.simulatePayroll(
+        {
+          ruleId,
+          employee: {
+            contractSalary: 25000000,
+            dependentsCount: 0,
+            allowances: 0,
+            taxExemptAllowances: 0,
+          },
+          attendance: {
+            actualWorkDays: 22,
+            paidLeaveDays: 0,
+            unpaidLeaveDays: 0,
+            weekdayOtHours: 0,
+            weekendOtHours: 0,
+            holidayOtHours: 0,
+            nightHours: 0,
+          },
+          adjustments: { kpiBonus: 0, otherBonuses: 0, penalties: 0 },
+        },
+        hrSession
+      );
+
+      expect(sim.result.period).toBe('2026-01');
+    });
+  });
+
+  describe('3. Vietnam business DATE contract', () => {
+    it('defaults effectiveFrom from the Vietnam business date after UTC month rollover', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+
+      const parsed = CreatePayrollRuleSchema.parse(validRuleInput());
+
+      expect(parsed.effectiveFrom).toBe('2026-10-01');
+    });
+
+    it('accepts a real leap day and rejects malformed or impossible dates', () => {
+      expect(
+        CreatePayrollRuleSchema.safeParse({
+          ...validRuleInput(),
+          effectiveFrom: '2028-02-29',
+          effectiveTo: '2028-12-31',
+        }).success
+      ).toBe(true);
+      expect(
+        CreatePayrollRuleSchema.safeParse({
+          ...validRuleInput(),
+          effectiveFrom: '2026-2-01',
+        }).success
+      ).toBe(false);
+      expect(
+        CreatePayrollRuleSchema.safeParse({
+          ...validRuleInput(),
+          effectiveFrom: '2026-02-29',
+        }).success
+      ).toBe(false);
+      expect(UpdatePayrollRuleSchema.safeParse({ effectiveTo: '2026-04-31' }).success).toBe(
+        false
+      );
+    });
+
+    it('stores supplied DATE values as canonical UTC-midnight carriers', async () => {
+      mockPrisma.payrollRule.findUnique.mockResolvedValue(null);
+      mockPrisma.payrollRule.create.mockResolvedValue({ ...mockDbRule, code: 'DATE_RULE' });
+
+      await PayrollRuleService.createRule(
+        {
+          ...validRuleInput(),
+          effectiveFrom: '2028-02-29',
+          effectiveTo: '2028-12-31',
+        },
+        adminSession
+      );
+
+      const data = mockPrisma.payrollRule.create.mock.calls[0][0].data;
+      expect(data.effectiveFrom.toISOString()).toBe('2028-02-29T00:00:00.000Z');
+      expect(data.effectiveTo.toISOString()).toBe('2028-12-31T00:00:00.000Z');
+    });
+  });
+});
+
+describe('G06 payroll rule tenant authorization', () => {
+  const ruleId = '00000000-0000-4000-8000-000000000001';
+  const simulation = {
+    employee: { contractSalary: 25000000, dependentsCount: 0, allowances: 0, taxExemptAllowances: 0 },
+    attendance: { actualWorkDays: 22, paidLeaveDays: 0, unpaidLeaveDays: 0, weekdayOtHours: 0, weekendOtHours: 0, holidayOtHours: 0, nightHours: 0 },
+    adjustments: { kpiBonus: 0, otherBonuses: 0, penalties: 0 },
+  };
+  const operations = [
+    { name: 'updateRule', run: (session: UserSession) => PayrollRuleService.updateRule(ruleId, { name: 'Updated rule', isDefault: true }, session) },
+    { name: 'setDefaultRule', run: (session: UserSession) => PayrollRuleService.setDefaultRule(ruleId, session) },
+    { name: 'simulatePayroll(ruleId)', run: (session: UserSession) => PayrollRuleService.simulatePayroll({ ...simulation, ruleId }, session) },
+  ];
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockPrisma.$transaction.mockImplementation(async (callback) => callback(mockPrisma));
+    mockPrisma.payrollRule.findFirst.mockResolvedValue({ ...mockDbRule, id: ruleId });
+    mockPrisma.payrollRule.update.mockImplementation(async ({ data }) => ({ ...mockDbRule, id: ruleId, ...data }));
+    mockPrisma.payrollRule.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.auditLog.create.mockResolvedValue({});
+    vi.spyOn(PayrollRuleEngine, 'calculate');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const expectNoEffects = () => {
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.payrollRule.update).not.toHaveBeenCalled();
+    expect(mockPrisma.payrollRule.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.payrollRule.create).not.toHaveBeenCalled();
+    expect(PayrollRuleEngine.calculate).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+  };
+
+  describe.each(operations)('$name', ({ name, run }) => {
+    it.each([undefined, null, '', '   '])('rejects missing organization context %s before lookup', async (organizationId) => {
+      await expect(run({ ...hrSession, organizationId })).rejects.toMatchObject({ statusCode: 403 });
+      expect(mockPrisma.payrollRule.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.payrollRule.findUnique).not.toHaveBeenCalled();
+      expectNoEffects();
+    });
+
+    it('rejects a foreign rule through tenant-scoped lookup', async () => {
+      const foreignRule = { ...mockDbRule, id: ruleId, organizationId: 'org-other' };
+      mockPrisma.payrollRule.findFirst.mockImplementation(async ({ where }) =>
+        foreignRule.organizationId === where.organizationId ? foreignRule : null
+      );
+      await expect(run(hrSession)).rejects.toMatchObject({ statusCode: 404 });
+      expect(mockPrisma.payrollRule.findFirst).toHaveBeenCalledWith({
+        where: { id: ruleId, organizationId: hrSession.organizationId },
+      });
+      expectNoEffects();
+    });
+
+    it.each(['org-other', null, undefined])('rejects mismatched rule ownership %s without effects', async (organizationId) => {
+      mockPrisma.payrollRule.findFirst.mockResolvedValue({ ...mockDbRule, id: ruleId, organizationId });
+      await expect(run(hrSession)).rejects.toMatchObject({ statusCode: 404 });
+      expectNoEffects();
+    });
+
+    it.each([adminSession, hrSession])('preserves same-tenant $roles behavior and tenant audit', async (session) => {
+      const result = await run(session);
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ organizationId: session.organizationId }),
+      }));
+      if (name === 'simulatePayroll(ruleId)') {
+        expect(result).toHaveProperty('result');
+        expect(PayrollRuleEngine.calculate).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      } else {
+        expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+        expect(mockPrisma.payrollRule.update).toHaveBeenCalledWith(expect.objectContaining({
+          where: { id: ruleId, organizationId: session.organizationId },
+        }));
+        expect(mockPrisma.payrollRule.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+          where: expect.objectContaining({ organizationId: session.organizationId }),
+        }));
+        expect(result).toMatchObject({ isDefault: true });
+        if (name === 'updateRule') expect(result).toMatchObject({ version: mockDbRule.version + 1 });
+      }
+    });
+  });
+
+  it('preserves dynamic simulation without ruleId for an orgless session', async () => {
+    const result = await PayrollRuleService.simulatePayroll({
+      ...simulation,
+      ruleConfig: {
+        code: 'DYNAMIC_TEST', name: 'Dynamic rule',
+        salaryBasisConfig: VIETNAM_STATUTORY_RULE_2026.salaryBasis as any,
+        overtimeConfig: VIETNAM_STATUTORY_RULE_2026.overtime as any,
+        insuranceConfig: VIETNAM_STATUTORY_RULE_2026.insurance as any,
+        taxConfig: VIETNAM_STATUTORY_RULE_2026.tax as any,
+        deductionConfig: VIETNAM_STATUTORY_RULE_2026.deduction as any,
+        roundingConfig: VIETNAM_STATUTORY_RULE_2026.rounding as any,
+      },
+    }, { ...hrSession, organizationId: null });
+    expect(result.ruleUsed.code).toBe('DYNAMIC_TEST');
+    expect(mockPrisma.payrollRule.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.payrollRule.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ entityId: 'DYNAMIC_CONFIG', organizationId: null }),
+    }));
   });
 });

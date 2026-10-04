@@ -18,6 +18,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { formatClientBusinessInstantDate } from '@/lib/time/client-business-instant';
 
 interface NotificationItem {
   id: string;
@@ -35,7 +36,7 @@ function formatRelativeTime(dateStr: string) {
   if (diff < 60) return 'Vừa xong';
   if (diff < 3600) return `${Math.floor(diff / 60)} phút trước`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} giờ trước`;
-  return new Date(dateStr).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+  return formatClientBusinessInstantDate(dateStr, { includeYear: false });
 }
 
 export function NotificationBell() {

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { formatClientBusinessInstantTime } from '@/lib/time/client-business-instant';
 import {
   X,
   Loader2,
@@ -90,8 +91,7 @@ export function CorrectionProcessModal({
 
   const formatTime = (isoString?: string | null) => {
     if (!isoString) return '--:--';
-    const date = new Date(isoString);
-    return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    return formatClientBusinessInstantTime(isoString, { precision: 'minute' });
   };
 
   return (

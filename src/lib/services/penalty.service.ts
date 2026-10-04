@@ -9,6 +9,11 @@ import {
   ProcessPenaltyInput,
   PenaltyQueryParams,
 } from '@/lib/validations/penalty';
+import {
+  formatBusinessDate,
+  getBusinessDateString,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
 
 export class PenaltyService {
   // ── 1. Create Penalty Record ────────────────────────────────────────────────
@@ -36,7 +41,9 @@ export class PenaltyService {
       include: { department: true },
     });
 
-    if (!targetEmployee || (session.organizationId && targetEmployee.organizationId !== session.organizationId)) {
+    const organizationId = session.organizationId;
+
+    if (!organizationId || !targetEmployee || targetEmployee.organizationId !== organizationId) {
       throw ApiError.notFound('Không tìm thấy nhân viên được chỉ định hoặc đã bị vô hiệu hóa.');
     }
 
@@ -62,12 +69,12 @@ export class PenaltyService {
     return await prisma.$transaction(async (tx) => {
       const created = await tx.employeeBonusPenalty.create({
         data: {
-          organizationId: session.organizationId ?? '__no_org__',
+          organizationId,
           employeeId: input.employeeId,
           type: 'PENALTY',
           category: input.category,
           amount: new Prisma.Decimal(input.amount),
-          effectiveDate: new Date(input.effectiveDate),
+          effectiveDate: parseBusinessDate(input.effectiveDate),
           period: input.period,
           reason: input.reason,
           notes: input.notes || null,
@@ -132,7 +139,7 @@ export class PenaltyService {
       },
     });
 
-    if (!existing || (session?.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
+    if (!session?.organizationId || !existing || (existing as any).organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy biên bản xử phạt.');
     }
 
@@ -164,14 +171,14 @@ export class PenaltyService {
       period: existing.period,
       reason: existing.reason,
       notes: existing.notes,
-      effectiveDate: existing.effectiveDate.toISOString().split('T')[0],
+      effectiveDate: formatBusinessDate(existing.effectiveDate),
     };
 
     return await prisma.$transaction(async (tx) => {
       const data: Prisma.EmployeeBonusPenaltyUpdateInput = {};
       if (input.category) data.category = input.category;
       if (input.amount !== undefined) data.amount = new Prisma.Decimal(input.amount);
-      if (input.effectiveDate) data.effectiveDate = new Date(input.effectiveDate);
+      if (input.effectiveDate) data.effectiveDate = parseBusinessDate(input.effectiveDate);
       if (input.period) data.period = input.period;
       if (input.reason) data.reason = input.reason;
       if (input.notes !== undefined) data.notes = input.notes || null;
@@ -206,7 +213,7 @@ export class PenaltyService {
             period: updated.period,
             reason: updated.reason,
             notes: updated.notes,
-            effectiveDate: updated.effectiveDate.toISOString().split('T')[0],
+            effectiveDate: formatBusinessDate(updated.effectiveDate),
           },
         },
       });
@@ -237,7 +244,7 @@ export class PenaltyService {
       },
     });
 
-    if (!existing || (session?.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
+    if (!session?.organizationId || !existing || (existing as any).organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy biên bản xử phạt.');
     }
 
@@ -342,6 +349,10 @@ export class PenaltyService {
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
     const isManager = session.roles.includes('manager');
 
+    if (!isHrOrAdmin && !session.employeeId) {
+      throw ApiError.forbidden('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    }
+
     if (!isHrOrAdmin && isManager && session.employeeId) {
       const manager = await prisma.employee.findUnique({
         where: { id: session.employeeId },
@@ -357,7 +368,7 @@ export class PenaltyService {
     }
 
     // Apply filters
-    if (query.employeeId) {
+    if (query.employeeId && (isHrOrAdmin || isManager)) {
       where.employeeId = query.employeeId;
     }
 
@@ -514,7 +525,7 @@ export class PenaltyService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const currentPeriod = new Date().toISOString().slice(0, 7);
+    const currentPeriod = getBusinessDateString().slice(0, 7);
 
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
     const isManager = session.roles.includes('manager');
@@ -525,6 +536,10 @@ export class PenaltyService {
       organizationId: session.organizationId ?? '__no_org__',
       employee: { organizationId: session.organizationId ?? '__no_org__' },
     };
+
+    if (!isHrOrAdmin && !session.employeeId) {
+      throw ApiError.forbidden('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    }
 
     if (!isHrOrAdmin && isManager && session.employeeId) {
       const manager = await prisma.employee.findUnique({

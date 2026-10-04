@@ -2,6 +2,10 @@
 
 import React, { useState } from 'react';
 import { EmployeeDashboardData } from '@/lib/services/dashboard.service';
+import {
+  formatClientBusinessInstantDate,
+  formatClientBusinessInstantTime,
+} from '@/lib/time/client-business-instant';
 import { StatCard } from './StatCard';
 import { SvgAreaLineChart, SvgDonutProgress } from './SvgCharts';
 import {
@@ -103,7 +107,7 @@ export function EmployeeDashboardView({ data, onMarkNotificationRead }: Employee
               <span className="text-slate-400 block text-[11px]">Giờ Check-in</span>
               <span className="font-mono text-sm font-semibold text-emerald-400">
                 {data.todayAttendance.checkInTime
-                  ? new Date(data.todayAttendance.checkInTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                  ? formatClientBusinessInstantTime(data.todayAttendance.checkInTime)
                   : 'Chưa có'}
               </span>
             </div>
@@ -112,7 +116,7 @@ export function EmployeeDashboardView({ data, onMarkNotificationRead }: Employee
               <span className="text-slate-400 block text-[11px]">Giờ Check-out</span>
               <span className="font-mono text-sm font-semibold text-blue-400">
                 {data.todayAttendance.checkOutTime
-                  ? new Date(data.todayAttendance.checkOutTime).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                  ? formatClientBusinessInstantTime(data.todayAttendance.checkOutTime)
                   : 'Đang làm việc'}
               </span>
             </div>
@@ -412,7 +416,7 @@ export function EmployeeDashboardView({ data, onMarkNotificationRead }: Employee
                 <div className="flex items-start justify-between gap-2">
                   <h4 className="text-xs font-semibold text-white">{notif.title}</h4>
                   <span className="text-[10px] text-slate-500 shrink-0 font-mono">
-                    {new Date(notif.createdAt).toLocaleDateString('vi-VN')}
+                    {formatClientBusinessInstantDate(notif.createdAt)}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">{notif.message}</p>

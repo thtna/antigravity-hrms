@@ -146,12 +146,6 @@ function resolveFonts() {
     return { regular: localRegular, bold: localBold };
   }
 
-  const winRegular = 'C:\\Windows\\Fonts\\arial.ttf';
-  const winBold = 'C:\\Windows\\Fonts\\arialbd.ttf';
-  if (fs.existsSync(winRegular) && fs.existsSync(winBold)) {
-    return { regular: winRegular, bold: winBold };
-  }
-
   return null;
 }
 

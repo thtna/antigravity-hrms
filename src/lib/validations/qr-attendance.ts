@@ -1,12 +1,27 @@
 import { z } from 'zod';
 
-export const GenerateQrTokenSchema = z.object({
-  tokenType: z.enum(['CHECK_IN', 'CHECK_OUT', 'ANY']).optional().default('ANY'),
-  expiresInSeconds: z.coerce.number().min(10).max(300).optional().default(30),
-  location: z.string().max(100).optional(),
-});
+export const GenerateQrTokenSchema = z
+  .object({
+    tokenType: z.enum(['CHECK_IN', 'CHECK_OUT', 'ANY']).optional().default('ANY'),
+    expiresInSeconds: z.coerce.number().min(10).max(300).optional().default(30),
+    location: z.string().max(100).optional(),
+  })
+  .strict();
 
 export type GenerateQrTokenInput = z.input<typeof GenerateQrTokenSchema>;
+
+export const QrTokenPayloadSchema = z
+  .object({
+    v: z.literal('1'),
+    code: z.string().min(1),
+    type: z.enum(['CHECK_IN', 'CHECK_OUT', 'ANY']),
+    exp: z.number().int().positive(),
+    sig: z.string().regex(/^[a-f0-9]{64}$/),
+    loc: z.string().max(100).optional(),
+  })
+  .strict();
+
+export type QrTokenPayload = z.infer<typeof QrTokenPayloadSchema>;
 
 export const ScanQrAttendanceSchema = z.object({
   qrPayload: z.string().min(1, 'Dữ liệu mã QR không được để trống.'),

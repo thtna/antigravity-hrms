@@ -51,6 +51,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { LeaveService } from '@/lib/services/leave.service';
+import { CreateLeaveRequestSchema } from '@/lib/validations/leave';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -152,6 +153,80 @@ describe('LeaveService.createLeaveRequest', () => {
     expect(mockPrisma.leaveRequest.create).toHaveBeenCalledOnce();
     expect(result.status).toBe('PENDING');
     expect(result.requestType).toBe('LEAVE');
+    expect(mockPrisma.leaveRequest.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          startDate: new Date(`${today}T00:00:00.000Z`),
+          endDate: new Date(`${tomorrow}T00:00:00.000Z`),
+        }),
+      })
+    );
+  });
+
+  it('rejects impossible calendar dates before a leave row is created', async () => {
+    expect(() =>
+      CreateLeaveRequestSchema.parse({
+        requestType: 'LEAVE',
+        startDate: '2026-02-30',
+        endDate: '2026-03-01',
+        reason: 'Ngày không tồn tại trong lịch',
+      })
+    ).toThrow();
+
+    await expect(
+      LeaveService.createLeaveRequest(
+        {
+          requestType: 'LEAVE',
+          startDate: '2026-02-30',
+          endDate: '2026-03-01',
+          reason: 'Ngày không tồn tại trong lịch',
+          durationDays: 1,
+        },
+        empSession
+      )
+    ).rejects.toThrow(RangeError);
+    expect(mockPrisma.leaveRequest.create).not.toHaveBeenCalled();
+  });
+
+  it('allows exactly 30 days in the past and rejects 31 days in Vietnam business time', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+
+    try {
+      await expect(
+        LeaveService.createLeaveRequest(
+          {
+            requestType: 'LEAVE',
+            startDate: '2026-09-01',
+            endDate: '2026-09-01',
+            reason: 'Đúng biên ba mươi ngày',
+            durationDays: 1,
+          },
+          empSession
+        )
+      ).resolves.toBeDefined();
+
+      vi.clearAllMocks();
+      mockPrisma.employee.findUnique.mockResolvedValue(mockEmployee);
+      mockPrisma.leaveRequest.findFirst.mockResolvedValue(null);
+      setupTransaction();
+
+      await expect(
+        LeaveService.createLeaveRequest(
+          {
+            requestType: 'LEAVE',
+            startDate: '2026-08-31',
+            endDate: '2026-08-31',
+            reason: 'Quá biên ba mươi ngày',
+            durationDays: 1,
+          },
+          empSession
+        )
+      ).rejects.toThrow('quá 30 ngày');
+      expect(mockPrisma.leaveRequest.create).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('2. creates a LATE_REQUEST successfully', async () => {
@@ -426,6 +501,27 @@ describe('LeaveService.listLeaveRequests — RBAC scoping', () => {
     expect(result.meta.page).toBe(2);
     expect(result.meta.total).toBe(45);
     expect(result.meta.totalPages).toBe(3); // ceil(45/20)
+  });
+
+  it('uses canonical DATE carriers for query range filters', async () => {
+    mockPrisma.leaveRequest.count.mockResolvedValue(0);
+    mockPrisma.leaveRequest.findMany.mockResolvedValue([]);
+
+    await LeaveService.listLeaveRequests(
+      {
+        status: 'ALL',
+        requestType: 'ALL',
+        startDate: '2026-09-01',
+        endDate: '2026-09-30',
+        page: 1,
+        limit: 50,
+      },
+      hrSession
+    );
+
+    const where = mockPrisma.leaveRequest.findMany.mock.calls[0][0].where;
+    expect(where.startDate).toEqual({ lte: new Date('2026-09-30T00:00:00.000Z') });
+    expect(where.endDate).toEqual({ gte: new Date('2026-09-01T00:00:00.000Z') });
   });
 });
 

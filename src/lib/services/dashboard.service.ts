@@ -1,5 +1,11 @@
 import { prisma } from '@/lib/db/prisma';
 import { ApiError } from '@/lib/errors';
+import {
+  addBusinessDays,
+  formatBusinessDate,
+  getBusinessDateString,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
 import { UserSession } from '@/types';
 
 export interface AdminHrDashboardData {
@@ -258,14 +264,11 @@ export interface EmployeeDashboardData {
 }
 
 export class DashboardService {
-  /**
-   * Helper: Get Start and End of Today in local/UTC dates
-   */
+  /** Get the canonical DATE carrier for the current Vietnam business date. */
   private static getTodayRange(): { startOfToday: Date; endOfToday: Date; dateStr: string } {
-    const now = new Date();
-    const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-    const endOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
-    const dateStr = startOfToday.toISOString().slice(0, 10);
+    const dateStr = getBusinessDateString();
+    const startOfToday = parseBusinessDate(dateStr);
+    const endOfToday = parseBusinessDate(dateStr);
     return { startOfToday, endOfToday, dateStr };
   }
 
@@ -273,10 +276,11 @@ export class DashboardService {
    * Helper: Get current month range (first day to last day)
    */
   private static getCurrentMonthRange(): { startOfMonth: Date; endOfMonth: Date; periodStr: string } {
-    const now = new Date();
-    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
-    const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999));
-    const periodStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const periodStr = getBusinessDateString().slice(0, 7);
+    const startOfMonth = parseBusinessDate(`${periodStr}-01`);
+    const nextMonthStart = new Date(startOfMonth.getTime());
+    nextMonthStart.setUTCMonth(nextMonthStart.getUTCMonth() + 1);
+    const endOfMonth = parseBusinessDate(addBusinessDays(nextMonthStart, -1));
     return { startOfMonth, endOfMonth, periodStr };
   }
 
@@ -285,15 +289,36 @@ export class DashboardService {
    */
   private static getPastDays(days: number): Array<{ start: Date; end: Date; dateStr: string; label: string }> {
     const list = [];
-    const now = new Date();
+    const today = getBusinessDateString();
     for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i, 0, 0, 0, 0));
-      const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i, 23, 59, 59, 999));
-      const dateStr = d.toISOString().slice(0, 10);
-      const label = `${d.getUTCDate()}/${d.getUTCMonth() + 1}`;
-      list.push({ start: d, end, dateStr, label });
+      const dateStr = addBusinessDays(today, -i);
+      const carrier = parseBusinessDate(dateStr);
+      const [, month, day] = dateStr.split('-');
+      list.push({
+        start: carrier,
+        end: parseBusinessDate(dateStr),
+        dateStr,
+        label: `${Number(day)}/${Number(month)}`,
+      });
     }
     return list;
+  }
+
+  private static getAttendanceRecordBusinessDate(record: {
+    workDate?: Date | string | null;
+    checkInTime?: Date | string | null;
+  }): string | null {
+    if (record.workDate) {
+      const carrier = record.workDate instanceof Date
+        ? record.workDate
+        : parseBusinessDate(record.workDate.slice(0, 10));
+      return formatBusinessDate(carrier);
+    }
+    return record.checkInTime ? getBusinessDateString(record.checkInTime) : null;
+  }
+
+  private static getBusinessYearStart(): Date {
+    return parseBusinessDate(`${getBusinessDateString().slice(0, 4)}-01-01`);
   }
 
   /**
@@ -450,10 +475,9 @@ export class DashboardService {
     let hasExplicitDate = false;
 
     for (const r of (past7Records || [])) {
-      const d = (r as any)?.workDate || (r as any)?.checkInTime;
-      if (d) {
+      const dStr = this.getAttendanceRecordBusinessDate(r as any);
+      if (dStr) {
         hasExplicitDate = true;
-        const dStr = (d instanceof Date ? d : new Date(d)).toISOString().slice(0, 10);
         let list = recordsByDate.get(dStr);
         if (!list) {
           list = [];
@@ -571,7 +595,7 @@ export class DashboardService {
     const past7Days = this.getPastDays(7);
     const rangeStart7 = past7Days[0].start;
     const rangeEnd7 = past7Days[past7Days.length - 1].end;
-    const past7DaysStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() - 6, 0, 0, 0, 0));
+    const past7DaysStart = rangeStart7;
 
     // [PHASE 25 OPTIMIZATION] Parallelize all department manager queries via Promise.all and batch 7-day trend
     const [
@@ -720,8 +744,8 @@ export class DashboardService {
       employeeName: `${l.employee.lastName} ${l.employee.firstName}`.trim(),
       employeeCode: l.employee.employeeCode,
       requestType: l.requestType,
-      startDate: l.startDate.toISOString().slice(0, 10),
-      endDate: l.endDate.toISOString().slice(0, 10),
+      startDate: formatBusinessDate(l.startDate),
+      endDate: formatBusinessDate(l.endDate),
       durationDays: Number(l.durationDays || 1),
       reason: l.reason,
       createdAt: l.createdAt.toISOString(),
@@ -731,7 +755,7 @@ export class DashboardService {
       id: a.id,
       employeeName: `${a.employee.lastName} ${a.employee.firstName}`.trim(),
       employeeCode: a.employee.employeeCode,
-      workDate: a.workDate.toISOString().slice(0, 10),
+      workDate: formatBusinessDate(a.workDate),
       correctionType: a.correctionType,
       reason: a.reason,
       createdAt: a.createdAt.toISOString(),
@@ -766,10 +790,9 @@ export class DashboardService {
     let hasExplicitTeamDate = false;
 
     for (const r of (team7DayRecords || [])) {
-      const d = (r as any)?.workDate || (r as any)?.checkInTime;
-      if (d) {
+      const dStr = this.getAttendanceRecordBusinessDate(r as any);
+      if (dStr) {
         hasExplicitTeamDate = true;
-        const dStr = (d instanceof Date ? d : new Date(d)).toISOString().slice(0, 10);
         let list = teamRecordsByDate.get(dStr);
         if (!list) {
           list = [];
@@ -941,7 +964,7 @@ export class DashboardService {
           employeeId,
           status: 'APPROVED',
           startDate: {
-            gte: new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1)),
+            gte: this.getBusinessYearStart(),
           },
         },
         select: { durationDays: true },
@@ -1019,8 +1042,8 @@ export class DashboardService {
     const recentLeaves = recentLeavesRaw.map((l) => ({
       id: l.id,
       requestType: l.requestType,
-      startDate: l.startDate.toISOString().slice(0, 10),
-      endDate: l.endDate.toISOString().slice(0, 10),
+      startDate: formatBusinessDate(l.startDate),
+      endDate: formatBusinessDate(l.endDate),
       durationDays: Number(l.durationDays || 1),
       status: l.status,
       reason: l.reason,
@@ -1086,10 +1109,9 @@ export class DashboardService {
     let hasExplicit14Date = false;
 
     for (const r of (past14DayRecords || [])) {
-      const d = (r as any)?.workDate || (r as any)?.checkInTime;
-      if (d) {
+      const dStr = this.getAttendanceRecordBusinessDate(r as any);
+      if (dStr) {
         hasExplicit14Date = true;
-        const dStr = (d instanceof Date ? d : new Date(d)).toISOString().slice(0, 10);
         past14Map.set(dStr, r);
       }
     }

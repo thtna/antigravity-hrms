@@ -3,6 +3,7 @@ import { ApiError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
 import { Prisma } from '@prisma/client';
+import { addBusinessDays, parseBusinessLocalDateTime } from '@/lib/time/business-time';
 
 export const AUDIT_ACTIONS = {
   SALARY_MODIFICATION: 'SALARY_MODIFICATION',
@@ -368,12 +369,11 @@ export class AuditService {
     if (query.startDate || query.endDate) {
       where.createdAt = {};
       if (query.startDate) {
-        where.createdAt.gte = new Date(query.startDate);
+        where.createdAt.gte = parseBusinessLocalDateTime(query.startDate, '00:00:00');
       }
       if (query.endDate) {
-        const end = new Date(query.endDate);
-        end.setHours(23, 59, 59, 999);
-        where.createdAt.lte = end;
+        const exclusiveEndDate = addBusinessDays(query.endDate, 1);
+        where.createdAt.lt = parseBusinessLocalDateTime(exclusiveEndDate, '00:00:00');
       }
     }
 

@@ -3,6 +3,7 @@ import { ApiError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
 import { PayslipPdfData, PayslipPdfGenerator } from '@/lib/payroll/pdf-generator';
+import { formatBusinessDate, parseBusinessDate } from '@/lib/time/business-time';
 
 export const COMPANY_INFO = {
   name: process.env.COMPANY_NAME || 'CÔNG TY CỔ PHẦN CÔNG NGHỆ ANTIGRAVITY',
@@ -114,10 +115,9 @@ export class PayslipService {
     const totalBonuses = kpiBonus + otherBonuses;
 
     const formatDate = (d: Date | string) => {
-      const dt = new Date(d);
-      return `${dt.getDate().toString().padStart(2, '0')}/${(dt.getMonth() + 1)
-        .toString()
-        .padStart(2, '0')}/${dt.getFullYear()}`;
+      const carrier = d instanceof Date ? d : parseBusinessDate(d.slice(0, 10));
+      const [year, month, day] = formatBusinessDate(carrier).split('-');
+      return `${day}/${month}/${year}`;
     };
 
     return {

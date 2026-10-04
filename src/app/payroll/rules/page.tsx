@@ -22,6 +22,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { SkeletonCard } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useToastHelpers } from '@/components/ui/toast';
+import { formatClientBusinessDate } from '@/lib/time/client-business-date-display';
 
 export default function PayrollRulesPage() {
   const toast = useToastHelpers();
@@ -212,7 +213,7 @@ export default function PayrollRulesPage() {
                     {/* Footer buttons */}
                     <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
                       <span className="text-[10px] text-slate-500 font-mono">
-                        Áp dụng: {new Date(rule.effectiveFrom).toLocaleDateString('vi-VN')}
+                        Áp dụng: {formatClientBusinessDate(rule.effectiveFrom)}
                       </span>
 
                       <div className="flex items-center gap-2">

@@ -9,6 +9,16 @@ import {
   AttendanceQueryParams,
 } from '@/lib/validations/attendance';
 import { Prisma } from '@prisma/client';
+import {
+  addBusinessDays,
+  formatBusinessDate,
+  formatBusinessTime,
+  getBusinessDateString,
+  getBusinessWeekday,
+  hasExplicitUtcOffset,
+  parseBusinessDate,
+  parseBusinessLocalDateTime,
+} from '@/lib/time/business-time';
 
 export interface ShiftTimeWindow {
   startTime: string; // "HH:mm"
@@ -31,6 +41,8 @@ export interface AttendanceMetrics {
   status: 'ON_TIME' | 'LATE' | 'EARLY_LEAVE' | 'LATE_AND_EARLY' | 'OVERTIME' | 'IN_PROGRESS';
 }
 
+export type TrustedAttendanceMethod = 'WEB' | 'QR' | 'GPS' | 'BIOMETRIC';
+
 export class AttendanceService {
   /**
    * Pure calculation function for working hours, late minutes, early minutes and overtime.
@@ -38,7 +50,8 @@ export class AttendanceService {
   static calculateAttendanceMetrics(
     checkIn: Date,
     checkOut: Date,
-    shift: ShiftTimeWindow
+    shift: ShiftTimeWindow,
+    workDateInput?: string | Date
   ): AttendanceMetrics {
     if (checkOut.getTime() <= checkIn.getTime()) {
       throw ApiError.badRequest('Thời gian check-out phải lớn hơn thời gian check-in.');
@@ -51,39 +64,27 @@ export class AttendanceService {
     const workingMinutes = Math.max(0, totalSpanMinutes - (shift.breakMinutes || 0));
     const actualWorkHours = Math.round((workingMinutes / 60) * 100) / 100;
 
-    // Helper: Parse "HH:mm" to minutes from midnight
-    const parseTime = (t: string) => {
-      const parts = t.split(':').map((p) => parseInt(p, 10));
-      return (parts[0] || 0) * 60 + (parts[1] || 0);
-    };
-
-    const shiftStartMin = parseTime(shift.startTime);
-    const shiftEndMin = parseTime(shift.endTime);
+    const workDate = workDateInput
+      ? typeof workDateInput === 'string'
+        ? formatBusinessDate(parseBusinessDate(workDateInput))
+        : formatBusinessDate(workDateInput)
+      : getBusinessDateString(checkIn);
+    const shiftStart = parseBusinessLocalDateTime(workDate, shift.startTime);
+    const shiftEndDate = shift.isOvernight ? addBusinessDays(workDate, 1) : workDate;
+    const shiftEnd = parseBusinessLocalDateTime(shiftEndDate, shift.endTime);
 
     // 3. Late minutes calculation
-    const checkInMin = checkIn.getHours() * 60 + checkIn.getMinutes();
-    const lateThreshold = shiftStartMin + (shift.gracePeriodLate || 0);
+    const lateThreshold = shiftStart.getTime() + (shift.gracePeriodLate || 0) * 60 * 1000;
     let lateMinutes = 0;
-    if (checkInMin > lateThreshold) {
-      lateMinutes = checkInMin - shiftStartMin;
+    if (checkIn.getTime() > lateThreshold) {
+      lateMinutes = Math.floor((checkIn.getTime() - shiftStart.getTime()) / (60 * 1000));
     }
 
     // 4. Early minutes calculation
     let earlyMinutes = 0;
-    if (shift.isOvernight) {
-      // Overnight: shift ends next calendar day
-      const checkOutMin = checkOut.getHours() * 60 + checkOut.getMinutes();
-      const earlyThreshold = shiftEndMin - (shift.gracePeriodEarly || 0);
-      if (checkOutMin < earlyThreshold) {
-        earlyMinutes = shiftEndMin - checkOutMin;
-      }
-    } else {
-      // Standard daytime shift
-      const checkOutMin = checkOut.getHours() * 60 + checkOut.getMinutes();
-      const earlyThreshold = shiftEndMin - (shift.gracePeriodEarly || 0);
-      if (checkOutMin < earlyThreshold) {
-        earlyMinutes = shiftEndMin - checkOutMin;
-      }
+    const earlyThreshold = shiftEnd.getTime() - (shift.gracePeriodEarly || 0) * 60 * 1000;
+    if (checkOut.getTime() < earlyThreshold) {
+      earlyMinutes = Math.floor((shiftEnd.getTime() - checkOut.getTime()) / (60 * 1000));
     }
 
     // 5. Overtime calculation
@@ -121,21 +122,25 @@ export class AttendanceService {
   /**
    * Resolve target employee ID based on session and optional input.
    */
-  private static async resolveEmployeeId(session: UserSession, explicitEmpId?: string): Promise<string> {
+  private static async resolveEmployeeId(
+    session: UserSession,
+    explicitEmpId: string | undefined,
+    db: Prisma.TransactionClient
+  ): Promise<string> {
     const isPrivileged = session.roles.includes('admin') || session.roles.includes('hr');
     if (explicitEmpId && isPrivileged) {
-      const emp = await prisma.employee.findUnique({
+      const emp = await db.employee.findUnique({
         where: { id: explicitEmpId },
         select: { id: true, status: true, deletedAt: true, organizationId: true },
       });
-      if (!emp || emp.deletedAt || emp.status === 'TERMINATED' || (session.organizationId && emp.organizationId !== session.organizationId)) {
+      if (!emp || emp.deletedAt || emp.status === 'TERMINATED' || !session.organizationId || emp.organizationId !== session.organizationId) {
         throw ApiError.badRequest('Nhân viên không tồn tại hoặc đã nghỉ việc.');
       }
       return emp.id;
     }
 
     // Default: current user's employee record
-    const emp = await prisma.employee.findUnique({
+    const emp = await db.employee.findUnique({
       where: { userId: session.userId },
       select: { id: true, status: true, deletedAt: true },
     });
@@ -148,16 +153,65 @@ export class AttendanceService {
     return emp.id;
   }
 
+  private static parseClockMinutes(value: string): number {
+    const [hourText, minuteText] = value.split(':');
+    const hour = Number(hourText);
+    const minute = Number(minuteText);
+    if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      throw ApiError.badRequest('Gio cham cong khong hop le.');
+    }
+    return hour * 60 + minute;
+  }
+
+  static parseAttendanceDateTime(
+    value: string,
+    workDateInput: string | Date,
+    shift: Pick<ShiftTimeWindow, 'startTime' | 'isOvernight'>,
+    kind: 'CHECK_IN' | 'CHECK_OUT'
+  ): Date {
+    if (hasExplicitUtcOffset(value)) {
+      return parseBusinessLocalDateTime(value);
+    }
+
+    const workDate =
+      typeof workDateInput === 'string'
+        ? formatBusinessDate(parseBusinessDate(workDateInput))
+        : formatBusinessDate(workDateInput);
+    const [providedDate, providedTime] = value.includes('T')
+      ? value.split('T', 2)
+      : [workDate, value];
+    let localDate = formatBusinessDate(parseBusinessDate(providedDate));
+    const localTime = providedTime;
+
+    if (
+      kind === 'CHECK_OUT' &&
+      shift.isOvernight &&
+      localDate === workDate &&
+      this.parseClockMinutes(localTime) < this.parseClockMinutes(shift.startTime)
+    ) {
+      localDate = addBusinessDays(workDate, 1);
+    }
+
+    return parseBusinessLocalDateTime(localDate, localTime);
+  }
+
   /**
    * Find or resolve assigned shift for an employee on a given date.
    */
-  static async resolveShiftForDate(employeeId: string, workDate: Date): Promise<{
+  static async resolveShiftForDate(
+    employeeId: string,
+    workDate: Date,
+    tx?: Prisma.TransactionClient,
+    options: { createSchedule?: boolean } = {}
+  ): Promise<{
     shift: ShiftTimeWindow;
     scheduleId?: string;
     organizationId: string;
   }> {
+    const db = tx || prisma;
+
     // 0. Fetch verified employee
-    const employee = await prisma.employee.findUnique({
+    const employee = await db.employee.findUnique({
       where: { id: employeeId },
       select: { id: true, organizationId: true },
     });
@@ -167,7 +221,7 @@ export class AttendanceService {
     const organizationId = employee.organizationId;
 
     // 1. Direct EmployeeSchedule for this date
-    const schedule = await prisma.employeeSchedule.findUnique({
+    const schedule = await db.employeeSchedule.findUnique({
       where: { employeeId_workDate: { employeeId, workDate } },
       include: { shift: true },
     });
@@ -190,8 +244,8 @@ export class AttendanceService {
     }
 
     // 2. Fallback: Recurring schedule pattern for this day of week
-    const dayOfWeek = workDate.getDay();
-    const recurring = await prisma.recurringSchedule.findFirst({
+    const dayOfWeek = getBusinessWeekday(workDate);
+    const recurring = await db.recurringSchedule.findFirst({
       where: {
         employeeId,
         dayOfWeek,
@@ -203,19 +257,20 @@ export class AttendanceService {
     });
 
     if (recurring && recurring.shift && recurring.shift.isActive && !recurring.shift.deletedAt) {
-      // Auto-create EmployeeSchedule row to link permanently
-      const newSchedule = await prisma.employeeSchedule.create({
-        data: {
-          organizationId,
-          employeeId,
-          shiftId: recurring.shift.id,
-          workDate,
-          status: 'SCHEDULED',
-        },
-      });
+      const newSchedule = options.createSchedule === false
+        ? null
+        : await db.employeeSchedule.create({
+            data: {
+              organizationId,
+              employeeId,
+              shiftId: recurring.shift.id,
+              workDate,
+              status: 'SCHEDULED',
+            },
+          });
 
       return {
-        scheduleId: newSchedule.id,
+        scheduleId: newSchedule?.id,
         organizationId,
         shift: {
           startTime: recurring.shift.startTime,
@@ -231,7 +286,7 @@ export class AttendanceService {
     }
 
     // 3. Fallback: First active default WorkShift in employee's organization
-    const defaultShift = await prisma.workShift.findFirst({
+    const defaultShift = await db.workShift.findFirst({
       where: { organizationId, isActive: true, deletedAt: null },
       orderBy: { createdAt: 'asc' },
     });
@@ -252,19 +307,20 @@ export class AttendanceService {
       };
     }
 
-    // Auto-create schedule for default shift
-    const fallbackSchedule = await prisma.employeeSchedule.create({
-      data: {
-        organizationId,
-        employeeId,
-        shiftId: defaultShift.id,
-        workDate,
-        status: 'SCHEDULED',
-      },
-    });
+    const fallbackSchedule = options.createSchedule === false
+      ? null
+      : await db.employeeSchedule.create({
+          data: {
+            organizationId,
+            employeeId,
+            shiftId: defaultShift.id,
+            workDate,
+            status: 'SCHEDULED',
+          },
+        });
 
     return {
-      scheduleId: fallbackSchedule.id,
+      scheduleId: fallbackSchedule?.id,
       organizationId,
       shift: {
         startTime: defaultShift.startTime,
@@ -282,57 +338,65 @@ export class AttendanceService {
   /**
    * CHECK-IN
    */
-  static async checkIn(input: CheckInInput, session: UserSession) {
-    const employeeId = await this.resolveEmployeeId(session, input.employeeId);
-
+  static async checkIn(
+    input: CheckInInput,
+    session: UserSession,
+    tx?: Prisma.TransactionClient,
+    trustedMethod: TrustedAttendanceMethod = 'WEB'
+  ) {
     const now = new Date();
-    const checkInTime = input.checkInTime ? new Date(input.checkInTime) : now;
-    const workDateStr = input.workDate || checkInTime.toISOString().split('T')[0];
-    const workDate = new Date(workDateStr);
+    const checkInTime = input.checkInTime
+      ? parseBusinessLocalDateTime(input.checkInTime)
+      : now;
+    const workDateStr = input.workDate
+      ? formatBusinessDate(parseBusinessDate(input.workDate))
+      : getBusinessDateString(checkInTime);
+    const workDate = parseBusinessDate(workDateStr);
 
     // Prevent invalid future timestamp (allow max 5 min clock drift)
     if (checkInTime.getTime() > now.getTime() + 5 * 60 * 1000) {
       throw ApiError.badRequest('Thời gian check-in không được ở tương lai.');
     }
 
-    // 1. PREVENT DUPLICATE ATTENDANCE
-    const existing = await prisma.attendance.findUnique({
-      where: { employeeId_workDate: { employeeId, workDate } },
-    });
+    const executeCheckIn = async (db: Prisma.TransactionClient) => {
+      const employeeId = await this.resolveEmployeeId(session, input.employeeId, db);
 
-    if (existing) {
-      throw ApiError.conflict(`Nhân viên đã thực hiện check-in cho ngày ${workDateStr} lúc ${existing.checkInTime?.toLocaleTimeString('vi-VN')}.`);
-    }
+      // 1. PREVENT DUPLICATE ATTENDANCE
+      const existing = await db.attendance.findUnique({
+        where: { employeeId_workDate: { employeeId, workDate } },
+      });
 
-    // 2. Resolve shift & schedule
-    const { shift, scheduleId, organizationId } = await this.resolveShiftForDate(employeeId, workDate);
+      if (existing) {
+        throw ApiError.conflict(`Nhân viên đã thực hiện check-in cho ngày ${workDateStr} lúc ${existing.checkInTime ? formatBusinessTime(existing.checkInTime) : 'N/A'}.`);
+      }
 
-    // 3. Compute late minutes at check-in
-    const parseTime = (t: string) => {
-      const parts = t.split(':').map((p) => parseInt(p, 10));
-      return (parts[0] || 0) * 60 + (parts[1] || 0);
-    };
-    const shiftStartMin = parseTime(shift.startTime);
-    const checkInMin = checkInTime.getHours() * 60 + checkInTime.getMinutes();
-    const lateThreshold = shiftStartMin + (shift.gracePeriodLate || 0);
+      // 2. Resolve shift & schedule inside the same transaction client.
+      const { shift, scheduleId, organizationId } = await this.resolveShiftForDate(
+        employeeId,
+        workDate,
+        db
+      );
 
-    let lateMinutes = 0;
-    let initialStatus = 'IN_PROGRESS';
-    if (checkInMin > lateThreshold) {
-      lateMinutes = checkInMin - shiftStartMin;
-      initialStatus = 'LATE';
-    }
+      // 3. Compute late minutes at check-in
+      const scheduledStart = parseBusinessLocalDateTime(workDateStr, shift.startTime);
+      const lateThreshold = scheduledStart.getTime() + (shift.gracePeriodLate || 0) * 60 * 1000;
 
-    // 4. Create attendance record
-    const attendance = await prisma.$transaction(async (tx) => {
-      const created = await tx.attendance.create({
+      let lateMinutes = 0;
+      let initialStatus = 'IN_PROGRESS';
+      if (checkInTime.getTime() > lateThreshold) {
+        lateMinutes = Math.floor((checkInTime.getTime() - scheduledStart.getTime()) / (60 * 1000));
+        initialStatus = 'LATE';
+      }
+
+      // 4. Create attendance record and audit using the same transaction client.
+      const created = await db.attendance.create({
         data: {
           organizationId,
           employeeId,
           scheduleId: scheduleId || null,
           workDate,
           checkInTime,
-          checkInMethod: input.checkInMethod || 'WEB',
+          checkInMethod: trustedMethod,
           checkInLat: input.checkInLat ? new Prisma.Decimal(input.checkInLat) : null,
           checkInLng: input.checkInLng ? new Prisma.Decimal(input.checkInLng) : null,
           lateMinutes,
@@ -352,7 +416,7 @@ export class AttendanceService {
         },
       });
 
-      await tx.auditLog.create({
+      await db.auditLog.create({
         data: {
           actorId: session.userId,
           action: 'ATTENDANCE_CHECK_IN',
@@ -363,7 +427,7 @@ export class AttendanceService {
             employeeId,
             workDate: workDateStr,
             checkInTime: checkInTime.toISOString(),
-            method: input.checkInMethod,
+            method: trustedMethod,
             lateMinutes,
             status: initialStatus,
           },
@@ -371,19 +435,23 @@ export class AttendanceService {
       });
 
       return created;
-    });
+    };
+
+    const attendance = tx
+      ? await executeCheckIn(tx)
+      : await prisma.$transaction(executeCheckIn);
 
     logger.info('Employee checked in', {
       attendanceId: attendance.id,
-      employeeId,
+      employeeId: attendance.employeeId,
       workDate: workDateStr,
-      lateMinutes,
+      lateMinutes: attendance.lateMinutes,
       actor: session.userId,
     });
 
     return {
       ...attendance,
-      workDate: attendance.workDate.toISOString().split('T')[0],
+      workDate: formatBusinessDate(attendance.workDate),
       actualWorkHours: Number(attendance.actualWorkHours),
       otHours: Number(attendance.otHours),
     };
@@ -392,92 +460,111 @@ export class AttendanceService {
   /**
    * CHECK-OUT
    */
-  static async checkOut(input: CheckOutInput, session: UserSession) {
-    const employeeId = await this.resolveEmployeeId(session, input.employeeId);
-
+  static async checkOut(
+    input: CheckOutInput,
+    session: UserSession,
+    tx?: Prisma.TransactionClient,
+    trustedMethod: TrustedAttendanceMethod = 'WEB'
+  ) {
     const now = new Date();
-    const checkOutTime = input.checkOutTime ? new Date(input.checkOutTime) : now;
-    const workDateStr = input.workDate || checkOutTime.toISOString().split('T')[0];
-    const workDate = new Date(workDateStr);
+    const checkOutTime = input.checkOutTime
+      ? parseBusinessLocalDateTime(input.checkOutTime)
+      : now;
+    const organizationId = session.organizationId;
+
+    if (!organizationId) {
+      throw ApiError.forbidden('Phien dang nhap khong thuoc to chuc hop le de cham cong.');
+    }
 
     // Prevent future check-out timestamp
     if (checkOutTime.getTime() > now.getTime() + 5 * 60 * 1000) {
       throw ApiError.badRequest('Thời gian check-out không được ở tương lai.');
     }
 
-    // 1. Find existing check-in
-    let attendance = null;
-    if (input.attendanceId) {
-      attendance = await prisma.attendance.findUnique({
-        where: { id: input.attendanceId },
-        include: {
-          schedule: { include: { shift: true } },
-          employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true } },
-        },
-      });
-    } else {
-      attendance = await prisma.attendance.findUnique({
-        where: { employeeId_workDate: { employeeId, workDate } },
-        include: {
-          schedule: { include: { shift: true } },
-          employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true } },
-        },
-      });
-    }
+    const executeCheckOut = async (db: Prisma.TransactionClient) => {
+      const isPrivileged = session.roles.includes('admin') || session.roles.includes('hr');
+      let employee;
 
-    // PREVENT CHECKOUT BEFORE CHECKIN
-    if (!attendance || !attendance.checkInTime) {
-      throw ApiError.badRequest(
-        'Không tìm thấy bản ghi check-in cho ngày làm việc này. Bạn phải thực hiện Check-in trước khi Check-out.'
-      );
-    }
+      if (input.employeeId && isPrivileged) {
+        employee = await db.employee.findFirst({
+          where: { id: input.employeeId, organizationId },
+          select: { id: true, status: true, deletedAt: true },
+        });
+      } else {
+        employee = await db.employee.findFirst({
+          where: { userId: session.userId, organizationId },
+          select: { id: true, status: true, deletedAt: true },
+        });
 
-    // Prevent duplicate checkout
-    if (attendance.checkOutTime) {
-      throw ApiError.badRequest(
-        `Bản ghi đã được check-out vào lúc ${attendance.checkOutTime.toLocaleTimeString('vi-VN')}.`
-      );
-    }
-
-    // PREVENT INVALID TIMESTAMPS
-    if (checkOutTime.getTime() <= attendance.checkInTime.getTime()) {
-      throw ApiError.badRequest(
-        `Thời gian check-out (${checkOutTime.toLocaleTimeString('vi-VN')}) phải diễn ra sau thời gian check-in (${attendance.checkInTime.toLocaleTimeString('vi-VN')}).`
-      );
-    }
-
-    // 2. Resolve shift info
-    const shiftData = attendance.schedule?.shift;
-    const shift: ShiftTimeWindow = shiftData
-      ? {
-          startTime: shiftData.startTime,
-          endTime: shiftData.endTime,
-          breakMinutes: shiftData.breakMinutes,
-          gracePeriodLate: shiftData.gracePeriodLate,
-          gracePeriodEarly: shiftData.gracePeriodEarly,
-          isOvernight: shiftData.isOvernight,
-          standardWorkHours: Number(shiftData.standardWorkHours),
+        if (employee && input.employeeId && input.employeeId !== employee.id) {
+          throw ApiError.forbidden('Ban khong co quyen cham cong cho nhan vien khac.');
         }
-      : {
-          startTime: '08:30',
-          endTime: '17:30',
-          breakMinutes: 60,
-          gracePeriodLate: 15,
-          gracePeriodEarly: 15,
-          isOvernight: false,
-          standardWorkHours: 8.0,
-        };
+      }
 
-    // 3. Calculate metrics
-    const metrics = this.calculateAttendanceMetrics(attendance.checkInTime, checkOutTime, shift);
+      if (!employee || employee.deletedAt || employee.status === 'TERMINATED') {
+        throw ApiError.notFound('Khong tim thay nhan vien hop le trong to chuc hien tai.');
+      }
 
-    // 4. Update attendance and schedule in transaction
-    const updated = await prisma.$transaction(async (tx) => {
-      const res = await tx.attendance.update({
-        where: { id: attendance.id },
+      const resolvedAttendance = await this.resolveCheckoutAttendance(
+        organizationId,
+        employee.id,
+        checkOutTime,
+        { attendanceId: input.attendanceId, workDate: input.workDate },
+        db
+      );
+      const attendance = resolvedAttendance.attendance;
+
+      if (!attendance || !attendance.checkInTime) {
+        throw ApiError.notFound('Khong tim thay ban ghi cham cong hop le de check-out.');
+      }
+
+      if (attendance.checkOutTime) {
+        throw ApiError.conflict('Ban ghi cham cong da duoc check-out.');
+      }
+
+      if (checkOutTime.getTime() <= attendance.checkInTime.getTime()) {
+        throw ApiError.badRequest(
+          `Thời gian check-out (${formatBusinessTime(checkOutTime)}) phải diễn ra sau thời gian check-in (${formatBusinessTime(attendance.checkInTime)}).`
+        );
+      }
+
+      const shiftData = attendance.schedule?.shift;
+      const shift: ShiftTimeWindow = shiftData
+        ? {
+            startTime: shiftData.startTime,
+            endTime: shiftData.endTime,
+            breakMinutes: shiftData.breakMinutes,
+            gracePeriodLate: shiftData.gracePeriodLate,
+            gracePeriodEarly: shiftData.gracePeriodEarly,
+            isOvernight: shiftData.isOvernight,
+            standardWorkHours: Number(shiftData.standardWorkHours),
+          }
+        : {
+            startTime: '08:30',
+            endTime: '17:30',
+            breakMinutes: 60,
+            gracePeriodLate: 15,
+            gracePeriodEarly: 15,
+            isOvernight: false,
+            standardWorkHours: 8.0,
+          };
+
+      const metrics = this.calculateAttendanceMetrics(
+        attendance.checkInTime,
+        checkOutTime,
+        shift,
+        resolvedAttendance.workDate ?? attendance.workDate
+      );
+      const checkout = await db.attendance.updateMany({
+        where: {
+          id: attendance.id,
+          organizationId,
+          employeeId: employee.id,
+          checkOutTime: null,
+        },
         data: {
           checkOutTime,
-          checkOutMethod: input.checkOutMethod || 'WEB',
+          checkOutMethod: trustedMethod,
           checkOutLat: input.checkOutLat ? new Prisma.Decimal(input.checkOutLat) : null,
           checkOutLng: input.checkOutLng ? new Prisma.Decimal(input.checkOutLng) : null,
           earlyMinutes: metrics.earlyMinutes,
@@ -486,6 +573,39 @@ export class AttendanceService {
           status: metrics.status,
           notes: input.notes?.trim() || attendance.notes,
         },
+      });
+
+      if (checkout.count !== 1) {
+        throw ApiError.conflict('Ban ghi cham cong da thay doi hoac da duoc check-out.');
+      }
+
+      if (attendance.scheduleId) {
+        await db.employeeSchedule.update({
+          where: { id: attendance.scheduleId },
+          data: { status: 'COMPLETED' },
+        });
+      }
+
+      await db.auditLog.create({
+        data: {
+          actorId: session.userId,
+          action: 'ATTENDANCE_CHECK_OUT',
+          entity: 'attendance',
+          entityId: attendance.id,
+          organizationId,
+          newValues: {
+            checkOutTime: checkOutTime.toISOString(),
+            method: trustedMethod,
+            actualWorkHours: metrics.actualWorkHours,
+            earlyMinutes: metrics.earlyMinutes,
+            otHours: metrics.otHours,
+            status: metrics.status,
+          },
+        },
+      });
+
+      const result = await db.attendance.findFirst({
+        where: { id: attendance.id, organizationId, employeeId: employee.id },
         include: {
           employee: {
             select: { id: true, employeeCode: true, firstName: true, lastName: true },
@@ -496,47 +616,120 @@ export class AttendanceService {
         },
       });
 
-      if (attendance.scheduleId) {
-        await tx.employeeSchedule.update({
-          where: { id: attendance.scheduleId },
-          data: { status: 'COMPLETED' },
-        });
+      if (!result) {
+        throw ApiError.conflict('Khong the doc lai ban ghi cham cong sau khi check-out.');
       }
 
-      await tx.auditLog.create({
-        data: {
-          actorId: session.userId,
-          action: 'ATTENDANCE_CHECK_OUT',
-          entity: 'attendance',
-          entityId: attendance.id,
-          organizationId: attendance.organizationId,
-          newValues: {
-            checkOutTime: checkOutTime.toISOString(),
-            actualWorkHours: metrics.actualWorkHours,
-            earlyMinutes: metrics.earlyMinutes,
-            otHours: metrics.otHours,
-            status: metrics.status,
-          },
-        },
-      });
+      return { result, metrics, employeeId: employee.id };
+    };
 
-      return res;
-    });
+    const updated = tx
+      ? await executeCheckOut(tx)
+      : await prisma.$transaction(executeCheckOut);
 
     logger.info('Employee checked out', {
-      attendanceId: updated.id,
-      employeeId,
-      actualWorkHours: metrics.actualWorkHours,
-      otHours: metrics.otHours,
-      status: metrics.status,
+      attendanceId: updated.result.id,
+      employeeId: updated.employeeId,
+      actualWorkHours: updated.metrics.actualWorkHours,
+      otHours: updated.metrics.otHours,
+      status: updated.metrics.status,
       actor: session.userId,
     });
 
     return {
-      ...updated,
-      workDate: updated.workDate.toISOString().split('T')[0],
-      actualWorkHours: Number(updated.actualWorkHours),
-      otHours: Number(updated.otHours),
+      ...updated.result,
+      workDate: formatBusinessDate(updated.result.workDate),
+      actualWorkHours: Number(updated.result.actualWorkHours),
+      otHours: Number(updated.result.otHours),
+    };
+  }
+
+  /**
+   * Resolve the exact attendance row eligible for checkout without guessing that
+   * an early wall-clock hour belongs to the previous day.
+   */
+  static async resolveCheckoutAttendance(
+    organizationId: string,
+    employeeId: string,
+    checkOutTime: Date,
+    input: Pick<CheckOutInput, 'attendanceId' | 'workDate'> = {},
+    tx?: Prisma.TransactionClient
+  ) {
+    const db = tx || prisma;
+    const include = {
+      schedule: { include: { shift: true } },
+      employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true } },
+    } as const;
+
+    if (input.attendanceId) {
+      const attendance = await db.attendance.findFirst({
+        where: { id: input.attendanceId, organizationId, employeeId },
+        include,
+      });
+      return {
+        attendance,
+        workDate: attendance ? formatBusinessDate(attendance.workDate) : null,
+      };
+    }
+
+    if (input.workDate) {
+      const workDate = formatBusinessDate(parseBusinessDate(input.workDate));
+      const attendance = await db.attendance.findFirst({
+        where: {
+          organizationId,
+          employeeId,
+          workDate: parseBusinessDate(workDate),
+        },
+        include,
+      });
+      return { attendance, workDate };
+    }
+
+    const currentWorkDate = getBusinessDateString(checkOutTime);
+    const currentAttendance = await db.attendance.findFirst({
+      where: {
+        organizationId,
+        employeeId,
+        workDate: parseBusinessDate(currentWorkDate),
+        checkInTime: { not: null },
+        checkOutTime: null,
+      },
+      include,
+    });
+    if (currentAttendance) {
+      return { attendance: currentAttendance, workDate: currentWorkDate };
+    }
+
+    const previousWorkDate = addBusinessDays(currentWorkDate, -1);
+    const previousOvernightAttendance = await db.attendance.findFirst({
+      where: {
+        organizationId,
+        employeeId,
+        workDate: parseBusinessDate(previousWorkDate),
+        checkInTime: { not: null },
+        checkOutTime: null,
+        schedule: {
+          is: {
+            organizationId,
+            employeeId,
+            workDate: parseBusinessDate(previousWorkDate),
+            shift: {
+              is: {
+                organizationId,
+                isActive: true,
+                deletedAt: null,
+                isOvernight: true,
+              },
+            },
+          },
+        },
+      },
+      include,
+    });
+
+    return {
+      attendance: previousOvernightAttendance,
+      workDate: previousOvernightAttendance ? previousWorkDate : currentWorkDate,
     };
   }
 
@@ -553,8 +746,8 @@ export class AttendanceService {
       throw ApiError.notFound('Hồ sơ nhân viên của bạn chưa được thiết lập.');
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
-    const todayDate = new Date(todayStr);
+    const todayStr = getBusinessDateString();
+    const todayDate = parseBusinessDate(todayStr);
 
     const attendance = await prisma.attendance.findUnique({
       where: { employeeId_workDate: { employeeId: employee.id, workDate: todayDate } },
@@ -608,6 +801,24 @@ export class AttendanceService {
       employee: { organizationId: session.organizationId ?? '__no_org__' },
     };
 
+    if (!isPrivileged && isManager) {
+      if (!session.organizationId) {
+        throw ApiError.forbidden('Organization context is required.');
+      }
+      const managerEmployee = await prisma.employee.findUnique({
+        where: { userId: session.userId, organizationId: session.organizationId },
+        select: { id: true, managedDepartments: { select: { id: true } } },
+      });
+      if (!managerEmployee) {
+        throw ApiError.forbidden('Manager employee profile is required.');
+      }
+
+      where.OR = [
+        { employeeId: managerEmployee.id },
+        { employee: { departmentId: { in: managerEmployee.managedDepartments.map((d) => d.id) } } },
+      ];
+    }
+
     if (targetEmployeeId) {
       where.employeeId = targetEmployeeId;
     }
@@ -618,8 +829,8 @@ export class AttendanceService {
 
     if (params.startDate || params.endDate) {
       where.workDate = {};
-      if (params.startDate) where.workDate.gte = new Date(params.startDate);
-      if (params.endDate) where.workDate.lte = new Date(params.endDate);
+      if (params.startDate) where.workDate.gte = parseBusinessDate(params.startDate);
+      if (params.endDate) where.workDate.lte = parseBusinessDate(params.endDate);
     }
 
     if (params.status && params.status !== 'ALL') {
@@ -657,7 +868,7 @@ export class AttendanceService {
     return {
       records: records.map((r) => ({
         ...r,
-        workDate: r.workDate.toISOString().split('T')[0],
+        workDate: formatBusinessDate(r.workDate),
         actualWorkHours: Number(r.actualWorkHours),
         otHours: Number(r.otHours),
         shift: r.schedule?.shift
@@ -707,7 +918,26 @@ export class AttendanceService {
     // RBAC check: employee can only view their own
     const isPrivileged = session.roles.includes('admin') || session.roles.includes('hr');
     const isManager = session.roles.includes('manager');
-    if (!isPrivileged && !isManager) {
+    if (!isPrivileged && isManager) {
+      if (!session.organizationId) {
+        throw ApiError.forbidden('Organization context is required.');
+      }
+      const managerEmployee = await prisma.employee.findUnique({
+        where: { userId: session.userId, organizationId: session.organizationId },
+        select: { id: true, managedDepartments: { select: { id: true } } },
+      });
+      if (!managerEmployee) {
+        throw ApiError.forbidden('Manager employee profile is required.');
+      }
+
+      const isOwnAttendance = record.employeeId === managerEmployee.id;
+      const isManagedDepartment = managerEmployee.managedDepartments.some(
+        (d) => d.id === record.employee.department?.id
+      );
+      if (!isOwnAttendance && !isManagedDepartment) {
+        throw ApiError.forbidden('Attendance is outside your managed departments.');
+      }
+    } else if (!isPrivileged) {
       const selfEmp = await prisma.employee.findUnique({
         where: { userId: session.userId },
         select: { id: true },
@@ -719,7 +949,7 @@ export class AttendanceService {
 
     return {
       ...record,
-      workDate: record.workDate.toISOString().split('T')[0],
+      workDate: formatBusinessDate(record.workDate),
       actualWorkHours: Number(record.actualWorkHours),
       otHours: Number(record.otHours),
       shift: record.schedule?.shift
@@ -744,23 +974,11 @@ export class AttendanceService {
       select: { id: true, status: true, deletedAt: true, organizationId: true },
     });
 
-    if (!employee || employee.deletedAt || employee.status === 'TERMINATED' || (session.organizationId && employee.organizationId !== session.organizationId)) {
+    if (!session.organizationId || !employee || employee.deletedAt || employee.status === 'TERMINATED' || employee.organizationId !== session.organizationId) {
       throw ApiError.badRequest('Nhân viên không tồn tại, đã nghỉ việc hoặc không thuộc tổ chức hiện tại.');
     }
 
-    const workDate = new Date(input.workDate);
-
-    // Format checkInTime and checkOutTime
-    const inDate = new Date(
-      input.checkInTime.includes('T') ? input.checkInTime : `${input.workDate}T${input.checkInTime}`
-    );
-    const outDate = new Date(
-      input.checkOutTime.includes('T') ? input.checkOutTime : `${input.workDate}T${input.checkOutTime}`
-    );
-
-    if (outDate.getTime() <= inDate.getTime()) {
-      throw ApiError.badRequest('Thời gian check-out phải diễn ra sau thời gian check-in.');
-    }
+    const workDate = parseBusinessDate(input.workDate);
 
     // Resolve shift
     let shiftData = null;
@@ -788,11 +1006,44 @@ export class AttendanceService {
 
     scheduleId = resolved.scheduleId;
 
-    // Calculate metrics
-    const metrics = this.calculateAttendanceMetrics(inDate, outDate, shift);
+    const inDate = this.parseAttendanceDateTime(
+      input.checkInTime,
+      input.workDate,
+      shift,
+      'CHECK_IN'
+    );
+    const outDate = this.parseAttendanceDateTime(
+      input.checkOutTime,
+      input.workDate,
+      shift,
+      'CHECK_OUT'
+    );
+
+    if (outDate.getTime() <= inDate.getTime()) {
+      throw ApiError.badRequest('Thời gian check-out phải diễn ra sau thời gian check-in.');
+    }
+
+    // Calculate metrics only after overnight shift semantics are known.
+    const metrics = this.calculateAttendanceMetrics(inDate, outDate, shift, input.workDate);
 
     // Upsert attendance record
     const result = await prisma.$transaction(async (tx) => {
+      const existingAttendance = await tx.attendance.findUnique({
+        where: { employeeId_workDate: { employeeId: input.employeeId, workDate } },
+        select: {
+          checkInTime: true,
+          checkOutTime: true,
+          checkInMethod: true,
+          checkOutMethod: true,
+        },
+      });
+      const checkInChanged =
+        !existingAttendance?.checkInTime || existingAttendance.checkInTime.getTime() !== inDate.getTime();
+      const checkOutChanged =
+        !existingAttendance?.checkOutTime || existingAttendance.checkOutTime.getTime() !== outDate.getTime();
+      const nextCheckInMethod = checkInChanged ? 'MANUAL' : existingAttendance?.checkInMethod ?? null;
+      const nextCheckOutMethod = checkOutChanged ? 'MANUAL' : existingAttendance?.checkOutMethod ?? null;
+
       const record = await tx.attendance.upsert({
         where: { employeeId_workDate: { employeeId: input.employeeId, workDate } },
         create: {
@@ -802,8 +1053,8 @@ export class AttendanceService {
           workDate,
           checkInTime: inDate,
           checkOutTime: outDate,
-          checkInMethod: 'MANUAL',
-          checkOutMethod: 'MANUAL',
+          checkInMethod: nextCheckInMethod,
+          checkOutMethod: nextCheckOutMethod,
           lateMinutes: metrics.lateMinutes,
           earlyMinutes: metrics.earlyMinutes,
           actualWorkHours: new Prisma.Decimal(metrics.actualWorkHours),
@@ -814,8 +1065,8 @@ export class AttendanceService {
         update: {
           checkInTime: inDate,
           checkOutTime: outDate,
-          checkInMethod: 'MANUAL',
-          checkOutMethod: 'MANUAL',
+          checkInMethod: nextCheckInMethod,
+          checkOutMethod: nextCheckOutMethod,
           lateMinutes: metrics.lateMinutes,
           earlyMinutes: metrics.earlyMinutes,
           actualWorkHours: new Prisma.Decimal(metrics.actualWorkHours),
@@ -838,9 +1089,21 @@ export class AttendanceService {
           entity: 'attendance',
           entityId: record.id,
           organizationId: employee.organizationId,
+          oldValues: existingAttendance
+            ? {
+                checkInTime: existingAttendance.checkInTime?.toISOString() ?? null,
+                checkOutTime: existingAttendance.checkOutTime?.toISOString() ?? null,
+                checkInMethod: existingAttendance.checkInMethod,
+                checkOutMethod: existingAttendance.checkOutMethod,
+              }
+            : undefined,
           newValues: {
             employeeId: input.employeeId,
             workDate: input.workDate,
+            checkInTime: inDate.toISOString(),
+            checkOutTime: outDate.toISOString(),
+            checkInMethod: nextCheckInMethod,
+            checkOutMethod: nextCheckOutMethod,
             actualWorkHours: metrics.actualWorkHours,
             status: metrics.status,
             actor: session.userId,
@@ -860,7 +1123,7 @@ export class AttendanceService {
 
     return {
       ...result,
-      workDate: result.workDate.toISOString().split('T')[0],
+      workDate: formatBusinessDate(result.workDate),
       actualWorkHours: Number(result.actualWorkHours),
       otHours: Number(result.otHours),
     };

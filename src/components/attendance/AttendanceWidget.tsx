@@ -5,6 +5,10 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
+  formatClientBusinessInstantLongDate,
+  formatClientBusinessInstantTime,
+} from '@/lib/time/client-business-instant';
+import {
   Clock,
   LogIn,
   LogOut,
@@ -35,15 +39,8 @@ export function AttendanceWidget({ onAttendanceChanged }: AttendanceWidgetProps)
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setCurrentTime(now.toLocaleTimeString('vi-VN', { hour12: false }));
-      setCurrentDateString(
-        now.toLocaleDateString('vi-VN', {
-          weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        })
-      );
+      setCurrentTime(formatClientBusinessInstantTime(now));
+      setCurrentDateString(formatClientBusinessInstantLongDate(now));
     };
     updateTime();
     const timer = setInterval(updateTime, 1000);
@@ -250,7 +247,7 @@ export function AttendanceWidget({ onAttendanceChanged }: AttendanceWidgetProps)
           <div>
             <span className="text-slate-500">Giờ vào: </span>
             <strong className="text-white">
-              {todayData.checkInTime ? new Date(todayData.checkInTime).toLocaleTimeString('vi-VN') : '—'}
+              {todayData.checkInTime ? formatClientBusinessInstantTime(todayData.checkInTime) : '—'}
             </strong>
             {todayData.lateMinutes > 0 && (
               <span className="text-red-400 ml-1">(Muộn {todayData.lateMinutes}p)</span>
@@ -259,7 +256,7 @@ export function AttendanceWidget({ onAttendanceChanged }: AttendanceWidgetProps)
           <div>
             <span className="text-slate-500">Giờ ra: </span>
             <strong className="text-white">
-              {todayData.checkOutTime ? new Date(todayData.checkOutTime).toLocaleTimeString('vi-VN') : 'Chưa ra'}
+              {todayData.checkOutTime ? formatClientBusinessInstantTime(todayData.checkOutTime) : 'Chưa ra'}
             </strong>
             {todayData.earlyMinutes > 0 && (
               <span className="text-amber-400 ml-1">(Sớm {todayData.earlyMinutes}p)</span>

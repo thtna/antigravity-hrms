@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { formatClientBusinessInstantDateTime } from '@/lib/time/client-business-instant';
 import { X, Loader2, History, Clock, ShieldCheck, User } from 'lucide-react';
 
 interface CorrectionAuditTrailModalProps {
@@ -146,7 +147,7 @@ export function CorrectionAuditTrailModal({
                           {getActionBadge(log.action)}
                           <span className="text-xs text-slate-400 flex items-center gap-1">
                             <Clock className="w-3 h-3" />
-                            {new Date(log.createdAt).toLocaleString('vi-VN')}
+                            {formatClientBusinessInstantDateTime(log.createdAt)}
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5 text-xs text-slate-300">

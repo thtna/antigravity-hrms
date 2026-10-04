@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/guard';
+import { requirePermission } from '@/lib/auth/guard';
 import { QrAttendanceService } from '@/lib/services/qr-attendance.service';
 import { GenerateQrTokenSchema } from '@/lib/validations/qr-attendance';
 import { validateRequest } from '@/lib/validations';
@@ -12,7 +12,7 @@ import { ApiResponse } from '@/types';
  */
 export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<any>>> {
   try {
-    const session = await requireAuth();
+    const session = await requirePermission('attendance:kiosk');
     const body = await req.json().catch(() => ({}));
     const validated = await validateRequest(GenerateQrTokenSchema, body);
 

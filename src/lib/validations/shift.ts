@@ -1,6 +1,18 @@
 import { z } from 'zod';
+import { getBusinessDateString, parseBusinessDate } from '@/lib/time/business-time';
 
 const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/;
+const businessDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày phải có định dạng YYYY-MM-DD')
+  .refine((value) => {
+    try {
+      parseBusinessDate(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Ngày không tồn tại trong lịch');
 
 export const ShiftBaseSchema = z.object({
   code: z
@@ -19,14 +31,14 @@ export const ShiftBaseSchema = z.object({
   gracePeriodEarly: z.coerce.number().int().min(0).default(15),
   standardWorkHours: z.coerce.number().min(0).max(24).optional(),
   isActive: z.boolean().default(true),
-  effectiveFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày bắt đầu hiệu lực YYYY-MM-DD').default(() => new Date().toISOString().split('T')[0]),
-  effectiveTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày kết thúc hiệu lực YYYY-MM-DD').optional().or(z.literal('')),
+  effectiveFrom: businessDateSchema.default(() => getBusinessDateString()),
+  effectiveTo: businessDateSchema.optional().or(z.literal('')),
 });
 
 export const CreateShiftSchema = ShiftBaseSchema.refine(
   (data) => {
     if (data.effectiveTo && data.effectiveTo !== '') {
-      return new Date(data.effectiveTo) >= new Date(data.effectiveFrom);
+      return data.effectiveTo >= data.effectiveFrom;
     }
     return true;
   },
@@ -41,7 +53,7 @@ export type CreateShiftInput = z.infer<typeof CreateShiftSchema>;
 export const UpdateShiftSchema = ShiftBaseSchema.partial().refine(
   (data) => {
     if (data.effectiveTo && data.effectiveTo !== '' && data.effectiveFrom) {
-      return new Date(data.effectiveTo) >= new Date(data.effectiveFrom);
+      return data.effectiveTo >= data.effectiveFrom;
     }
     return true;
   },

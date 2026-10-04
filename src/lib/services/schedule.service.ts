@@ -9,6 +9,12 @@ import {
   AssignRecurringPatternInput,
   ScheduleQueryParams,
 } from '@/lib/validations/schedule';
+import {
+  addBusinessDays,
+  formatBusinessDate,
+  getBusinessWeekday,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
 
 export class ScheduleService {
   /**
@@ -22,14 +28,17 @@ export class ScheduleService {
   }
 
   /**
-   * Verify shift exists and is active, optionally verifying tenant ownership.
+   * Verify shift exists, is active and belongs to the authenticated tenant.
    */
-  private static async requireActiveShift(shiftId: string, expectedOrgId?: string) {
+  private static async requireActiveShift(shiftId: string, expectedOrgId: string) {
+    if (!expectedOrgId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
     const shift = await prisma.workShift.findUnique({ where: { id: shiftId } });
     if (!shift || shift.deletedAt || !shift.isActive) {
       throw ApiError.badRequest(`Ca làm việc [${shiftId}] không tồn tại hoặc đã bị ngưng hoạt động.`);
     }
-    if (expectedOrgId && shift.organizationId !== expectedOrgId) {
+    if (shift.organizationId !== expectedOrgId) {
       throw ApiError.forbidden('Ca làm việc không thuộc cùng tổ chức với nhân viên/tổ chức hiện tại.');
     }
     return shift;
@@ -38,7 +47,10 @@ export class ScheduleService {
   /**
    * Verify employee exists and is active, returning verified employee record.
    */
-  private static async requireActiveEmployee(employeeId: string, expectedOrgId?: string) {
+  private static async requireActiveEmployee(employeeId: string, expectedOrgId: string) {
+    if (!expectedOrgId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
       select: { id: true, status: true, deletedAt: true, firstName: true, lastName: true, employeeCode: true, organizationId: true },
@@ -46,7 +58,7 @@ export class ScheduleService {
     if (!employee || employee.deletedAt || employee.status === 'TERMINATED') {
       throw ApiError.badRequest(`Nhân viên [${employeeId}] không tồn tại hoặc đã nghỉ việc.`);
     }
-    if (expectedOrgId && employee.organizationId !== expectedOrgId) {
+    if (employee.organizationId !== expectedOrgId) {
       throw ApiError.forbidden('Nhân viên không thuộc tổ chức hiện tại.');
     }
     return employee;
@@ -57,15 +69,18 @@ export class ScheduleService {
    */
   static async assignSingleSchedule(input: AssignSingleScheduleInput, session: UserSession) {
     this.requireScheduleAccess(session);
-    const employee = await this.requireActiveEmployee(input.employeeId, session.organizationId || undefined);
-    const shift = await this.requireActiveShift(input.shiftId, employee.organizationId);
+    if (!session.organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+    const employee = await this.requireActiveEmployee(input.employeeId, session.organizationId);
+    const shift = await this.requireActiveShift(input.shiftId, session.organizationId);
 
-    // Check for existing schedule on the same date → upsert
+    const workDate = parseBusinessDate(input.workDate);
+
+    // Check for existing schedule on the same business date -> upsert
     const existing = await prisma.employeeSchedule.findUnique({
-      where: { employeeId_workDate: { employeeId: input.employeeId, workDate: new Date(input.workDate) } },
+      where: { employeeId_workDate: { employeeId: input.employeeId, workDate } },
     });
-
-    const workDate = new Date(input.workDate);
 
     const schedule = await prisma.$transaction(async (tx) => {
       let result;
@@ -146,30 +161,32 @@ export class ScheduleService {
    */
   static async bulkAssignSchedule(input: BulkAssignScheduleInput, session: UserSession) {
     this.requireScheduleAccess(session);
-    const shift = await this.requireActiveShift(input.shiftId, session.organizationId || undefined);
+    if (!session.organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+    const shift = await this.requireActiveShift(input.shiftId, session.organizationId);
 
     // Validate all employees exist and belong to the same organization as the shift
     const employeeMap = new Map<string, { id: string; organizationId: string }>();
     for (const eid of input.employeeIds) {
-      const emp = await this.requireActiveEmployee(eid, session.organizationId || shift.organizationId);
+      const emp = await this.requireActiveEmployee(eid, session.organizationId);
       if (emp.organizationId !== shift.organizationId) {
         throw ApiError.forbidden('Tất cả nhân viên và ca làm việc phải thuộc cùng một tổ chức.');
       }
       employeeMap.set(eid, emp);
     }
 
-    const startDate = new Date(input.startDate);
-    const endDate = new Date(input.endDate);
+    const startDate = formatBusinessDate(parseBusinessDate(input.startDate));
+    const endDate = formatBusinessDate(parseBusinessDate(input.endDate));
 
     // Generate all dates in range that match daysOfWeek
     const dates: Date[] = [];
-    const current = new Date(startDate);
+    let current = startDate;
     while (current <= endDate) {
-      // getDay() returns 0=Sun, 1=Mon, ... 6=Sat — matches our dayOfWeek encoding
-      if (input.daysOfWeek.includes(current.getDay())) {
-        dates.push(new Date(current));
+      if (input.daysOfWeek.includes(getBusinessWeekday(current))) {
+        dates.push(parseBusinessDate(current));
       }
-      current.setDate(current.getDate() + 1);
+      current = addBusinessDays(current, 1);
     }
 
     if (dates.length === 0) {
@@ -251,11 +268,14 @@ export class ScheduleService {
    */
   static async assignRecurringPattern(input: AssignRecurringPatternInput, session: UserSession) {
     this.requireScheduleAccess(session);
-    const employee = await this.requireActiveEmployee(input.employeeId, session.organizationId || undefined);
-    const shift = await this.requireActiveShift(input.shiftId, employee.organizationId);
+    if (!session.organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+    const employee = await this.requireActiveEmployee(input.employeeId, session.organizationId);
+    const shift = await this.requireActiveShift(input.shiftId, session.organizationId);
 
-    const effectiveFrom = new Date(input.effectiveFrom);
-    const effectiveTo = input.effectiveTo ? new Date(input.effectiveTo) : null;
+    const effectiveFrom = parseBusinessDate(input.effectiveFrom);
+    const effectiveTo = input.effectiveTo ? parseBusinessDate(input.effectiveTo) : null;
 
     const records = await prisma.$transaction(async (tx) => {
       // Deactivate overlapping recurring patterns for same employee on same days
@@ -350,8 +370,8 @@ export class ScheduleService {
     }
     if (params.startDate || params.endDate) {
       where.workDate = {};
-      if (params.startDate) (where.workDate as Record<string, unknown>).gte = new Date(params.startDate);
-      if (params.endDate) (where.workDate as Record<string, unknown>).lte = new Date(params.endDate);
+      if (params.startDate) (where.workDate as Record<string, unknown>).gte = parseBusinessDate(params.startDate);
+      if (params.endDate) (where.workDate as Record<string, unknown>).lte = parseBusinessDate(params.endDate);
     }
     if (params.status && params.status !== 'ALL') {
       where.status = params.status;
@@ -388,7 +408,7 @@ export class ScheduleService {
 
     return schedules.map((s) => ({
       ...s,
-      workDate: s.workDate.toISOString().split('T')[0],
+      workDate: formatBusinessDate(s.workDate),
       shift: {
         ...s.shift,
         standardWorkHours: Number(s.shift.standardWorkHours),
@@ -439,8 +459,8 @@ export class ScheduleService {
 
     return patterns.map((p) => ({
       ...p,
-      effectiveFrom: p.effectiveFrom.toISOString().split('T')[0],
-      effectiveTo: p.effectiveTo ? p.effectiveTo.toISOString().split('T')[0] : null,
+      effectiveFrom: formatBusinessDate(p.effectiveFrom),
+      effectiveTo: p.effectiveTo ? formatBusinessDate(p.effectiveTo) : null,
     }));
   }
 }

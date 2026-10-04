@@ -13,6 +13,7 @@ import { logger } from '@/lib/logger';
 import { StorageProvider } from './types';
 import { LocalStorageProvider } from './providers/local.provider';
 import { SupabaseStorageProvider } from './providers/supabase.provider';
+import { resolveStorageConfig } from './storage-config';
 import {
   buildTenantDocumentKey,
   buildTenantAvatarKey,
@@ -32,16 +33,11 @@ export class StorageManager {
     }
 
     if (!this.activeProvider) {
-      const explicitProvider = (process.env.STORAGE_PROVIDER || '').toLowerCase();
-      const isProd = process.env.NODE_ENV === 'production';
-      const hasSupabaseConfig = Boolean(
-        process.env.SUPABASE_URL &&
-        (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY)
-      );
+      const config = resolveStorageConfig();
 
-      if (explicitProvider === 'supabase' || (isProd && hasSupabaseConfig)) {
+      if (config.provider === 'supabase') {
         logger.info('[StorageManager] Initialized SupabaseStorageProvider for Production/Staging');
-        this.activeProvider = new SupabaseStorageProvider();
+        this.activeProvider = new SupabaseStorageProvider(config.supabase);
       } else {
         logger.info('[StorageManager] Initialized LocalStorageProvider for Development/Testing');
         this.activeProvider = new LocalStorageProvider();

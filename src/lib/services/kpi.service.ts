@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db/prisma';
 import { ApiError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
+import { getBusinessDateString } from '@/lib/time/business-time';
 import { Prisma } from '@prisma/client';
 import {
   calculateAchievementRate,
@@ -158,14 +159,25 @@ export class KpiService {
     this.ensurePrivileged(session);
 
     const existing = await prisma.kpi.findUnique({ where: { id } });
-    if (!existing || existing.deletedAt || (session.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
+    if (!session.organizationId || !existing || existing.deletedAt || (existing as any).organizationId !== session.organizationId) {
       throw ApiError.notFound('Chỉ số KPI không tồn tại hoặc đã bị xóa.');
     }
 
     if (input.code && input.code !== existing.code) {
-      const duplicate = await prisma.kpi.findFirst({ where: { code: input.code } });
+      const duplicate = await prisma.kpi.findFirst({
+        where: { code: input.code, organizationId: session.organizationId },
+      });
       if (duplicate && duplicate.id !== id) {
         throw ApiError.conflict(`Mã KPI "${input.code}" đã được sử dụng.`);
+      }
+    }
+
+    if (input.departmentId) {
+      const dept = await prisma.department.findUnique({
+        where: { id: input.departmentId },
+      });
+      if (!dept || dept.organizationId !== existing.organizationId) {
+        throw ApiError.badRequest('Phòng ban được chỉ định không tồn tại hoặc không thuộc tổ chức hiện tại.');
       }
     }
 
@@ -220,7 +232,7 @@ export class KpiService {
       },
     });
 
-    if (!existing || existing.deletedAt || (session.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
+    if (!session.organizationId || !existing || existing.deletedAt || (existing as any).organizationId !== session.organizationId) {
       throw ApiError.notFound('Chỉ số KPI không tồn tại.');
     }
 
@@ -331,7 +343,7 @@ export class KpiService {
       where: { id: input.employeeId },
       select: { id: true, status: true, deletedAt: true, organizationId: true },
     });
-    if (!employee || employee.deletedAt || employee.status === 'TERMINATED' || (session.organizationId && employee.organizationId !== session.organizationId)) {
+    if (!session.organizationId || !employee || employee.deletedAt || employee.status === 'TERMINATED' || employee.organizationId !== session.organizationId) {
       throw ApiError.badRequest('Nhân viên không tồn tại, đã nghỉ việc hoặc không thuộc tổ chức hiện tại.');
     }
 
@@ -430,7 +442,7 @@ export class KpiService {
     const kpi = await prisma.kpi.findUnique({
       where: { id: input.kpiId },
     });
-    if (!kpi || kpi.deletedAt || kpi.status !== 'ACTIVE' || (session.organizationId && kpi.organizationId !== session.organizationId)) {
+    if (!session.organizationId || !kpi || kpi.deletedAt || kpi.status !== 'ACTIVE' || kpi.organizationId !== session.organizationId) {
       throw ApiError.notFound('Chỉ số KPI không khả dụng hoặc không thuộc tổ chức hiện tại.');
     }
 
@@ -513,10 +525,10 @@ export class KpiService {
   ) {
     const existing = await prisma.employeeKpiResult.findUnique({
       where: { id: resultId },
-      include: { kpi: true },
+      include: { kpi: true, employee: { select: { id: true, departmentId: true } } },
     });
 
-    if (!existing) {
+    if (!session?.organizationId || !existing || (existing as any).organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy bản ghi KPI.');
     }
 
@@ -527,6 +539,20 @@ export class KpiService {
 
     if (!isOwner && !isHrOrAdmin && !isManager) {
       throw ApiError.forbidden('Bạn không có quyền cập nhật kết quả cho KPI này.');
+    }
+
+    if (!isOwner && !isHrOrAdmin && isManager) {
+      if (!session.employeeId) {
+        throw ApiError.forbidden('Không xác định được danh tính quản lý.');
+      }
+      const manager = await prisma.employee.findUnique({
+        where: { id: session.employeeId },
+        include: { managedDepartments: { select: { id: true } } },
+      });
+      const managedDeptIds = manager?.managedDepartments.map((d) => d.id) || [];
+      if (!existing.employee?.departmentId || !managedDeptIds.includes(existing.employee.departmentId)) {
+        throw ApiError.forbidden('Bạn chỉ có quyền cập nhật KPI cho nhân viên thuộc phòng ban bạn trực tiếp quản lý.');
+      }
     }
 
     if (existing.status === 'APPROVED') {
@@ -590,7 +616,7 @@ export class KpiService {
       include: { kpi: true, employee: true },
     });
 
-    if (!existing) {
+    if (!session?.organizationId || !existing || (existing as any).organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy bản ghi KPI.');
     }
 
@@ -687,7 +713,7 @@ export class KpiService {
       throw ApiError.forbidden('Bạn không có quyền xem bảng điểm KPI của nhân viên khác.');
     }
 
-    const selectedPeriod = period || new Date().toISOString().slice(0, 7); // Default current YYYY-MM
+    const selectedPeriod = period || getBusinessDateString().slice(0, 7);
 
     const [employee, results] = await Promise.all([
       prisma.employee.findFirst({
@@ -710,6 +736,22 @@ export class KpiService {
 
     if (!employee) {
       throw ApiError.notFound('Không tìm thấy hồ sơ nhân viên.');
+    }
+
+    const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
+    const isManager = session.roles.includes('manager');
+    if (!isOwner && !isHrOrAdmin && isManager) {
+      if (!session.employeeId) {
+        throw ApiError.forbidden('Không xác định được danh tính quản lý.');
+      }
+      const manager = await prisma.employee.findUnique({
+        where: { id: session.employeeId },
+        include: { managedDepartments: { select: { id: true } } },
+      });
+      const managedDeptIds = manager?.managedDepartments.map((d) => d.id) || [];
+      if (!employee.departmentId || !managedDeptIds.includes(employee.departmentId)) {
+        throw ApiError.forbidden('Bạn chỉ có quyền xem bảng điểm KPI của nhân viên thuộc phòng ban bạn trực tiếp quản lý.');
+      }
     }
 
     // Transform into scorecard items for calculator engine
@@ -748,7 +790,7 @@ export class KpiService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const currentPeriod = new Date().toISOString().slice(0, 7);
+    const currentPeriod = getBusinessDateString().slice(0, 7);
 
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
     const isManager = session.roles.includes('manager');
@@ -757,6 +799,10 @@ export class KpiService {
       period: currentPeriod,
       organizationId: session.organizationId ?? '__no_org__',
     };
+
+    if (!isHrOrAdmin && !session.employeeId) {
+      throw ApiError.forbidden('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    }
 
     if (!isHrOrAdmin && isManager && session.employeeId) {
       const manager = await prisma.employee.findUnique({

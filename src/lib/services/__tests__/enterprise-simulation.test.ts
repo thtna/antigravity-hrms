@@ -201,9 +201,15 @@ vi.mock('@/lib/db/prisma', () => {
       }),
       findFirst: vi.fn(async ({ where }: any = {}) => {
         let emp: any = null;
-        if (where?.employeeCode) {
+        if (where?.id) emp = state.employees.get(where.id);
+        if (!emp && where?.employeeCode) {
           for (const e of state.employees.values()) {
             if (e.employeeCode === where.employeeCode) { emp = e; break; }
+          }
+        }
+        if (!emp && where?.userId) {
+          for (const e of state.employees.values()) {
+            if (e.userId === where.userId) { emp = e; break; }
           }
         }
         if (!emp && where?.identityCard) {
@@ -356,7 +362,15 @@ vi.mock('@/lib/db/prisma', () => {
       }),
       findFirst: vi.fn(async ({ where }) => {
         for (const a of state.attendances.values()) {
+          if (where?.id && a.id !== where.id) continue;
+          if (where?.organizationId && a.organizationId !== where.organizationId) continue;
           if (where?.employeeId && a.employeeId !== where.employeeId) continue;
+          if (
+            where?.workDate &&
+            new Date(a.workDate).getTime() !== new Date(where.workDate).getTime()
+          ) continue;
+          if (where?.checkInTime?.not === null && a.checkInTime == null) continue;
+          if (where?.checkOutTime === null && a.checkOutTime != null) continue;
           return a;
         }
         return null;
@@ -379,6 +393,24 @@ vi.mock('@/lib/db/prisma', () => {
           state.attendances.set(key, updated);
         }
         return updated;
+      }),
+      updateMany: vi.fn(async ({ where, data }) => {
+        const existing = state.attendances.get(where.id);
+        if (
+          !existing ||
+          (where.organizationId && existing.organizationId !== where.organizationId) ||
+          (where.employeeId && existing.employeeId !== where.employeeId) ||
+          (where.checkOutTime === null && existing.checkOutTime != null)
+        ) {
+          return { count: 0 };
+        }
+        const updated = { ...existing, ...data };
+        state.attendances.set(where.id, updated);
+        if (existing.employeeId && existing.workDate) {
+          const key = `${existing.employeeId}_${new Date(existing.workDate).toISOString().split('T')[0]}`;
+          state.attendances.set(key, updated);
+        }
+        return { count: 1 };
       }),
       aggregate: vi.fn(async ({ where }) => {
         let actualWorkHours = 0;
@@ -930,20 +962,22 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
     const attNormal = await AttendanceService.checkIn(
       {
         workDate: '2026-09-01',
-        checkInMethod: 'QR',
         checkInTime: '2026-09-01T08:00:00',
       },
-      devAnSession
+      devAnSession,
+      undefined,
+      'QR'
     );
     expect(attNormal.status).toBe('IN_PROGRESS');
 
     const attNormalOut = await AttendanceService.checkOut(
       {
         attendanceId: attNormal.id,
-        checkOutMethod: 'QR',
         checkOutTime: '2026-09-01T17:00:00',
       },
-      devAnSession
+      devAnSession,
+      undefined,
+      'QR'
     );
     expect(attNormalOut.actualWorkHours).toBeGreaterThanOrEqual(8.0);
 
@@ -951,18 +985,20 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
     const attOt = await AttendanceService.checkIn(
       {
         workDate: '2026-09-02',
-        checkInMethod: 'QR',
         checkInTime: '2026-09-02T08:00:00',
       },
-      devAnSession
+      devAnSession,
+      undefined,
+      'QR'
     );
     const attOtOut = await AttendanceService.checkOut(
       {
         attendanceId: attOt.id,
-        checkOutMethod: 'QR',
         checkOutTime: '2026-09-02T19:30:00',
       },
-      devAnSession
+      devAnSession,
+      undefined,
+      'QR'
     );
     expect(attOtOut.otHours).toBeGreaterThanOrEqual(2.5);
 
@@ -970,18 +1006,20 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
     const attNight = await AttendanceService.checkIn(
       {
         workDate: '2026-09-03',
-        checkInMethod: 'QR',
         checkInTime: '2026-09-03T22:00:00',
       },
-      nightOpsSession
+      nightOpsSession,
+      undefined,
+      'QR'
     );
     const attNightOut = await AttendanceService.checkOut(
       {
         attendanceId: attNight.id,
-        checkOutMethod: 'QR',
         checkOutTime: '2026-09-04T06:00:00',
       },
-      nightOpsSession
+      nightOpsSession,
+      undefined,
+      'QR'
     );
     expect(attNightOut.actualWorkHours).toBeGreaterThanOrEqual(7.0);
   });
@@ -996,10 +1034,11 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
     const missingAtt = await AttendanceService.checkIn(
       {
         workDate: '2026-09-02',
-        checkInMethod: 'QR',
         checkInTime: '2026-09-02T22:00:00',
       },
-      nightOpsSession
+      nightOpsSession,
+      undefined,
+      'QR'
     );
     expect(missingAtt.checkOutTime).toBeUndefined();
 
@@ -1029,10 +1068,11 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
     await AttendanceService.checkOut(
       {
         attendanceId: missingAtt.id,
-        checkOutMethod: 'QR',
         checkOutTime: '2026-09-03T06:00:00',
       },
-      nightOpsSession
+      nightOpsSession,
+      undefined,
+      'QR'
     );
     const fixedAtt = state.attendances.get(missingAtt.id);
     expect(fixedAtt.checkOutTime).toBeDefined();

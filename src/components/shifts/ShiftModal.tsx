@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { getBusinessDateString } from '@/lib/time/business-time';
 import { X, Loader2, AlertCircle, Clock, Moon, Sun, Calendar } from 'lucide-react';
 
 interface ShiftModalProps {
@@ -36,7 +37,7 @@ export function ShiftModal({
   const [gracePeriodEarly, setGracePeriodEarly] = useState(15);
   const [standardWorkHours, setStandardWorkHours] = useState<number | ''>('');
   const [isActive, setIsActive] = useState(true);
-  const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().split('T')[0]);
+  const [effectiveFrom, setEffectiveFrom] = useState(getBusinessDateString());
   const [effectiveTo, setEffectiveTo] = useState('');
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export function ShiftModal({
       setGracePeriodEarly(initialData.gracePeriodEarly ?? 15);
       setStandardWorkHours(initialData.standardWorkHours ?? '');
       setIsActive(initialData.isActive ?? true);
-      setEffectiveFrom(initialData.effectiveFrom || new Date().toISOString().split('T')[0]);
+      setEffectiveFrom(initialData.effectiveFrom || getBusinessDateString());
       setEffectiveTo(initialData.effectiveTo || '');
     } else {
       setCode('');
@@ -68,7 +69,7 @@ export function ShiftModal({
       setGracePeriodEarly(15);
       setStandardWorkHours('');
       setIsActive(true);
-      setEffectiveFrom(new Date().toISOString().split('T')[0]);
+      setEffectiveFrom(getBusinessDateString());
       setEffectiveTo('');
     }
     setErrorMessage('');

@@ -17,6 +17,7 @@ import { PayrollRuleEngine } from '@/lib/payroll/payroll-rule-engine';
 import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
 import { PayrollRuleConfig } from '@/lib/payroll/types';
 import { formatVnd } from '@/lib/payroll/decimal-math';
+import { getBusinessDateString } from '@/lib/time/business-time';
 
 interface PayrollSimulatorWidgetProps {
   availableRules?: any[];
@@ -82,7 +83,7 @@ export function PayrollSimulatorWidget({
         otherBonuses: otherBonuses || 0,
         penalties: penalties || 0,
       },
-      period: new Date().toISOString().slice(0, 7),
+      period: getBusinessDateString().slice(0, 7),
       ruleConfig: activeRuleConfig,
     });
   }, [

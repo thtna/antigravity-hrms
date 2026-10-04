@@ -22,6 +22,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 import { LocalStorageProvider } from '../providers/local.provider';
 import { SupabaseStorageProvider } from '../providers/supabase.provider';
 import { StorageManager } from '../storage-manager';
+import { resolveStorageConfig } from '../storage-config';
 import { logger } from '@/lib/logger';
 import {
   buildTenantDocumentKey,
@@ -909,6 +910,310 @@ describe('PHASE 11A.0C — PRODUCTION STORAGE HARDENING & TENANT ISOLATION', () 
         updateSpy.mockRestore();
         getProviderSpy.mockRestore();
       }
+    });
+  });
+});
+
+describe('R3 storage environment fail-closed contract', () => {
+  const originalEnv = { ...process.env };
+  const validSupabaseEnv = {
+    STORAGE_PROVIDER: 'supabase',
+    SUPABASE_URL: 'https://test-project.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
+  };
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    StorageManager.resetProvider();
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    StorageManager.resetProvider();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { environment: { NODE_ENV: 'production' }, label: 'NODE_ENV=production' },
+    { environment: { NODE_ENV: 'test', APP_ENV: 'production' }, label: 'APP_ENV=production' },
+    { environment: { NODE_ENV: 'test', APP_ENV: 'staging' }, label: 'APP_ENV=staging' },
+  ])('rejects a missing provider in protected environment: $label', ({ environment }) => {
+    expect(() => resolveStorageConfig(environment)).toThrow(/STORAGE_PROVIDER=supabase/);
+  });
+
+  it.each(['', '   ', 'supabse', 'local'])(
+    'rejects protected STORAGE_PROVIDER=%j',
+    (provider) => {
+      expect(() =>
+        resolveStorageConfig({
+          NODE_ENV: 'production',
+          ...validSupabaseEnv,
+          STORAGE_PROVIDER: provider,
+        })
+      ).toThrow();
+    }
+  );
+
+  it('selects Supabase for a valid protected configuration', () => {
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: 'production',
+      APP_ENV: 'production',
+      ...validSupabaseEnv,
+    };
+
+    expect(StorageManager.getProvider()).toBeInstanceOf(SupabaseStorageProvider);
+  });
+
+  it.each([
+    { environment: { ...validSupabaseEnv, SUPABASE_URL: '' }, label: 'missing URL' },
+    {
+      environment: { ...validSupabaseEnv, SUPABASE_SERVICE_ROLE_KEY: '' },
+      label: 'missing canonical key',
+    },
+    {
+      environment: {
+        STORAGE_PROVIDER: 'supabase',
+        SUPABASE_URL: 'https://test-project.supabase.co',
+      },
+      label: 'partial config',
+    },
+    {
+      environment: { ...validSupabaseEnv, SUPABASE_URL: 'not-a-url' },
+      label: 'malformed URL',
+    },
+  ])('rejects invalid Supabase configuration: $label', ({ environment }) => {
+    expect(() =>
+      resolveStorageConfig({ NODE_ENV: 'production', ...environment })
+    ).toThrow();
+  });
+
+  it('rejects a legacy alias as the only protected credential', () => {
+    expect(() =>
+      resolveStorageConfig({
+        NODE_ENV: 'production',
+        STORAGE_PROVIDER: 'supabase',
+        SUPABASE_URL: 'https://test-project.supabase.co',
+        SUPABASE_SERVICE_KEY: 'legacy-key',
+      })
+    ).toThrow(/SUPABASE_SERVICE_ROLE_KEY/);
+  });
+
+  it.each(['development', 'test'])('supports explicit local storage in %s', (nodeEnv) => {
+    expect(resolveStorageConfig({ NODE_ENV: nodeEnv, STORAGE_PROVIDER: 'local' })).toEqual({
+      provider: 'local',
+      protectedEnvironment: false,
+    });
+  });
+
+  it('retains missing-provider local compatibility outside protected environments', () => {
+    expect(resolveStorageConfig({ NODE_ENV: 'development' })).toEqual({
+      provider: 'local',
+      protectedEnvironment: false,
+    });
+  });
+
+  it('rejects an unknown explicit provider outside protected environments', () => {
+    expect(() =>
+      resolveStorageConfig({ NODE_ENV: 'test', STORAGE_PROVIDER: 'filesystem' })
+    ).toThrow();
+  });
+
+  it('fails Supabase provider construction immediately for invalid config', () => {
+    expect(() =>
+      new SupabaseStorageProvider({
+        supabaseUrl: 'invalid-url',
+        serviceRoleKey: 'test-key',
+      })
+    ).toThrow();
+  });
+});
+
+describe('R3 local provider path and I/O failure contract', () => {
+  const testRoot = path.join(process.cwd(), 'scratch', 'r3_local_storage');
+  let provider: LocalStorageProvider;
+
+  beforeEach(async () => {
+    provider = new LocalStorageProvider(testRoot, 'r3-local-test-secret');
+    await fs.rm(testRoot, { recursive: true, force: true });
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await fs.rm(testRoot, { recursive: true, force: true });
+  });
+
+  it.each(['../escape.txt', '../documents-evil/escape.txt'])(
+    'rejects traversal or sibling-prefix escape: %s',
+    async (key) => {
+      await expect(
+        provider.upload('documents', key, Buffer.from('blocked'), {
+          contentType: 'text/plain',
+        })
+      ).rejects.toThrow(/Path Traversal/);
+    }
+  );
+
+  it('rejects an absolute path escape', async () => {
+    const absoluteKey = path.resolve(testRoot, '..', 'outside.txt');
+    await expect(
+      provider.upload('documents', absoluteKey, Buffer.from('blocked'), {
+        contentType: 'text/plain',
+      })
+    ).rejects.toThrow(/Path Traversal/);
+  });
+
+  it('allows a valid descendant', async () => {
+    await provider.upload('documents', 'organizations/org-a/doc.txt', Buffer.from('ok'), {
+      contentType: 'text/plain',
+    });
+    await expect(provider.exists('documents', 'organizations/org-a/doc.txt')).resolves.toBe(true);
+  });
+
+  it('treats delete ENOENT as idempotent success', async () => {
+    await expect(provider.delete('documents', 'missing.txt')).resolves.toBeUndefined();
+  });
+
+  it('throws for non-ENOENT delete errors', async () => {
+    await fs.mkdir(path.join(testRoot, 'documents', 'directory-target'), { recursive: true });
+    await expect(provider.delete('documents', 'directory-target')).rejects.toBeDefined();
+  });
+
+  it('returns false only for exists ENOENT', async () => {
+    await expect(provider.exists('documents', 'missing.txt')).resolves.toBe(false);
+  });
+
+  it('throws for non-ENOENT exists errors', async () => {
+    const accessError = Object.assign(new Error('access denied'), { code: 'EACCES' });
+    vi.spyOn(fs, 'access').mockRejectedValueOnce(accessError);
+    await expect(provider.exists('documents', 'document.txt')).rejects.toBe(accessError);
+  });
+
+  it('returns null only for metadata ENOENT', async () => {
+    await expect(provider.getMetadata('documents', 'missing.txt')).resolves.toBeNull();
+  });
+
+  it('throws for non-ENOENT metadata errors', async () => {
+    const statError = Object.assign(new Error('access denied'), { code: 'EACCES' });
+    vi.spyOn(fs, 'stat').mockRejectedValueOnce(statError);
+    await expect(provider.getMetadata('documents', 'document.txt')).rejects.toBe(statError);
+  });
+});
+
+describe('R3 Supabase existence and metadata failure contract', () => {
+  let provider: SupabaseStorageProvider;
+
+  const storageResponse = (status: number, body?: unknown): Response =>
+    ({
+      status,
+      ok: status >= 200 && status < 300,
+      text: vi.fn().mockResolvedValue(body === undefined ? '' : JSON.stringify(body)),
+    }) as unknown as Response;
+
+  beforeEach(() => {
+    provider = new SupabaseStorageProvider({
+      supabaseUrl: 'https://test-project.supabase.co',
+      serviceRoleKey: 'test-service-role-key',
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  describe('download() validated 404 classification', () => {
+    it('returns NOT_FOUND only for structured NoSuchKey with a validated 404 body status', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(storageResponse(404, { code: 'NoSuchKey', statusCode: 404 }))
+      );
+
+      await expect(provider.download('documents', 'missing.pdf')).rejects.toMatchObject({
+        statusCode: 404,
+        errorCode: 'NOT_FOUND',
+      });
+    });
+
+    it.each([
+      { label: 'generic 404', body: undefined },
+      { label: 'NoSuchBucket', body: { code: 'NoSuchBucket', statusCode: 404 } },
+      {
+        label: 'authentication conflict',
+        body: { code: 'NoSuchKey', statusCode: 404, error: 'AccessDenied' },
+      },
+    ])('fails closed with INTERNAL_SERVER_ERROR for $label', async ({ body }) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(storageResponse(404, body)));
+
+      await expect(provider.download('documents', 'document.pdf')).rejects.toMatchObject({
+        statusCode: 500,
+        errorCode: 'INTERNAL_SERVER_ERROR',
+      });
+    });
+  });
+
+  describe('exists()', () => {
+    it('returns false only for structured NoSuchKey with a validated 404 body status', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(storageResponse(404, { code: 'NoSuchKey', statusCode: 404 }))
+      );
+      await expect(provider.exists('documents', 'missing.pdf')).resolves.toBe(false);
+    });
+
+    it.each([
+      { label: 'generic 404', body: undefined },
+      { label: 'NoSuchBucket', body: { code: 'NoSuchBucket', statusCode: 404 } },
+      {
+        label: 'authentication conflict',
+        body: { code: 'NoSuchKey', statusCode: 404, error: 'AccessDenied' },
+      },
+    ])('throws for $label', async ({ body }) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(storageResponse(404, body)));
+      await expect(provider.exists('documents', 'document.pdf')).rejects.toThrow();
+    });
+
+    it('throws for HTTP 500', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(storageResponse(500)));
+      await expect(provider.exists('documents', 'document.pdf')).rejects.toThrow();
+    });
+
+    it('throws for a network rejection', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network failure')));
+      await expect(provider.exists('documents', 'document.pdf')).rejects.toThrow('network failure');
+    });
+  });
+
+  describe('getMetadata()', () => {
+    it('returns null only for structured NoSuchKey with a validated 404 body status', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(storageResponse(404, { code: 'NoSuchKey', statusCode: 404 }))
+      );
+      await expect(provider.getMetadata('documents', 'missing.pdf')).resolves.toBeNull();
+    });
+
+    it.each([
+      { label: 'generic 404', body: undefined },
+      { label: 'NoSuchBucket', body: { code: 'NoSuchBucket', statusCode: 404 } },
+      {
+        label: 'authentication conflict',
+        body: { code: 'NoSuchKey', statusCode: 404, error: 'AccessDenied' },
+      },
+    ])('throws for $label', async ({ body }) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(storageResponse(404, body)));
+      await expect(provider.getMetadata('documents', 'document.pdf')).rejects.toThrow();
+    });
+
+    it('throws for HTTP 500', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(storageResponse(500)));
+      await expect(provider.getMetadata('documents', 'document.pdf')).rejects.toThrow();
+    });
+
+    it('throws for a network rejection', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network failure')));
+      await expect(provider.getMetadata('documents', 'document.pdf')).rejects.toThrow(
+        'network failure'
+      );
     });
   });
 });

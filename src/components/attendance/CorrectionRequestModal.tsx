@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { X, Loader2, AlertCircle, FileEdit, Clock, CheckCircle2 } from 'lucide-react';
+import { getBusinessDateString } from '@/lib/time/business-time';
 import { CorrectionType } from '@/lib/validations/attendance-correction';
 
 interface CorrectionRequestModalProps {
@@ -67,7 +68,7 @@ export function CorrectionRequestModal({
 
   const [correctionType, setCorrectionType] = useState<CorrectionType>(initialCorrectionType);
   const [workDate, setWorkDate] = useState(
-    initialWorkDate || new Date().toISOString().split('T')[0]
+    initialWorkDate || getBusinessDateString()
   );
   const [checkInTime, setCheckInTime] = useState('08:30');
   const [checkOutTime, setCheckOutTime] = useState('17:30');

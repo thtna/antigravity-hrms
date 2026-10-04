@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { BonusItem } from './BonusEditModal';
 import { formatBonusVnd } from '@/lib/kpi/kpi-calculator';
+import { formatClientBusinessInstantDateTime } from '@/lib/time/client-business-instant';
 
 interface AuditLogItem {
   id: string;
@@ -143,7 +144,7 @@ export function BonusAuditModal({
             <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-800">
               {logs.map((log) => {
                 const actionInfo = getActionLabel(log.action);
-                const dateFormatted = new Date(log.createdAt).toLocaleString('vi-VN');
+                const dateFormatted = formatClientBusinessInstantDateTime(log.createdAt);
 
                 return (
                   <div key={log.id} className="relative group">

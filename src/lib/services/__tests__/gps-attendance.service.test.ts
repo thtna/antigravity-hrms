@@ -31,6 +31,7 @@ vi.mock('@/lib/services/attendance.service', () => ({
   AttendanceService: {
     checkIn: vi.fn(),
     checkOut: vi.fn(),
+    resolveCheckoutAttendance: vi.fn(),
   },
 }));
 
@@ -66,6 +67,7 @@ describe('PHASE 8 — GPS ATTENDANCE SERVICE TEST SUITE', () => {
 
   const activeEmployee = {
     id: 'emp-01',
+    organizationId: 'org-001',
     employeeCode: 'AG-001',
     firstName: 'Thành',
     lastName: 'Nguyễn',
@@ -202,12 +204,45 @@ describe('PHASE 8 — GPS ATTENDANCE SERVICE TEST SUITE', () => {
       expect(AttendanceService.checkIn).toHaveBeenCalledWith(
         expect.objectContaining({
           employeeId: 'emp-01',
-          checkInMethod: 'GPS',
           checkInLat: 10.7769,
           checkInLng: 106.700806,
         }),
-        session
+        session,
+        undefined,
+        'GPS'
       );
+    });
+
+    it('derives the GPS check-in workDate from Vietnam time at a UTC rollover', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-03T18:00:00.000Z'));
+
+      try {
+        mockPrisma.employee.findUnique.mockResolvedValue(activeEmployee);
+        mockPrisma.attendance.findFirst.mockResolvedValue(null);
+        mockPrisma.attendance.findUnique.mockResolvedValue(null);
+        vi.mocked(AttendanceService.checkIn).mockResolvedValue({ id: 'att-gps-rollover' } as any);
+
+        await GpsAttendanceService.attendWithGps(
+          {
+            action: 'CHECK_IN',
+            latitude: 10.7769,
+            longitude: 106.700806,
+            accuracy: 10,
+          },
+          session
+        );
+
+        expect(vi.mocked(AttendanceService.checkIn).mock.calls[0][0]).toEqual(
+          expect.objectContaining({
+            workDate: '2026-09-04',
+            checkInTime: '2026-09-03T18:00:00.000Z',
+          })
+        );
+        expect(vi.mocked(AttendanceService.checkIn).mock.calls[0][3]).toBe('GPS');
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('should REJECT check-in when user is outside the allowed geofence radius', async () => {
@@ -311,10 +346,43 @@ describe('PHASE 8 — GPS ATTENDANCE SERVICE TEST SUITE', () => {
       expect(AttendanceService.checkOut).toHaveBeenCalledWith(
         expect.objectContaining({
           employeeId: 'emp-01',
-          checkOutMethod: 'GPS',
         }),
+        session,
+        undefined,
+        'GPS'
+      );
+    });
+
+    it('uses the canonical resolver for an automatic previous-day overnight checkout', async () => {
+      mockPrisma.employee.findUnique.mockResolvedValue(activeEmployee);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
+      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      vi.mocked(AttendanceService.resolveCheckoutAttendance).mockResolvedValue({
+        attendance: { id: 'att-gps-overnight' },
+        workDate: '2026-09-03',
+      } as any);
+      vi.mocked(AttendanceService.checkOut).mockResolvedValue({ id: 'att-gps-overnight' } as any);
+
+      const result = await GpsAttendanceService.attendWithGps(
+        {
+          latitude: 10.7769,
+          longitude: 106.700806,
+          accuracy: 10,
+        },
         session
       );
+
+      expect(result.action).toBe('CHECK_OUT');
+      expect(AttendanceService.resolveCheckoutAttendance).toHaveBeenCalledWith(
+        activeEmployee.organizationId,
+        activeEmployee.id,
+        expect.any(Date)
+      );
+      expect(vi.mocked(AttendanceService.checkOut).mock.calls[0][0]).not.toHaveProperty('workDate');
+      expect(vi.mocked(AttendanceService.checkOut).mock.calls[0][0]).toEqual(
+        expect.objectContaining({ employeeId: activeEmployee.id })
+      );
+      expect(vi.mocked(AttendanceService.checkOut).mock.calls[0][3]).toBe('GPS');
     });
   });
 
@@ -400,6 +468,67 @@ describe('PHASE 8 — GPS ATTENDANCE SERVICE TEST SUITE', () => {
           session
         )
       ).rejects.toThrow('Tài khoản nhân viên của bạn đã bị ngưng hoạt động');
+    });
+  });
+
+  describe('8. R7-B Regression: Worksite Tenant Isolation', () => {
+    it('rejects preferred worksite belonging to another tenant', async () => {
+      mockPrisma.employee.findUnique.mockResolvedValue(activeEmployee);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
+      mockPrisma.worksite.findUnique.mockResolvedValue({
+        ...hcmWorksite,
+        id: 'ws-foreign',
+        organizationId: 'org-foreign',
+      });
+
+      await expect(
+        GpsAttendanceService.attendWithGps(
+          {
+            action: 'CHECK_IN',
+            latitude: 10.7769,
+            longitude: 106.700806,
+            accuracy: 10,
+            worksiteId: 'ws-foreign',
+          },
+          session
+        )
+      ).rejects.toThrow('Địa điểm làm việc được chỉ định không tồn tại.');
+    });
+
+    it('scopes fallback active-worksite lookup to employee organization', async () => {
+      const unassignedEmployee = {
+        ...activeEmployee,
+        worksiteId: null,
+        worksite: null,
+      };
+      mockPrisma.employee.findUnique.mockResolvedValue(unassignedEmployee);
+      mockPrisma.worksite.findMany.mockResolvedValue([
+        {
+          ...hcmWorksite,
+          organizationId: 'org-001',
+        },
+      ]);
+      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
+
+      await GpsAttendanceService.attendWithGps(
+        {
+          action: 'CHECK_IN',
+          latitude: 10.776889,
+          longitude: 106.700806,
+          accuracy: 10,
+        },
+        session
+      );
+
+      expect(mockPrisma.worksite.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            organizationId: 'org-001',
+            isActive: true,
+          },
+        })
+      );
     });
   });
 });

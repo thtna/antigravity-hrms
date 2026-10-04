@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { UserSession } from '@/types';
 
 // ── Use vi.hoisted so mockPrisma is available BEFORE vi.mock factories run ──
 const mockPrisma = vi.hoisted(() => ({
@@ -53,6 +54,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { ShiftService } from '@/lib/services/shift.service';
 import { ScheduleService } from '@/lib/services/schedule.service';
+import { CreateShiftSchema } from '@/lib/validations/shift';
 
 // ── Fixture sessions ─────────────────────────────────────────────────────────
 
@@ -505,6 +507,36 @@ describe('PHASE 5 — WORK SHIFT & SCHEDULE TEST SUITE', () => {
   // ── 4. Effective Date & Shift Lifecycle ─────────────────────────────────────
 
   describe('4. Effective Dates & Shift Lifecycle', () => {
+    it('uses the Vietnam business date for the default effectiveFrom', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+
+      try {
+        const parsed = CreateShiftSchema.parse({
+          code: 'CA-VN-DATE',
+          name: 'Ca ngày nghiệp vụ',
+          startTime: '08:00',
+          endTime: '17:00',
+        });
+
+        expect(parsed.effectiveFrom).toBe('2026-10-01');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects an impossible effective date', () => {
+      expect(() =>
+        CreateShiftSchema.parse({
+          code: 'CA-INVALID-DATE',
+          name: 'Ca ngày không hợp lệ',
+          startTime: '08:00',
+          endTime: '17:00',
+          effectiveFrom: '2026-02-30',
+        })
+      ).toThrow();
+    });
+
     it('calculates effectiveTo correctly from input date string', async () => {
       mockPrisma.workShift.findUnique.mockResolvedValue(null);
       const created = {
@@ -536,6 +568,39 @@ describe('PHASE 5 — WORK SHIFT & SCHEDULE TEST SUITE', () => {
       );
 
       expect(result.effectiveTo).toBe('2026-12-31');
+      expect(mockPrisma.workShift.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            effectiveFrom: new Date('2026-09-01T00:00:00.000Z'),
+            effectiveTo: new Date('2026-12-31T00:00:00.000Z'),
+          }),
+        })
+      );
+    });
+
+    it('uses strict business-date carriers on the update path', async () => {
+      mockPrisma.workShift.findUnique.mockResolvedValue(activeShift);
+      mockPrisma.workShift.update.mockResolvedValue({
+        ...activeShift,
+        effectiveFrom: new Date('2026-10-01T00:00:00.000Z'),
+        effectiveTo: new Date('2026-12-31T00:00:00.000Z'),
+      });
+      mockPrisma.auditLog.create.mockResolvedValue({});
+
+      await ShiftService.updateShift(
+        activeShift.id,
+        { effectiveFrom: '2026-10-01', effectiveTo: '2026-12-31' },
+        adminSession
+      );
+
+      expect(mockPrisma.workShift.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            effectiveFrom: new Date('2026-10-01T00:00:00.000Z'),
+            effectiveTo: new Date('2026-12-31T00:00:00.000Z'),
+          }),
+        })
+      );
     });
 
     it('getShiftById throws 404 for soft-deleted shift', async () => {
@@ -610,6 +675,78 @@ describe('PHASE 5 — WORK SHIFT & SCHEDULE TEST SUITE', () => {
 
       const callArg = mockPrisma.employeeSchedule.findMany.mock.calls[0][0];
       expect(callArg.where.status).toBe('ABSENT');
+    });
+  });
+});
+
+describe('G06 shift mutation tenant authorization', () => {
+  const operations = [
+    { name: 'updateShift', run: (session: UserSession) => ShiftService.updateShift(activeShift.id, { name: 'Updated shift' }, session) },
+    { name: 'toggleShiftStatus', run: (session: UserSession) => ShiftService.toggleShiftStatus(activeShift.id, false, session) },
+    { name: 'deleteShift', run: (session: UserSession) => ShiftService.deleteShift(activeShift.id, session) },
+  ];
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockPrisma.$transaction.mockImplementation(async (callback) => callback(mockPrisma));
+    mockPrisma.workShift.findFirst.mockResolvedValue(activeShift);
+    mockPrisma.workShift.update.mockResolvedValue({ ...activeShift, isActive: false });
+    mockPrisma.employeeSchedule.count.mockResolvedValue(0);
+    mockPrisma.recurringSchedule.count.mockResolvedValue(0);
+    mockPrisma.auditLog.create.mockResolvedValue({});
+  });
+
+  const expectNoWrites = () => {
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.workShift.update).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    expect(mockPrisma.employeeSchedule.count).not.toHaveBeenCalled();
+    expect(mockPrisma.recurringSchedule.count).not.toHaveBeenCalled();
+  };
+
+  describe.each(operations)('$name', ({ run }) => {
+    it.each([undefined, null, '', '   '])('rejects missing organization context %s before lookup', async (organizationId) => {
+      await expect(run({ ...adminSession, organizationId })).rejects.toMatchObject({ statusCode: 403 });
+      expect(mockPrisma.workShift.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.workShift.findUnique).not.toHaveBeenCalled();
+      expectNoWrites();
+    });
+
+    it('rejects a foreign target through a tenant-scoped lookup', async () => {
+      const foreignShift = { ...activeShift, organizationId: 'org-other' };
+      mockPrisma.workShift.findFirst.mockImplementation(async ({ where }) =>
+        foreignShift.organizationId === where.organizationId ? foreignShift : null
+      );
+      await expect(run(adminSession)).rejects.toMatchObject({ statusCode: 404 });
+      expect(mockPrisma.workShift.findFirst).toHaveBeenCalledWith({
+        where: { id: activeShift.id, organizationId: adminSession.organizationId, deletedAt: null },
+      });
+      expectNoWrites();
+    });
+
+    it.each(['org-other', null, undefined])('rejects mismatched target ownership %s without writes', async (organizationId) => {
+      mockPrisma.workShift.findFirst.mockResolvedValue({ ...activeShift, organizationId });
+      await expect(run(adminSession)).rejects.toMatchObject({ statusCode: 404 });
+      expectNoWrites();
+    });
+
+    it.each([adminSession, hrSession])('preserves same-tenant $roles mutation and audit', async (session) => {
+      await run(session);
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.workShift.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: activeShift.id, organizationId: session.organizationId, deletedAt: null },
+      }));
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ organizationId: session.organizationId }),
+      }));
+    });
+  });
+
+  it('always scopes duplicate-code checks to the authenticated tenant', async () => {
+    mockPrisma.workShift.findFirst.mockResolvedValueOnce(activeShift).mockResolvedValueOnce(null);
+    await ShiftService.updateShift(activeShift.id, { code: ' new-code ' }, adminSession);
+    expect(mockPrisma.workShift.findFirst).toHaveBeenNthCalledWith(2, {
+      where: { code: 'NEW-CODE', organizationId: adminSession.organizationId },
     });
   });
 });

@@ -288,6 +288,21 @@ describe('PHASE 21 — AUDIT & SECURITY HARDENING TEST SUITE', () => {
       expect(result.data[0].action).toBe('SALARY_MODIFICATION');
       expect(result.data[0].actor?.name).toBe('System Admin');
     });
+
+    it('maps an inclusive Vietnam calendar day to VN midnight and an exclusive next-day boundary', async () => {
+      (prisma.auditLog.count as unknown as Mock).mockResolvedValue(0);
+      (prisma.auditLog.findMany as unknown as Mock).mockResolvedValue([]);
+
+      await AuditService.getAuditLogs(
+        { startDate: '2026-10-01', endDate: '2026-10-01' },
+        adminSession
+      );
+
+      const where = (prisma.auditLog.findMany as unknown as Mock).mock.calls[0][0].where;
+      expect(where.createdAt.gte).toEqual(new Date('2026-09-30T17:00:00.000Z'));
+      expect(where.createdAt.lt).toEqual(new Date('2026-10-01T17:00:00.000Z'));
+      expect(where.createdAt.lte).toBeUndefined();
+    });
   });
 
   // ── 3. PERMISSION SERVICE & PRIVILEGE ESCALATION ────────────────────────────

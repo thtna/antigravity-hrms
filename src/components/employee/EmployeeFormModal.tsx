@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { X, Loader2, Plus, Trash2, FileText, AlertCircle } from 'lucide-react';
 import { EmployeeDocument } from '@/lib/validations/employee';
 import { useToastHelpers } from '@/components/ui/toast';
+import { getBusinessDateString } from '@/lib/time/business-time';
 
 interface OrgMeta {
   departments: { id: string; code: string; name: string }[];
@@ -58,7 +59,7 @@ export function EmployeeFormModal({
   const [departmentId, setDepartmentId] = useState('');
   const [positionId, setPositionId] = useState('');
   const [worksiteId, setWorksiteId] = useState('');
-  const [hireDate, setHireDate] = useState(new Date().toISOString().split('T')[0]);
+  const [hireDate, setHireDate] = useState(getBusinessDateString());
   const [contractType, setContractType] = useState('PROBATION');
   const [contractSalary, setContractSalary] = useState<number>(15000000);
   const [hourlyRate, setHourlyRate] = useState<number>(0);
@@ -159,7 +160,7 @@ export function EmployeeFormModal({
       setDepartmentId(initialData.departmentId || '');
       setPositionId(initialData.positionId || '');
       setWorksiteId(initialData.worksiteId || '');
-      setHireDate(initialData.hireDate ? new Date(initialData.hireDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+      setHireDate(initialData.hireDate ? new Date(initialData.hireDate).toISOString().split('T')[0] : getBusinessDateString());
       setContractType(initialData.contractType || 'PROBATION');
       setContractSalary(Number(initialData.contractSalary) || 0);
       setHourlyRate(Number(initialData.hourlyRate) || 0);
@@ -185,7 +186,7 @@ export function EmployeeFormModal({
       setDepartmentId(meta.departments[0]?.id || '');
       setPositionId(meta.positions[0]?.id || '');
       setWorksiteId(meta.worksites[0]?.id || '');
-      setHireDate(new Date().toISOString().split('T')[0]);
+      setHireDate(getBusinessDateString());
       setContractType('PROBATION');
       setContractSalary(15000000);
       setHourlyRate(Math.round(15000000 / (22 * 8)));

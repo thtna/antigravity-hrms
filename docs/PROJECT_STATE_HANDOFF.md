@@ -69,7 +69,73 @@ Neither R5G.3 nor R5G.11 accessed or revalidated Production DB. The values below
 
 ### Completed Release Gates
 
-`5I-G = PASS`; `5J-A = PASS`; `5J-A2 = PASS`; `5J-B = PASS`; `5J-C = PASS`; `5J-D = PASS`; `5J-E = PASS`; `5J-F = PASS`; `5K-A = PASS`; `5K-B1 = PASS`; `5K-B2 = PASS`.
+`5I-G = PASS`; `5J-A = PASS`; `5J-A2 = PASS`; `5J-B = PASS`; `5J-C = PASS`; `5J-D = PASS`; `5J-E = PASS`; `5J-F = PASS`; `5K-A = PASS`; `5K-B1 = PASS`; `5K-B2 = PASS`; `R5G15A4B-S1 = PASS`; `R5G15A4B-S2 = PASS`.
+
+### R5G15A4B Sub-Gate Verification Evidence (Storage Hardening & Staging Runtime Rehearsal)
+
+- **Authoritative Source Commit**: `1da40441eed9f93e598b9bcbe1dabf4f70df2478` on branch `staging`.
+- **CI Quality Gate #38**: `PASS`
+- **R5G15A4B-S1 (Source Remediation & Unit Suite)**: `PASS`
+  - Hardened `SupabaseStorageProvider.deleteWithDetails` with strict HTTP status parsing (`100..599`), property-presence validation, symmetric error signal contradiction scanning, and 2xx body status range enforcement.
+  - Added targeted test suite `[SUPABASE-DEL-01]` through `[SUPABASE-DEL-30]`, `[SVC-DEL-01]`, `[SVC-DEL-02]` (50/50 passing).
+- **R5G15A4B-S2 (Staging Storage Runtime Revision 7 Rehearsal)**: `PASS with eventual delete settlement evidence.`
+  - Target bucket: `documents` (PRIVATE) on `antigravity-hrms-staging` (`rdpufonfascxgbydvtak.supabase.co`).
+  - Target tenant: `588234eb-53f0-424b-835c-fc0f24d406a3`.
+  - Target object key: `organizations/588234eb-53f0-424b-835c-fc0f24d406a3/employees/rev7-runtime-641d2286-f8d7-4ef6-bcf1-b96a4b04952d/doc-rev7-641d2286-f8d7-4ef6-bcf1-b96a4b04952d.pdf`.
+  - Upload synthetic 303-byte PDF (`adcbda4582b892d43918b43c021f2ffc187f34a8df1770ef1727189fc5de0177`): `PASS`.
+  - Authenticated download (303 bytes, exact SHA-256 match): `PASS`.
+  - Signed URL creation and fetch (HTTP 200, 303 bytes, exact SHA-256 match): `PASS`.
+  - Pre-delete parent list: item count = 1, exact match count = 1.
+  - Exactly one `deleteWithDetails()` call executed (`DELETE_CALL_COUNT_TOTAL = 1`): HTTP 200, `responseOk: YES`, `redirectDetected: NO`, `errorCode: NONE`, `errorClass: NONE`, `errorSignalConflict: NO`, `classifiedSuccess: YES`.
+  - **Settlement Evidence**: Immediate post-delete read remained HTTP 200; a later independent read-only settlement probe authoritatively proved NoSuchKey/404 and zero parent-list matches. The cause of settlement delay remains UNPROVEN.
+  - Consistency metrics: `DELETE_EVENTUALLY_SETTLED = YES`, `DELETE_SETTLEMENT_MODEL = EVENTUAL`, `OBJECT_LEAK_LEFT_BEHIND = NO`, `SECOND_DELETE_REQUIRED = NO`, `CLEANUP_REQUIRED = NO`, `ROOT_CAUSE_OF_DELAY = UNPROVEN`.
+  - Scope safeguards: No second delete, no automatic retry, no automatic cleanup, no DB/Data API/RLS/Production mutation. No credentials, authorization values, tokens, or signed URL values were exposed in the Rev7 verification outputs reviewed.
+- **R5G15A4B Status Boundary**:
+  - `R5G15A4B-S1 = PASS`
+  - `R5G15A4B-S2 = PASS`
+  - `R5G15A4B_FINAL = INCOMPLETE / UNPROVEN`
+  - `PRODUCTION_CONTAINMENT_READY = INCOMPLETE / UNPROVEN`
+  - `CUSTOMER_HANDOFF_READY = INCOMPLETE / UNPROVEN`
+  - `NEXT_CANONICAL_GATE = UNPROVEN`
+
+### R5G15A4B Post-Push Verification Snapshot (30/09/2026)
+
+- **Documentation Commit Pushed to Staging**: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2` (`docs: record R5G15A4B storage verification`).
+  - Remote staging before push: `1da40441eed9f93e598b9bcbe1dabf4f70df2478`.
+  - Remote staging after push: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2`.
+  - Live `refs/heads/main` observed before push: `acc3702abbb9b833d01f99d148a3117d6d14a041` (cached `origin/main` was stale and must not be treated as authoritative).
+- **Execution & Safety Guards**:
+  - `PRE_PUSH_GUARD = PASS`
+  - `PUSH_EXECUTED = YES` (`PUSH_COUNT = 1`, `EXPECTED_COMMIT_REACHED_REMOTE = YES`)
+  - `FORCE_PUSH_EXECUTED = NO`
+  - `MAIN_PUSH_EXECUTED = NO`
+  - `PRODUCTION_DEPLOY_EXECUTED = NO`
+  - `VERCEL_SETTING_MUTATION_EXECUTED = NO`
+- **Pre-Push Baseline Verification**:
+  - Branch: `staging` | Local HEAD: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2`
+  - Staged tracked count = 0 | Unstaged tracked count = 0
+  - Untracked count = 57 | Untracked fingerprint = `17F37294D7AE11B7E289BF9E420B99838489DDF793127BBEAF42795CF2D3F778` (baseline match = YES)
+  - `DIFF_CHECK_RESULT = PASS` | `CACHED_DIFF_CHECK_RESULT = PASS`
+- **GitHub CI**:
+  - Target SHA: `48c5243391e82b8a68e67c12eaa7652e4dcf11c2` | Branch: `staging` | Event: `push`
+  - Workflow: `CI` | Run number: `41` | Run ID: `36667125364`
+  - Status: `completed` | Conclusion: `success` | Quality Gate: `success`
+- **Vercel Git Deployment Evidence**:
+  - Vercel Git deployment/status evidence for the exact staging commit = `SUCCESS`.
+  - Vercel Preview Comments: `completed` / `success`.
+  - Commit status context: `Vercel – antigravity-hrms` (description: `Deployment has completed`).
+  - Multiple Vercel status contexts were present for this commit.
+- **Control Deviation Record**:
+  - During read-only investigation, unapproved transcript-content reads occurred.
+  - Subsequent Git State Revalidation proved: 0 tracked modifications, 57 untracked files with exact fingerprint match, and the frozen repository content baseline was unchanged. No repository-content mutation was evidenced from these deviations.
+- **Invariants & Scope Boundary**:
+  - Successful staging CI and Vercel status evidence do not alter the recorded R5G15A4B-S2 runtime evidence or infer Production readiness.
+  - `R5G15A4B-S1 = PASS`
+  - `R5G15A4B-S2 = PASS`
+  - `R5G15A4B_FINAL = INCOMPLETE / UNPROVEN`
+  - `PRODUCTION_CONTAINMENT_READY = INCOMPLETE / UNPROVEN`
+  - `CUSTOMER_HANDOFF_READY = INCOMPLETE / UNPROVEN`
+  - `NEXT_CANONICAL_GATE = UNPROVEN`
 
 ### Verified Behavioral Guarantees
 
@@ -92,6 +158,105 @@ Neither R5G.3 nor R5G.11 accessed or revalidated Production DB. The values below
 - Tenant A must never access Tenant B.
 - Untracked operator/helper files must be preserved and must not be committed accidentally.
 
+### R7 Post-Release Verification & Staging DB Preflight Snapshot (03/10/2026)
+
+- **Branch**: `staging`
+- **HEAD**: `99b47733ffe8cf10c780c267c27c1f051ab115ed`
+- **Pre-reconciliation Git baseline**:
+  - Staged = 0
+  - Short = 148
+  - Porcelain = 182
+  - STATUS_SHA256 = `E96AA0A0F5D4C0704DBBCB7E0EB6006A87E3918318A784439FAD361BE5A526E1`
+- **13 locked historical hashes matched**: `ALL_13_MATCH = True`.
+- **Windows font references in src**: `0`.
+- **R7-B4 Full Local Verification = VERIFIED_COMPLETE**:
+  - Targeted PDF tests: 28/28 PASS (`payslip.service.test.ts`, `report.service.test.ts`).
+  - Typecheck (`tsc --noEmit`): PASS (0 diagnostics).
+  - Build (`next build`): PASS (92/92 routes compiled cleanly).
+  - Lint (`npm run lint`): PASS (0 errors, 174 non-blocking warnings, no `--fix`).
+  - Full suite (`npm test`): 69/69 files, 1214/1214 tests PASS.
+  - PDF standalone Windows-font trace issue remediated (`.next/standalone` fonts verified).
+- **R7-C0C Staging DB Credential Preflight = VERIFIED_COMPLETE**:
+  - Expected staging project ref: `rdpufonfascxgbydvtak`.
+  - DATABASE_URL topology verified for port 6543 (`SUPABASE_POOLER`).
+  - DIRECT_URL topology verified for port 5432 (`SUPABASE_POOLER`).
+  - Credential structural completeness = YES.
+  - Placeholder detected = NO.
+  - No remote connection was performed during R7-C0C.
+- **R7-C1 Remote Staging Migration Status = VERIFIED_COMPLETE**:
+  - Remote Staging connection verified via local Prisma binary 6.19.3.
+  - Prisma migrate status exit code = 0.
+  - Local migration inventory = 4.
+  - Prisma result: `Database schema is up to date!`.
+  - Pending local migrations = 0.
+  - Containment after R7-C1 = VERIFIED_PASS.
+- **Scope & Schema Qualification**:
+  - R7-C1 proves that all 4 local migrations are applied on the Staging database and no local migration is pending. It does NOT independently prove zero physical schema drift outside Prisma migration history.
+- **Project-State Boundaries**:
+  - `NEXT_CANONICAL_GATE = UNPROVEN`
+  - `Next product/development mutation approved = NONE`
+
+
+### Current Local Engineering Checkpoint (04/10/2026)
+
+- **Local branch**: `staging`
+- **Current local HEAD**: `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f`.
+- This is a **local engineering checkpoint**, not evidence that these commits were pushed to remote Staging or deployed to Production.
+- **Current local engineering commit chain after `99b47733ffe8cf10c780c267c27c1f051ab115ed`**:
+  - G03 `b5851128b36a3ee1e19b238891975ebf94171256` — `build: exclude local artifacts from Docker context`.
+  - G02 `e1da08ef84931f196330667444d2b6fef4a370ba` — `chore: scope CommonJS lint exception to operator scripts`.
+  - G01 `401e2174c795bbc9667d91c4b2bb27ee2647a9f5` — `fix: separate application startup from database initialization`.
+  - G04 `1a10092dd082f04da4da560fd03e54a6dd2e8fb1` — `feat: add canonical business time helpers`.
+  - G05 `0e5b7af4f16d49431eccd01e8894c59eeb2f9014` — `feat: harden attendance workflows and tenant scoping`.
+  - G06 `5a08a7e2397f866bc750b5f4de12f062eb201534` — `feat: harden finance and scheduling tenant workflows`.
+  - G07 `23629530ba61d81903a56a9563c0fc33c64d2e37` — `feat: harden tenant storage and provider fail-closed behavior`.
+  - G08 `804e2291b020cb93c35596bf6e071440b28a5568` — `fix: remove host-specific PDF font fallback`.
+  - G09 `46f39038003f731d6557825c79212857d26b3238` — `fix: enforce business-date validation across employee leave and onboarding`.
+  - G10 `6451938c31413d90043adcfac6dbe012d273187f` — `test: expand cross-group regression coverage`.
+  - G13 `eeee6866aa1b92d48ebbe3129b80355ab5af6409` — `feat: harden derived workflows and tenant-safe business time`.
+  - Residual business-time source-contract commit `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f` — `test: preserve business-time source contracts`.
+- **G01-G10 and G13 current engineering work**: `COMMITTED_LOCAL / POST_COMMIT_VERIFIED`.
+- **G13 current engineering scope**:
+  - Exact validated engineering scope = 26 paths.
+  - ESLint = PASS, 0 errors / 42 warnings.
+  - HOST = 182/182 PASS.
+  - UTC = 182/182 PASS.
+  - America/Los_Angeles = 182/182 PASS.
+  - Commit `eeee6866aa1b92d48ebbe3129b80355ab5af6409` = 26 paths, 24 modified + 2 added, 618 insertions / 146 deletions.
+- **Residual source-contract regression tests**:
+  - 5 source-contract tests classified as product regression tests.
+  - ESLint = PASS.
+  - HOST Vitest = 5 files / 28 tests / 28 passed / 0 failed / 0 pending.
+  - Commit `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f` = 5 added files, 344 insertions / 0 deletions.
+- **Historical G13 boundary remains separate**:
+  - Historical G13 scope was recorded as 26 paths.
+  - Historical tracked core = 23 verified paths.
+  - Historical exact untracked member count = 3.
+  - The identities of those exact historical 3 remain `UNPROVEN`.
+  - Do not reinterpret the current validated 26-path engineering scope as proof of historical G13 membership.
+- **G11 / operator-historical residual boundary**:
+  - Current residual untracked count = 56.
+  - These artifacts remain outside approved product/test commits and must not be staged or committed automatically.
+- **G12 documentation durability boundary**:
+  - This handoff records the verified local engineering checkpoint through HEAD `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f`.
+  - The live stage, commit, push, and deployment status of this document must be determined from current Git/runtime evidence, not from this checkpoint text.
+- **PROJECT_SPEC authority status**:
+  - `docs/PROJECT_SPEC.md` does not exist in the worktree.
+  - It is not tracked.
+  - It has no Git path history in the available repository evidence.
+  - Status = `MISSING / UNPROVEN`.
+  - Do not create or promote another document as its replacement without a separate approved governance decision.
+- **Validation boundary**:
+  - R7-B4 69-file / 1214-test full-suite evidence remains historical.
+  - This checkpoint does not claim a newly executed full suite, full typecheck, or full Production build.
+- **Remote / deployment boundary**:
+  - The new local commits through `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f` have **no push evidence in this checkpoint**.
+  - They have **no Production deployment evidence in this checkpoint**.
+  - Existing R5G Production records remain historical release evidence only and do not prove deployment of these new local commits.
+- **Governance**:
+  - No push is authorized by this correction.
+  - No deployment is authorized by this correction.
+  - Production DB writes, migrations, seed, env/WAF changes, rollback, promotion, or deployment require separate explicit Human Owner approval.
 ---
 
 ## 1. THÔNG TIN CƠ BẢN VÀ KIẾN TRÚC HIỆN TẠI

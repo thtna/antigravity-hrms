@@ -3,7 +3,7 @@ import { EmployeeService } from '../employee.service';
 import { prisma } from '@/lib/db/prisma';
 import { ApiError } from '@/lib/errors';
 import { UserSession } from '@/types';
-import { CreateEmployeeInput } from '@/lib/validations/employee';
+import { CreateEmployeeInput, CreateEmployeeSchema } from '@/lib/validations/employee';
 
 vi.mock('@/lib/db/prisma', () => ({
   prisma: {
@@ -277,6 +277,29 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
       documents: [],
     };
 
+    it('uses the Vietnam business date for the default hireDate', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+
+      try {
+        const { hireDate: _hireDate, ...withoutHireDate } = validInput;
+        const parsed = CreateEmployeeSchema.parse(withoutHireDate);
+        expect(parsed.hireDate).toBe('2026-10-01');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects impossible dob and hireDate values before database work', async () => {
+      expect(() => CreateEmployeeSchema.parse({ ...validInput, dob: '2026-02-30' })).toThrow();
+      expect(() => CreateEmployeeSchema.parse({ ...validInput, hireDate: '2026-13-01' })).toThrow();
+
+      await expect(
+        EmployeeService.createEmployee({ ...validInput, dob: '2026-02-30' }, hrSession)
+      ).rejects.toThrow(RangeError);
+      expect(prisma.employee.findFirst).not.toHaveBeenCalled();
+    });
+
     it('should reject non-admin/HR when attempting to create employee', async () => {
       await expect(
         EmployeeService.createEmployee(validInput, employeeSession)
@@ -313,10 +336,47 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
       };
       (prisma.employee.create as unknown as Mock).mockResolvedValue(createdEmp);
 
-      const result = await EmployeeService.createEmployee(validInput, hrSession);
+      const result = await EmployeeService.createEmployee(
+        { ...validInput, dob: '1990-02-28' },
+        hrSession
+      );
       expect(result.id).toBe('new-emp-id');
       expect(result.fullName).toBe('Lê Cường');
       expect(prisma.auditLog.create).toHaveBeenCalled();
+      expect(prisma.employee.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            dob: new Date('1990-02-28T00:00:00.000Z'),
+            hireDate: new Date('2026-09-01T00:00:00.000Z'),
+          }),
+        })
+      );
+    });
+
+    it('preserves the static safe dob fallback when dob is omitted', async () => {
+      (prisma.employee.findUnique as unknown as Mock).mockResolvedValue(null);
+      (prisma.user.findUnique as unknown as Mock).mockResolvedValue(null);
+      (prisma.role.findUnique as unknown as Mock).mockResolvedValue({ id: 'role-emp-id' });
+      (prisma.user.create as unknown as Mock).mockResolvedValue({ id: 'new-user-id' });
+      (prisma.employee.create as unknown as Mock).mockResolvedValue({
+        id: 'new-emp-id',
+        firstName: 'Cường',
+        lastName: 'Lê',
+        contractSalary: '18000000',
+        hourlyRate: '102273',
+        insuranceSalary: '5000000',
+        documents: [],
+      });
+
+      await EmployeeService.createEmployee(validInput, hrSession);
+
+      expect(prisma.employee.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            dob: new Date('1995-01-01T00:00:00.000Z'),
+          }),
+        })
+      );
     });
   });
 
@@ -484,6 +544,29 @@ describe('PHASE 3 — EMPLOYEE MANAGEMENT SERVICE TEST SUITE', () => {
 
       expect(updated.id).toBe('emp-dept-01');
       expect(updated.contractSalary).toBe(25000000);
+    });
+
+    it('uses strict business-date carriers when Admin/HR updates dob and hireDate', async () => {
+      (prisma.employee.findUnique as unknown as Mock).mockResolvedValue(mockDeptEmp);
+      (prisma.employee.update as unknown as Mock).mockResolvedValue({
+        ...mockDeptEmp,
+        documents: [],
+      });
+
+      await EmployeeService.updateEmployee(
+        'emp-dept-01',
+        { dob: '1992-02-29', hireDate: '2026-10-01' },
+        hrSession
+      );
+
+      expect(prisma.employee.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            dob: new Date('1992-02-29T00:00:00.000Z'),
+            hireDate: new Date('2026-10-01T00:00:00.000Z'),
+          }),
+        })
+      );
     });
   });
 

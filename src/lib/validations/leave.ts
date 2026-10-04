@@ -1,9 +1,21 @@
 import { z } from 'zod';
+import { parseBusinessDate } from '@/lib/time/business-time';
 
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 const emptyToUndefined = (v: unknown) => (v === '' || v === null ? undefined : v);
+const businessDateSchema = z
+  .string()
+  .regex(dateRegex, 'Ngày phải có định dạng YYYY-MM-DD')
+  .refine((value) => {
+    try {
+      parseBusinessDate(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Ngày không tồn tại trong lịch');
 
 export const LeaveRequestTypeEnum = z.enum([
   'LEAVE',         // Đơn xin nghỉ phép (nghỉ ngày/nhiều ngày)
@@ -30,12 +42,8 @@ export const CreateLeaveRequestSchema = z
       emptyToUndefined,
       z.string().uuid('ID loại nghỉ phép không hợp lệ').optional()
     ),
-    startDate: z
-      .string()
-      .regex(dateRegex, 'Ngày bắt đầu phải có định dạng YYYY-MM-DD'),
-    endDate: z
-      .string()
-      .regex(dateRegex, 'Ngày kết thúc phải có định dạng YYYY-MM-DD'),
+    startDate: businessDateSchema,
+    endDate: businessDateSchema,
     expectedTime: z.preprocess(
       emptyToUndefined,
       z.string().regex(timeRegex, 'Thời gian dự kiến phải có định dạng HH:mm (00:00 - 23:59)').optional()
@@ -51,10 +59,7 @@ export const CreateLeaveRequestSchema = z
   })
   .superRefine((data, ctx) => {
     // 1. Kiểm tra thứ tự ngày
-    const start = new Date(data.startDate);
-    const end = new Date(data.endDate);
-
-    if (end.getTime() < start.getTime()) {
+    if (data.endDate < data.startDate) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Ngày kết thúc không được nhỏ hơn ngày bắt đầu',
@@ -124,8 +129,8 @@ export const LeaveQuerySchema = z.object({
   departmentId: z.string().uuid().optional(),
   status: LeaveStatusEnum.or(z.literal('ALL')).default('ALL'),
   requestType: LeaveRequestTypeEnum.or(z.literal('ALL')).default('ALL'),
-  startDate: z.string().regex(dateRegex).optional(),
-  endDate: z.string().regex(dateRegex).optional(),
+  startDate: businessDateSchema.optional(),
+  endDate: businessDateSchema.optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Hoist Prisma & Logger Mocks ──────────────────────────────────────────────
 const mockPrisma = vi.hoisted(() => ({
@@ -21,6 +21,7 @@ const mockPrisma = vi.hoisted(() => ({
   employee: {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
+    findMany: vi.fn(),
   },
   department: {
     findUnique: vi.fn(),
@@ -169,6 +170,10 @@ describe('PHASE 11 — KPI Engine: KpiService Test Suite', () => {
     );
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   // ── 1. KPI Definition CRUD ───────────────────────────────────────────────
 
   describe('1. KpiService.createKpiDefinition', () => {
@@ -243,6 +248,75 @@ describe('PHASE 11 — KPI Engine: KpiService Test Suite', () => {
   });
 
   describe('2. KpiService.updateKpiDefinition', () => {
+    it.each([
+      { role: 'admin', session: adminSession },
+      { role: 'hr', session: hrSession },
+    ])('allows $role to use a code that exists only in another tenant', async ({ session }) => {
+      const code = 'SHARED_KPI_CODE';
+      const foreignKpi = { ...mockKpi, id: 'kpi-foreign', organizationId: 'org-foreign', code };
+      mockPrisma.kpi.findUnique.mockResolvedValue(mockKpi);
+      mockPrisma.kpi.findFirst.mockImplementation(async ({ where }: {
+        where: { code: string; organizationId?: string };
+      }) => (
+        foreignKpi.code === where.code &&
+        (!where.organizationId || foreignKpi.organizationId === where.organizationId)
+          ? foreignKpi
+          : null
+      ));
+      mockPrisma.kpi.update.mockResolvedValue({ ...mockKpi, code });
+      mockPrisma.auditLog.create.mockResolvedValue({});
+
+      const updated = await KpiService.updateKpiDefinition(mockKpi.id, { code }, session);
+
+      expect(mockPrisma.kpi.findFirst).toHaveBeenCalledExactlyOnceWith({
+        where: { code, organizationId: session.organizationId },
+      });
+      expect(mockPrisma.$transaction).toHaveBeenCalledOnce();
+      expect(mockPrisma.kpi.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: mockKpi.id },
+        data: { code },
+      }));
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledOnce();
+      expect(updated.code).toBe(code);
+    });
+
+    it.each([
+      { role: 'admin', session: adminSession },
+      { role: 'hr', session: hrSession },
+    ])('rejects $role updating to a duplicate code in the same tenant without side effects', async ({ session }) => {
+      const code = 'DUPLICATE_KPI_CODE';
+      mockPrisma.kpi.findUnique.mockResolvedValue(mockKpi);
+      mockPrisma.kpi.findFirst.mockResolvedValue({ ...mockKpi, id: 'kpi-other', code });
+
+      await expect(
+        KpiService.updateKpiDefinition(mockKpi.id, { code }, session)
+      ).rejects.toMatchObject({ statusCode: 409, errorCode: 'CONFLICT' });
+
+      expect(mockPrisma.kpi.findFirst).toHaveBeenCalledExactlyOnceWith({
+        where: { code, organizationId: session.organizationId },
+      });
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.kpi.update).not.toHaveBeenCalled();
+      expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('does not perform a duplicate lookup when the code is unchanged', async () => {
+      mockPrisma.kpi.findUnique.mockResolvedValue(mockKpi);
+      mockPrisma.kpi.update.mockResolvedValue(mockKpi);
+      mockPrisma.auditLog.create.mockResolvedValue({});
+
+      const updated = await KpiService.updateKpiDefinition(
+        mockKpi.id,
+        { code: mockKpi.code },
+        adminSession
+      );
+
+      expect(mockPrisma.kpi.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.kpi.update).toHaveBeenCalledOnce();
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledOnce();
+      expect(updated.code).toBe(mockKpi.code);
+    });
+
     it('updates KPI fields and creates audit log', async () => {
       mockPrisma.kpi.findUnique.mockResolvedValue(mockKpi);
       mockPrisma.kpi.update.mockResolvedValue({
@@ -500,10 +574,26 @@ describe('PHASE 11 — KPI Engine: KpiService Test Suite', () => {
       const data = await KpiService.getEmployeeScorecard('emp-001', '2026-09', hrSession);
       expect(data.employee.fullName).toBe('Nguyen Van A');
     });
+
+    it('defaults the scorecard to the Vietnam business month after UTC rollover', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+      mockPrisma.employee.findUnique.mockResolvedValue(mockEmployee);
+      mockPrisma.employeeKpiResult.findMany.mockResolvedValue([]);
+
+      const data = await KpiService.getEmployeeScorecard('emp-001', undefined, hrSession);
+
+      expect(data.period).toBe('2026-10');
+      expect(mockPrisma.employeeKpiResult.findMany.mock.calls[0][0].where.period).toBe(
+        '2026-10'
+      );
+    });
   });
 
   describe('8. KpiService.getKpiDashboardSummary', () => {
     it('returns correct counts and bonus payout', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2025-12-31T18:00:00.000Z'));
       mockPrisma.kpi.count.mockResolvedValue(8);
       mockPrisma.employeeKpiResult.count
         .mockResolvedValueOnce(25) // totalAssigned
@@ -523,6 +613,206 @@ describe('PHASE 11 — KPI Engine: KpiService Test Suite', () => {
       expect(summary.approvedEvaluations).toBe(18);
       expect(summary.totalBonusPayout).toBe(10_000_000);
       expect(summary.averageScore).toBe(110);
+      expect(summary.period).toBe('2026-01');
+      expect(mockPrisma.employeeKpiResult.count.mock.calls[0][0].where.period).toBe(
+        '2026-01'
+      );
+    });
+  });
+
+  describe('9. R7-B & R7-B1A Regression: Tenant Isolation and Scoping Invariants', () => {
+    it('update definition with missing organization fails closed', async () => {
+      const hrNoOrg = { ...hrSession, organizationId: undefined };
+      mockPrisma.kpi.findUnique.mockResolvedValue({
+        id: 'kpi-001',
+        organizationId: 'org-test-kpi',
+        deletedAt: null,
+      });
+
+      await expect(
+        KpiService.updateKpiDefinition('kpi-001', { title: 'Updated' }, hrNoOrg)
+      ).rejects.toThrow('Chỉ số KPI không tồn tại hoặc đã bị xóa.');
+    });
+
+    it('update definition cannot connect a department from another organization', async () => {
+      mockPrisma.kpi.findUnique.mockResolvedValue({
+        id: 'kpi-001',
+        organizationId: 'org-test-kpi',
+        deletedAt: null,
+      });
+      mockPrisma.department.findUnique.mockResolvedValue({
+        id: 'dept-foreign',
+        organizationId: 'org-foreign',
+      });
+
+      await expect(
+        KpiService.updateKpiDefinition('kpi-001', { departmentId: 'dept-foreign' }, hrSession)
+      ).rejects.toThrow('Phòng ban được chỉ định không tồn tại hoặc không thuộc tổ chức hiện tại.');
+    });
+
+    it('delete definition with missing organization fails closed', async () => {
+      const hrNoOrg = { ...hrSession, organizationId: undefined };
+      mockPrisma.kpi.findUnique.mockResolvedValue({
+        id: 'kpi-001',
+        organizationId: 'org-test-kpi',
+        deletedAt: null,
+        _count: { results: 0 },
+      });
+
+      await expect(
+        KpiService.deleteKpiDefinition('kpi-001', hrNoOrg)
+      ).rejects.toThrow('Chỉ số KPI không tồn tại.');
+    });
+
+    it('recordActualValue with missing organization fails closed', async () => {
+      const empNoOrg = { ...employeeSession, organizationId: undefined };
+      mockPrisma.employeeKpiResult.findUnique.mockResolvedValue({
+        id: 'res-001',
+        employeeId: 'emp-001',
+        organizationId: 'org-test-kpi',
+        status: 'DRAFT',
+      });
+
+      await expect(
+        KpiService.recordActualValue('res-001', { actualValue: 100 }, empNoOrg)
+      ).rejects.toThrow('Không tìm thấy bản ghi KPI.');
+    });
+
+    it('manager cannot recordActualValue for employee outside managed department', async () => {
+      mockPrisma.employeeKpiResult.findUnique.mockResolvedValue({
+        id: 'res-001',
+        employeeId: 'emp-sales',
+        organizationId: 'org-test-kpi',
+        status: 'DRAFT',
+        employee: {
+          id: 'emp-sales',
+          departmentId: 'dept-sales',
+        },
+      });
+      mockPrisma.employee.findUnique.mockResolvedValue({
+        id: 'emp-mgr',
+        managedDepartments: [{ id: 'dept-eng' }],
+      });
+
+      await expect(
+        KpiService.recordActualValue('res-001', { actualValue: 100 }, managerSession)
+      ).rejects.toThrow('Bạn chỉ có quyền cập nhật KPI cho nhân viên thuộc phòng ban bạn trực tiếp quản lý.');
+    });
+
+    it('evaluate assignment with missing organization fails closed', async () => {
+      const hrNoOrg = { ...hrSession, organizationId: undefined };
+      mockPrisma.employeeKpiResult.findUnique.mockResolvedValue({
+        id: 'res-001',
+        employeeId: 'emp-001',
+        organizationId: 'org-test-kpi',
+        status: 'SUBMITTED',
+        employee: mockEmployee,
+      });
+
+      await expect(
+        KpiService.evaluateKpiAssignment('res-001', { decision: 'APPROVED' }, hrNoOrg)
+      ).rejects.toThrow('Không tìm thấy bản ghi KPI.');
+    });
+
+    it('manager cannot read cross-department scorecard outside managed departments', async () => {
+      mockPrisma.employee.findFirst.mockResolvedValue({
+        ...mockEmployee,
+        id: 'emp-sales',
+        departmentId: 'dept-sales',
+      });
+      mockPrisma.employeeKpiResult.findMany.mockResolvedValue([]);
+      mockPrisma.employee.findUnique.mockResolvedValue({
+        id: 'emp-mgr',
+        managedDepartments: [{ id: 'dept-eng' }],
+      });
+
+      await expect(
+        KpiService.getEmployeeScorecard('emp-sales', '2026-10', managerSession)
+      ).rejects.toThrow('Bạn chỉ có quyền xem bảng điểm KPI của nhân viên thuộc phòng ban bạn trực tiếp quản lý.');
+    });
+
+    it('dashboard non-HR/Admin without session.employeeId fails closed', async () => {
+      const empNoId = { ...employeeSession, employeeId: undefined };
+      await expect(
+        KpiService.getKpiDashboardSummary(empNoId)
+      ).rejects.toThrow('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    });
+
+    it('assignKpiToEmployee with missing organization fails closed', async () => {
+      const hrNoOrg = { ...hrSession, organizationId: undefined };
+      mockPrisma.employee.findUnique.mockResolvedValue(mockEmployee);
+
+      await expect(
+        KpiService.assignKpiToEmployee(
+          { employeeId: 'emp-001', kpiId: 'kpi-001', period: '2026-10', targetValue: 100 },
+          hrNoOrg
+        )
+      ).rejects.toThrow('Nhân viên không tồn tại, đã nghỉ việc hoặc không thuộc tổ chức hiện tại.');
+    });
+
+    it('assignKpiToEmployee rejects KPI/employee tenant mismatch', async () => {
+      mockPrisma.employee.findUnique.mockResolvedValue({
+        ...mockEmployee,
+        organizationId: 'org-test-kpi',
+      });
+      mockPrisma.kpi.findUnique.mockResolvedValue({
+        id: 'kpi-foreign',
+        organizationId: 'org-foreign',
+        deletedAt: null,
+        status: 'ACTIVE',
+      });
+
+      await expect(
+        KpiService.assignKpiToEmployee(
+          { employeeId: 'emp-001', kpiId: 'kpi-foreign', period: '2026-10', targetValue: 100 },
+          hrSession
+        )
+      ).rejects.toThrow('Chỉ số KPI không thuộc cùng tổ chức với nhân viên.');
+    });
+
+    it('bulkAssignKpi with missing organization fails closed', async () => {
+      const hrNoOrg = { ...hrSession, organizationId: undefined };
+      mockPrisma.kpi.findUnique.mockResolvedValue({
+        id: 'kpi-001',
+        organizationId: 'org-test-kpi',
+        deletedAt: null,
+        status: 'ACTIVE',
+      });
+
+      await expect(
+        KpiService.bulkAssignKpi(
+          { kpiId: 'kpi-001', employeeIds: ['emp-001'], period: '2026-10' },
+          hrNoOrg
+        )
+      ).rejects.toThrow('Chỉ số KPI không khả dụng hoặc không thuộc tổ chức hiện tại.');
+    });
+
+    it('bulk assignment cannot escape KPI organization boundary', async () => {
+      mockPrisma.kpi.findUnique.mockResolvedValue({
+        id: 'kpi-001',
+        organizationId: 'org-test-kpi',
+        deletedAt: null,
+        status: 'ACTIVE',
+      });
+      mockPrisma.employee.findMany.mockResolvedValue([
+        { id: 'emp-001', organizationId: 'org-test-kpi' },
+      ]);
+
+      await expect(
+        KpiService.bulkAssignKpi(
+          { kpiId: 'kpi-001', employeeIds: ['emp-001', 'emp-foreign'], period: '2026-10' },
+          hrSession
+        )
+      ).rejects.toThrow('Một hoặc nhiều nhân viên không hợp lệ hoặc không thuộc cùng tổ chức với chỉ số KPI.');
+
+      expect(mockPrisma.employee.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            organizationId: 'org-test-kpi',
+            id: { in: ['emp-001', 'emp-foreign'] },
+          }),
+        })
+      );
     });
   });
 });

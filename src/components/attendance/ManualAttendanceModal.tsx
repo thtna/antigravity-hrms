@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { getBusinessDateString } from '@/lib/time/business-time';
 import { X, Loader2, AlertCircle, Calendar, PlusCircle } from 'lucide-react';
 
 interface ManualAttendanceModalProps {
@@ -24,7 +25,7 @@ export function ManualAttendanceModal({
   const [errorMessage, setErrorMessage] = useState('');
 
   const [employeeId, setEmployeeId] = useState('');
-  const [workDate, setWorkDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [workDate, setWorkDate] = useState(() => getBusinessDateString());
   const [shiftId, setShiftId] = useState('');
   const [checkInTime, setCheckInTime] = useState('08:30');
   const [checkOutTime, setCheckOutTime] = useState('17:30');

@@ -57,13 +57,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Copy public assets (favicon, robots.txt, etc.)
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-# Copy Prisma schema + migrations for runtime migrate deploy
+# Copy Prisma schema + migrations as files; migration tooling is provided by the builder stage
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 # Copy Prisma client generated files
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
 
-# Copy entrypoint script (migrate → seed → start)
+# Copy entrypoint script (DB readiness → start)
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x ./docker-entrypoint.sh
 

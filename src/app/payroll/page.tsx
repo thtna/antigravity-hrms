@@ -34,6 +34,7 @@ import { AppShell } from '@/components/layout/AppShell';
 import { SkeletonTable } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorBanner } from '@/components/ui/error-state';
+import { formatClientBusinessDate } from '@/lib/time/client-business-date-display';
 
 interface PayrollPeriodItem {
   id: string;
@@ -326,7 +327,7 @@ export default function PayrollManagementPage() {
 
           {periodDetail && (
             <div className="flex items-center gap-3 text-xs text-slate-400">
-              <span>Khoảng thời gian: <strong className="text-slate-200">{new Date(periodDetail.startDate).toLocaleDateString('vi-VN')} - {new Date(periodDetail.endDate).toLocaleDateString('vi-VN')}</strong></span>
+              <span>Khoảng thời gian: <strong className="text-slate-200">{formatClientBusinessDate(periodDetail.startDate)} - {formatClientBusinessDate(periodDetail.endDate)}</strong></span>
               <span>•</span>
               <span>Công chuẩn: <strong className="text-slate-200">{periodDetail.standardWorkDays} ngày</strong></span>
               <span>•</span>

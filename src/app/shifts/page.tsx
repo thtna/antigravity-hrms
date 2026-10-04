@@ -13,6 +13,11 @@ import { ErrorBanner } from '@/components/ui/error-state';
 import { useToastHelpers } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
+  addBusinessDays,
+  getBusinessDateString,
+  getBusinessWeekday,
+} from '@/lib/time/business-time';
+import {
   Clock,
   Calendar,
   Plus,
@@ -28,12 +33,10 @@ import {
 
 // Pure date helpers computed outside render
 function getInitialDates() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3);
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
+  const today = getBusinessDateString();
   return {
-    startDate: start.toISOString().split('T')[0],
-    endDate: end.toISOString().split('T')[0],
+    startDate: addBusinessDays(today, -3),
+    endDate: addBusinessDays(today, 7),
   };
 }
 
@@ -538,8 +541,7 @@ export default function ShiftsPage() {
                       </tr>
                     ) : (
                       schedules.map((item) => {
-                        const dateObj = new Date(item.workDate);
-                        const dayName = dayOfWeekNames[dateObj.getDay()];
+                        const dayName = dayOfWeekNames[getBusinessWeekday(item.workDate)];
                         return (
                           <tr key={item.id} className="hover:bg-slate-800/30 transition-colors">
                             <td className="px-5 py-4">

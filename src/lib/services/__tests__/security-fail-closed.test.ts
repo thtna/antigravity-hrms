@@ -81,6 +81,8 @@ import {
   verifyPasswordResetToken,
 } from '@/lib/auth/password-reset';
 import { LocalStorageProvider } from '@/lib/storage/providers/local.provider';
+import { StorageManager } from '@/lib/storage/storage-manager';
+import { readAvatarFile } from '@/lib/security/file-storage';
 import { UserSession } from '@/types';
 
 describe('SECURITY FAIL-CLOSED AUDIT & REGRESSION SUITE', () => {
@@ -613,6 +615,52 @@ describe('SECURITY FAIL-CLOSED AUDIT & REGRESSION SUITE', () => {
         exp
       );
       expect(isValid).toBe(false);
+    });
+  });
+
+  describe('6. Storage Routing Fail-Closed Contract', () => {
+    afterEach(() => {
+      StorageManager.resetProvider();
+      vi.restoreAllMocks();
+    });
+
+    it('does not retry a failed tenant-scoped avatar read with a bare key', async () => {
+      const download = vi.fn().mockRejectedValue(new Error('scoped read failed'));
+      vi.spyOn(StorageManager, 'getProvider').mockReturnValue({ download } as any);
+
+      await expect(readAvatarFile('avatar_user.png', 'org-sec-001')).rejects.toThrow(
+        'scoped read failed'
+      );
+
+      expect(download).toHaveBeenCalledTimes(1);
+      expect(download).toHaveBeenCalledWith(
+        'avatars',
+        'organizations/org-sec-001/avatars/avatar_user.png'
+      );
+      expect(download).not.toHaveBeenCalledWith('avatars', 'avatar_user.png');
+    });
+
+    it('does not provide a remote-to-local fallback for protected misconfiguration', () => {
+      process.env = {
+        ...originalEnv,
+        NODE_ENV: 'production',
+        APP_ENV: 'production',
+        STORAGE_PROVIDER: 'supabase',
+        SUPABASE_URL: 'https://test-project.supabase.co',
+      };
+
+      expect(() => StorageManager.getProvider()).toThrow(/SUPABASE_SERVICE_ROLE_KEY/);
+    });
+
+    it('rejects local storage in a protected environment', () => {
+      process.env = {
+        ...originalEnv,
+        NODE_ENV: 'test',
+        APP_ENV: 'staging',
+        STORAGE_PROVIDER: 'local',
+      };
+
+      expect(() => StorageManager.getProvider()).toThrow(/Local Storage/);
     });
   });
 });
