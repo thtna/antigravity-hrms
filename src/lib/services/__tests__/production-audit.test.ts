@@ -115,7 +115,7 @@ describe('PHASE 25 — PERFORMANCE & PRODUCTION AUDIT TEST SUITE', () => {
         employeeId: 'emp-admin',
       };
 
-      (prisma.payrollPeriod.findUnique as any).mockResolvedValue({
+      (prisma.payrollPeriod.findFirst as any).mockResolvedValue({
         id: 'prd-01',
         organizationId: 'org-test-audit',
         code: '2026-09',
