@@ -368,6 +368,24 @@ vi.mock('@/lib/db/prisma', () => {
         }
         return updated;
       }),
+      updateMany: vi.fn(async ({ where, data }) => {
+        const existing = state.attendances.get(where.id);
+        if (
+          !existing ||
+          (where.organizationId && existing.organizationId !== where.organizationId) ||
+          (where.employeeId && existing.employeeId !== where.employeeId) ||
+          (where.checkOutTime === null && existing.checkOutTime != null)
+        ) {
+          return { count: 0 };
+        }
+        const updated = { ...existing, ...data };
+        state.attendances.set(where.id, updated);
+        if (existing.employeeId && existing.workDate) {
+          const key = `${existing.employeeId}_${new Date(existing.workDate).toISOString().split('T')[0]}`;
+          state.attendances.set(key, updated);
+        }
+        return { count: 1 };
+      }),
     },
     worksite: {
       findUnique: vi.fn(async ({ where }) => state.worksites.get(where.id) || null),
@@ -408,6 +426,19 @@ vi.mock('@/lib/db/prisma', () => {
         const updated = { ...existing, ...data };
         state.qrTokens.set(where.id, updated);
         return updated;
+      }),
+      updateMany: vi.fn(async ({ where, data }) => {
+        const existing = state.qrTokens.get(where.id);
+        if (
+          !existing ||
+          (where.organizationId && existing.organizationId !== where.organizationId) ||
+          (where.isUsed === false && existing.isUsed) ||
+          (where.expiresAt?.gte && existing.expiresAt < where.expiresAt.gte)
+        ) {
+          return { count: 0 };
+        }
+        state.qrTokens.set(where.id, { ...existing, ...data });
+        return { count: 1 };
       }),
     },
     leaveRequest: {
@@ -1062,15 +1093,16 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
   // ─── STAGE 7: CHECK-IN ───────────────────────────────────────────────────
   describe('Stage 7 — Standard Check-in', () => {
     it('7.1 should record check-in at 08:00 and evaluate status as ON_TIME', async () => {
-      const checkInTime = new Date(2026, 8, 1, 8, 0, 0);
+      const checkInTime = new Date('2026-09-01T08:00:00+07:00');
 
       const record = await AttendanceService.checkIn(
         {
           employeeId: testEmployeeId,
           checkInTime: checkInTime.toISOString(),
-          checkInMethod: 'BIOMETRIC',
         },
-        employeeSession
+        employeeSession,
+        undefined,
+        'BIOMETRIC'
       );
 
       expect(record).toBeDefined();
@@ -1082,15 +1114,16 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
   // ─── STAGE 8: CHECK-OUT ──────────────────────────────────────────────────
   describe('Stage 8 — Standard Check-out & Hours Calculation', () => {
     it('8.1 should record check-out at 18:00 and compute 9h total (1h OT)', async () => {
-      const checkOutTime = new Date(2026, 8, 1, 18, 0, 0);
+      const checkOutTime = new Date('2026-09-01T18:00:00+07:00');
       const record = await AttendanceService.checkOut(
         {
           employeeId: testEmployeeId,
           checkOutTime: checkOutTime.toISOString(),
           workDate: '2026-09-01',
-          checkOutMethod: 'BIOMETRIC',
         },
-        employeeSession
+        employeeSession,
+        undefined,
+        'BIOMETRIC'
       );
 
       expect(record).toBeDefined();
@@ -1136,6 +1169,7 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
       // Seed worksite
       state.worksites.set('ws-headquarters', {
         id: 'ws-headquarters',
+        organizationId: testOrgId,
         name: 'Trụ sở chính Antigravity',
         address: 'Hà Nội',
         latitude: 21.028511,

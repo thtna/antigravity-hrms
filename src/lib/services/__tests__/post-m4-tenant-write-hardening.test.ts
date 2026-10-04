@@ -466,11 +466,18 @@ describe('POST-M4 TENANT WRITE HARDENING REGRESSION TEST SUITE', () => {
         deletedAt: null,
       });
 
+      const code = 'qr-token-from-org-a';
+      const exp = Date.now() + 60000;
+      const sig = QrAttendanceService.signToken(code, 'CHECK_IN', exp);
+
       (prisma.qrAttendanceToken.findUnique as any).mockResolvedValue({
+        id: 'qr-token-a',
         code: 'qr-token-from-org-a',
         organizationId: orgA, // Token belongs to Org A!
-        expiresAt: new Date(Date.now() + 60000),
+        expiresAt: new Date(exp),
         tokenType: 'CHECK_IN',
+        signature: sig,
+        isUsed: false,
         worksiteId: 'ws-a',
         worksite: {
           id: 'ws-a',
@@ -485,7 +492,7 @@ describe('POST-M4 TENANT WRITE HARDENING REGRESSION TEST SUITE', () => {
       await expect(
         QrAttendanceService.scanQrAttendance(
           {
-            qrPayload: 'qr-token-from-org-a',
+            qrPayload: JSON.stringify({ v: '1', code, type: 'CHECK_IN', exp, sig }),
             lat: 21.0,
             lng: 105.0,
           },

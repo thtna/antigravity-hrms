@@ -353,6 +353,10 @@ vi.mock('@/lib/db/prisma', () => ({
   prisma: mockPrisma,
 }));
 
+vi.mock('@/lib/auth/password', () => ({
+  hashPassword: vi.fn().mockResolvedValue('mock-password-hash'),
+}));
+
 import { OnboardingService } from '../onboarding.service';
 import { EmployeeService } from '../employee.service';
 
@@ -828,5 +832,77 @@ describe('STAGING ONBOARDING STEP 6 REGRESSION & ATOMICITY TEST SUITE', () => {
 
     // CRITICAL: onboardingStep must remain 8, NOT regressed to 7!
     expect(dbState.organizations.get('org-tenant-a').onboardingStep).toBe(8);
+  });
+
+  it('8. Step 6 uses Vietnam business date by default and stores a UTC-midnight carrier', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+
+    try {
+      await OnboardingService.saveStep(activeOwnerSession, 6, {
+        firstName: 'Ngày',
+        lastName: 'Nghiệp Vụ',
+        employeeCode: 'EMP-VN-DATE',
+        email: 'vn-date@tenanta.vn',
+        phoneNumber: '0901111222',
+        departmentId: 'dept-a-01',
+        positionId: 'pos-a-01',
+        contractSalary: 20000000,
+      });
+
+      const saved = Array.from(dbState.employees.values()).find(
+        (employee) => employee.employeeCode === 'EMP-VN-DATE'
+      );
+      expect(saved?.hireDate).toEqual(new Date('2026-10-01T00:00:00.000Z'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('9. Step 6 accepts real DATE values and rejects malformed or impossible dates', async () => {
+    await OnboardingService.saveStep(activeOwnerSession, 6, {
+      firstName: 'Ngày',
+      lastName: 'Hợp Lệ',
+      employeeCode: 'EMP-VALID-DATE',
+      email: 'valid-date@tenanta.vn',
+      phoneNumber: '0902222333',
+      departmentId: 'dept-a-01',
+      positionId: 'pos-a-01',
+      contractSalary: 20000000,
+      hireDate: '2024-02-29',
+    });
+
+    const saved = Array.from(dbState.employees.values()).find(
+      (employee) => employee.employeeCode === 'EMP-VALID-DATE'
+    );
+    expect(saved?.hireDate).toEqual(new Date('2024-02-29T00:00:00.000Z'));
+
+    await expect(
+      OnboardingService.saveStep(activeOwnerSession, 6, {
+        firstName: 'Ngày',
+        lastName: 'Sai Định Dạng',
+        employeeCode: 'EMP-BAD-SYNTAX',
+        email: 'bad-syntax@tenanta.vn',
+        phoneNumber: '0903333444',
+        departmentId: 'dept-a-01',
+        positionId: 'pos-a-01',
+        contractSalary: 20000000,
+        hireDate: '2026/10/01',
+      })
+    ).rejects.toThrow();
+
+    await expect(
+      OnboardingService.saveStep(activeOwnerSession, 6, {
+        firstName: 'Ngày',
+        lastName: 'Không Tồn Tại',
+        employeeCode: 'EMP-BAD-DATE',
+        email: 'bad-date@tenanta.vn',
+        phoneNumber: '0904444555',
+        departmentId: 'dept-a-01',
+        positionId: 'pos-a-01',
+        contractSalary: 20000000,
+        hireDate: '2026-02-30',
+      })
+    ).rejects.toThrow();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockPrisma = vi.hoisted(() => ({
   attendance: {
@@ -80,6 +80,61 @@ describe('Phase 19 — Enterprise Reporting & Export System', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe('R2A-DERIVED-D1 Vietnam business dates and times', () => {
+    it('renders attendance instants in Vietnam time', async () => {
+      mockPrisma.attendance.count.mockResolvedValue(1);
+      mockPrisma.attendance.aggregate.mockResolvedValue({
+        _sum: { actualWorkHours: 8, otHours: 0 },
+        _count: { id: 1 },
+      });
+      mockPrisma.attendance.findMany.mockResolvedValue([{
+        id: 'att-vn-time',
+        employeeCode: 'EMP-TIME',
+        workDate: new Date('2026-09-02T00:00:00.000Z'),
+        checkInTime: new Date('2026-09-02T01:30:00.000Z'),
+        checkOutTime: null,
+        status: 'PRESENT',
+        employee: null,
+      }]);
+
+      const result = await ReportService.getReport({
+        type: 'attendance',
+        startDate: '2026-09-01',
+        endDate: '2026-09-30',
+      }, adminSession);
+
+      expect(result.rows[0].checkInTime).toBe('08:30');
+      expect(result.rows[0].workDate).toBe('2026-09-02');
+    });
+
+    it('uses the Vietnam current month and canonical DATE carriers by default', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+      mockPrisma.attendance.count.mockResolvedValue(0);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.attendance.aggregate.mockResolvedValue({ _sum: {}, _count: { id: 0 } });
+
+      await ReportService.getReport({ type: 'attendance' }, adminSession);
+
+      const range = mockPrisma.attendance.count.mock.calls[0][0].where.workDate;
+      expect(range.gte.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+      expect(range.lte.toISOString()).toBe('2026-10-31T00:00:00.000Z');
+    });
+
+    it('rejects impossible date-only report input before querying', async () => {
+      await expect(ReportService.getReport({
+        type: 'attendance',
+        startDate: '2026-02-30',
+        endDate: '2026-03-31',
+      }, adminSession)).rejects.toThrow(/khong ton tai/i);
+      expect(mockPrisma.attendance.count).not.toHaveBeenCalled();
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────

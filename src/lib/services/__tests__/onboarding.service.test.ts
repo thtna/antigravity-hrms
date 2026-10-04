@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OnboardingService } from '../onboarding.service';
+import { ShiftService } from '../shift.service';
 import { UserSession } from '@/types';
 import { ApiError } from '@/lib/errors';
 
@@ -360,6 +361,47 @@ describe('PHASE 7 — EMPTY TENANT & ONBOARDING SERVICE TEST SUITE', () => {
           data: expect.objectContaining({ onboardingStep: 6 }),
         })
       );
+    });
+
+    it('Step 5 uses Vietnam business date by default and validates supplied dates', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+
+      try {
+        await OnboardingService.saveStep(ownerSession, 5, {
+          name: 'Ca Ngày Nghiệp Vụ',
+          code: 'VN-DATE',
+          shiftType: 'FIXED',
+          startTime: '08:00',
+          endTime: '17:00',
+          breakMinutes: 60,
+          standardWorkHours: 8,
+        });
+
+        expect(ShiftService.createShift).toHaveBeenCalledWith(
+          expect.objectContaining({ effectiveFrom: '2026-10-01' }),
+          ownerSession
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+
+      vi.clearAllMocks();
+      mockPrisma.organization.findUnique.mockResolvedValue(mockFreshOrg);
+
+      await expect(
+        OnboardingService.saveStep(ownerSession, 5, {
+          name: 'Ca Ngày Không Hợp Lệ',
+          code: 'BAD-DATE',
+          shiftType: 'FIXED',
+          startTime: '08:00',
+          endTime: '17:00',
+          breakMinutes: 60,
+          standardWorkHours: 8,
+          effectiveFrom: '2026-02-30',
+        })
+      ).rejects.toThrow();
+      expect(ShiftService.createShift).not.toHaveBeenCalled();
     });
 
     it('Step 6 (Employee): should create first employee and advance to step 7', async () => {

@@ -628,7 +628,6 @@ describe('FINAL RED-TEAM PRODUCTION PREFLIGHT VERIFICATION', () => {
       await expect(
         AttendanceService.checkIn({
           employeeId: 'emp-of-tenant-b', // Cross-tenant employee attendance injection
-          checkInMethod: 'WEB',
         }, sessionA)
       ).rejects.toThrow(ApiError);
     });
