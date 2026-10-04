@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Hoist Prisma & Logger Mocks ──────────────────────────────────────────────
 const mockPrisma = vi.hoisted(() => ({
@@ -28,6 +28,7 @@ vi.mock('@/lib/logger', () => ({
 
 import { PenaltyService } from '@/lib/services/penalty.service';
 import { UserSession } from '@/types';
+import { CreatePenaltySchema, UpdatePenaltySchema } from '@/lib/validations/penalty';
 
 // ── Fixture Sessions ─────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ const adminSession: UserSession = {
 
 const hrSession: UserSession = {
   userId: 'usr-hr',
+  organizationId: 'org-test-penalty',
   employeeId: 'emp-hr',
   roles: ['hr'],
   email: 'hr@test.com',
@@ -54,6 +56,7 @@ const hrSession: UserSession = {
 
 const managerSession: UserSession = {
   userId: 'usr-mgr',
+  organizationId: 'org-test-penalty',
   employeeId: 'emp-mgr',
   roles: ['manager'],
   email: 'manager@test.com',
@@ -64,6 +67,7 @@ const managerSession: UserSession = {
 
 const employeeSession: UserSession = {
   userId: 'usr-emp',
+  organizationId: 'org-test-penalty',
   employeeId: 'emp-001',
   roles: ['employee'],
   email: 'emp@test.com',
@@ -82,6 +86,7 @@ const mockDepartment = {
 
 const mockEmployee = {
   id: 'emp-001',
+  organizationId: 'org-test-penalty',
   employeeCode: 'EMP001',
   firstName: 'Van A',
   lastName: 'Nguyen',
@@ -130,6 +135,10 @@ describe('PHASE 13 — PENALTY SERVICE TEST SUITE', () => {
       const penalty = await mockPrisma.employeeBonusPenalty.findUnique({ where: { id: where.id } });
       return penalty?.organizationId === where.organizationId ? penalty : null;
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // ── 1. createPenalty Tests ─────────────────────────────────────────────────
@@ -214,6 +223,8 @@ describe('PHASE 13 — PENALTY SERVICE TEST SUITE', () => {
 
       expect(res.id).toBe('pen-001');
       expect(mockPrisma.employeeBonusPenalty.create).toHaveBeenCalledOnce();
+      const data = mockPrisma.employeeBonusPenalty.create.mock.calls[0][0].data;
+      expect(data.effectiveDate.toISOString()).toBe('2026-09-10T00:00:00.000Z');
       expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -222,6 +233,32 @@ describe('PHASE 13 — PENALTY SERVICE TEST SUITE', () => {
             actorId: 'usr-mgr',
           }),
         })
+      );
+    });
+
+    it('defaults to the Vietnam business date and rejects invalid DATE values', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2025-12-31T18:00:00.000Z'));
+      const base = {
+        employeeId: '00000000-0000-4000-8000-000000000001',
+        category: 'OTHER' as const,
+        amount: 100_000,
+        period: '2026-01',
+        reason: 'Biên bản ngày nghiệp vụ',
+      };
+
+      expect(CreatePenaltySchema.parse(base).effectiveDate).toBe('2026-01-01');
+      expect(
+        CreatePenaltySchema.safeParse({ ...base, effectiveDate: '2028-02-29' }).success
+      ).toBe(true);
+      expect(
+        CreatePenaltySchema.safeParse({ ...base, effectiveDate: '2028-2-29' }).success
+      ).toBe(false);
+      expect(
+        CreatePenaltySchema.safeParse({ ...base, effectiveDate: '2026-02-29' }).success
+      ).toBe(false);
+      expect(UpdatePenaltySchema.safeParse({ effectiveDate: '2026-04-31' }).success).toBe(
+        false
       );
     });
 
@@ -499,6 +536,8 @@ describe('PHASE 13 — PENALTY SERVICE TEST SUITE', () => {
     });
 
     it('should calculate dashboard metrics and category breakdown', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2025-12-31T18:00:00.000Z'));
       mockPrisma.employeeBonusPenalty.count.mockResolvedValue(2); // pendingCount
       mockPrisma.employeeBonusPenalty.findMany
         .mockResolvedValueOnce([{ amount: '500000' }]) // total approved
@@ -515,6 +554,143 @@ describe('PHASE 13 — PENALTY SERVICE TEST SUITE', () => {
       expect(summary.categories.unauthorizedLeave).toBe(300000);
       expect(summary.categories.kpiMiss).toBe(0);
       expect(summary.categories.other).toBe(0);
+      expect(summary.period).toBe('2026-01');
+      expect(mockPrisma.employeeBonusPenalty.count.mock.calls[0][0].where.period).toBe(
+        '2026-01'
+      );
+    });
+  });
+
+  describe('6. R7-B & R7-B1A Regression: Tenant Isolation and Fail-Closed Invariants', () => {
+    it('regular employee cannot override list scope with query.employeeId', async () => {
+      mockPrisma.employeeBonusPenalty.count.mockResolvedValue(0);
+      mockPrisma.employeeBonusPenalty.findMany.mockResolvedValue([]);
+
+      await PenaltyService.listPenalties(
+        { employeeId: 'emp-other', status: 'ALL', page: 1, limit: 20 },
+        employeeSession
+      );
+
+      const whereArg = mockPrisma.employeeBonusPenalty.findMany.mock.calls[0][0].where;
+      expect(whereArg.employeeId).toBe('emp-001');
+      expect(whereArg.employeeId).not.toBe('emp-other');
+    });
+
+    it('non-HR/Admin list caller without session.employeeId fails closed', async () => {
+      const empNoId = { ...employeeSession, employeeId: undefined };
+      await expect(
+        PenaltyService.listPenalties({ status: 'ALL', page: 1, limit: 20 }, empNoId)
+      ).rejects.toThrow('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    });
+
+    it('dashboard non-HR/Admin without session.employeeId fails closed', async () => {
+      const empNoId = { ...employeeSession, employeeId: undefined };
+      await expect(
+        PenaltyService.getPenaltyDashboardSummary(empNoId)
+      ).rejects.toThrow('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    });
+
+    it('createPenalty with missing organizationId fails closed', async () => {
+      const sessionNoOrg = { ...adminSession, organizationId: undefined };
+      mockPrisma.employee.findUnique.mockResolvedValueOnce(mockEmployee);
+      await expect(
+        PenaltyService.createPenalty(
+          {
+            employeeId: 'emp-001',
+            category: 'LATE',
+            amount: 500000,
+            effectiveDate: '2026-10-02',
+            period: '2026-10',
+            reason: 'Late checkin',
+          },
+          sessionNoOrg
+        )
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('updatePenalty with missing organizationId fails closed', async () => {
+      const sessionNoOrg = { ...adminSession, organizationId: undefined };
+      mockPrisma.employeeBonusPenalty.findUnique.mockResolvedValue({
+        ...mockPenalty,
+        organizationId: 'org-test-penalty',
+      });
+
+      await expect(
+        PenaltyService.updatePenalty('pen-001', { amount: 600000 }, sessionNoOrg)
+      ).rejects.toThrow('Không tìm thấy biên bản xử phạt.');
+    });
+
+    it('processPenalty with missing organizationId fails closed', async () => {
+      const sessionNoOrg = { ...adminSession, organizationId: undefined };
+      mockPrisma.employeeBonusPenalty.findUnique.mockResolvedValue({
+        ...mockPenalty,
+        organizationId: 'org-test-penalty',
+      });
+
+      await expect(
+        PenaltyService.processPenalty('pen-001', { decision: 'APPROVED' }, sessionNoOrg)
+      ).rejects.toThrow('Không tìm thấy biên bản xử phạt.');
+    });
+
+    it('preserves getPenaltyById: manager may access penalty in genuinely managed department', async () => {
+      mockPrisma.employeeBonusPenalty.findFirst.mockResolvedValue({
+        ...mockPenalty,
+        organizationId: 'org-test-penalty',
+        employeeId: 'emp-001',
+        employee: {
+          ...mockEmployee,
+          id: 'emp-001',
+          departmentId: 'dept-eng',
+        },
+      });
+      mockPrisma.employeeBonusPenalty.findUnique.mockResolvedValue({
+        ...mockPenalty,
+        organizationId: 'org-test-penalty',
+        employeeId: 'emp-001',
+        employee: {
+          ...mockEmployee,
+          id: 'emp-001',
+          departmentId: 'dept-eng',
+        },
+      });
+      mockPrisma.employee.findUnique.mockResolvedValue({
+        id: 'emp-mgr',
+        managedDepartments: [{ id: 'dept-eng' }],
+      });
+
+      const result = await PenaltyService.getPenaltyById('pen-001', managerSession);
+      expect(result.id).toBe('pen-001');
+    });
+
+    it('preserves getPenaltyById: manager is denied access to unmanaged department', async () => {
+      mockPrisma.employeeBonusPenalty.findFirst.mockResolvedValue({
+        ...mockPenalty,
+        organizationId: 'org-test-penalty',
+        employeeId: 'emp-sales',
+        employee: {
+          ...mockEmployee,
+          id: 'emp-sales',
+          departmentId: 'dept-sales',
+        },
+      });
+      mockPrisma.employeeBonusPenalty.findUnique.mockResolvedValue({
+        ...mockPenalty,
+        organizationId: 'org-test-penalty',
+        employeeId: 'emp-sales',
+        employee: {
+          ...mockEmployee,
+          id: 'emp-sales',
+          departmentId: 'dept-sales',
+        },
+      });
+      mockPrisma.employee.findUnique.mockResolvedValue({
+        id: 'emp-mgr',
+        managedDepartments: [{ id: 'dept-eng' }],
+      });
+
+      await expect(
+        PenaltyService.getPenaltyById('pen-001', managerSession)
+      ).rejects.toMatchObject({ statusCode: 403 });
     });
   });
 });

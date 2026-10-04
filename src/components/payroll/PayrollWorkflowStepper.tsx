@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { formatClientBusinessInstantDateTime } from '@/lib/time/client-business-instant';
 
 interface PayrollWorkflowStepperProps {
   periodId: string;
@@ -428,7 +429,7 @@ export function PayrollWorkflowStepper({
                         {item.decision}
                       </Badge>
                       <span className="text-slate-500 text-[11px]">
-                        {new Date(item.actionAt).toLocaleString('vi-VN')}
+                        {formatClientBusinessInstantDateTime(item.actionAt)}
                       </span>
                     </div>
                     <div className="text-slate-300">

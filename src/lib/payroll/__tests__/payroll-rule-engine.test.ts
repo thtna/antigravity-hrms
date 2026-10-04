@@ -321,5 +321,14 @@ describe('PHASE 14 — PAYROLL RULE ENGINE TEST SUITE', () => {
       });
       expect(res.tax.personalRelief).toBe(15000000);
     });
+
+    it('preserves the caller-provided Vietnam business period contract', () => {
+      const res = PayrollRuleEngine.calculate({
+        ...standardInput,
+        period: '2026-10',
+      });
+
+      expect(res.period).toBe('2026-10');
+    });
   });
 });

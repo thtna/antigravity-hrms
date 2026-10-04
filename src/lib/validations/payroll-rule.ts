@@ -1,4 +1,20 @@
 import { z } from 'zod';
+import { getBusinessDateString, parseBusinessDate } from '@/lib/time/business-time';
+
+const PayrollBusinessDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày phải theo định dạng YYYY-MM-DD')
+  .refine(
+    (value) => {
+      try {
+        parseBusinessDate(value);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Ngày không tồn tại trong lịch' }
+  );
 
 export const SalaryBasisConfigSchema = z.object({
   method: z.enum(['FIXED_DAYS', 'CALENDAR_WORKING_DAYS', 'HOURLY']).default('FIXED_DAYS'),
@@ -71,15 +87,8 @@ export const CreatePayrollRuleSchema = z.object({
   taxConfig: TaxConfigSchema,
   deductionConfig: DeductionConfigSchema,
   roundingConfig: RoundingConfigSchema,
-  effectiveFrom: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày hiệu lực phải theo định dạng YYYY-MM-DD')
-    .default(() => new Date().toISOString().split('T')[0]),
-  effectiveTo: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày hết hiệu lực phải theo định dạng YYYY-MM-DD')
-    .optional()
-    .nullable(),
+  effectiveFrom: PayrollBusinessDateSchema.default(() => getBusinessDateString()),
+  effectiveTo: PayrollBusinessDateSchema.optional().nullable(),
 });
 
 export const UpdatePayrollRuleSchema = CreatePayrollRuleSchema.partial().omit({ code: true });

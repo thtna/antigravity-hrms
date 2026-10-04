@@ -4,6 +4,7 @@ import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
 import { CreateShiftInput, UpdateShiftInput } from '@/lib/validations/shift';
 import { Prisma } from '@prisma/client';
+import { parseBusinessDate } from '@/lib/time/business-time';
 
 export interface ShiftDurationCalculation {
   totalSpanMinutes: number;
@@ -180,8 +181,8 @@ export class ShiftService {
           gracePeriodEarly: input.gracePeriodEarly,
           standardWorkHours: new Prisma.Decimal(duration.standardWorkHours),
           isActive: input.isActive ?? true,
-          effectiveFrom: new Date(input.effectiveFrom),
-          effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
+          effectiveFrom: parseBusinessDate(input.effectiveFrom),
+          effectiveTo: input.effectiveTo ? parseBusinessDate(input.effectiveTo) : null,
         },
       });
 
@@ -225,11 +226,16 @@ export class ShiftService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền cập nhật ca làm việc.');
     }
 
-    const currentShift = await prisma.workShift.findUnique({
-      where: { id },
+    const organizationId = session.organizationId;
+    if (!organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+
+    const currentShift = await prisma.workShift.findFirst({
+      where: { id, organizationId, deletedAt: null },
     });
 
-    if (!currentShift || currentShift.deletedAt || (session?.organizationId && (currentShift as any).organizationId && (currentShift as any).organizationId !== session.organizationId)) {
+    if (!currentShift || currentShift.deletedAt || currentShift.organizationId !== organizationId) {
       throw ApiError.notFound(`Không tìm thấy ca làm việc với ID: ${id}`);
     }
 
@@ -239,7 +245,7 @@ export class ShiftService {
       const codeTaken = await prisma.workShift.findFirst({
         where: {
           code: upperCode,
-          ...(session?.organizationId ? { organizationId: session.organizationId } : {}),
+          organizationId,
         },
       });
       if (codeTaken && codeTaken.id !== id) {
@@ -278,13 +284,13 @@ export class ShiftService {
       if (input.gracePeriodEarly !== undefined) updateData.gracePeriodEarly = input.gracePeriodEarly;
       updateData.standardWorkHours = new Prisma.Decimal(duration.standardWorkHours);
       if (input.isActive !== undefined) updateData.isActive = input.isActive;
-      if (input.effectiveFrom) updateData.effectiveFrom = new Date(input.effectiveFrom);
+      if (input.effectiveFrom) updateData.effectiveFrom = parseBusinessDate(input.effectiveFrom);
       if (input.effectiveTo !== undefined) {
-        updateData.effectiveTo = input.effectiveTo ? new Date(input.effectiveTo) : null;
+        updateData.effectiveTo = input.effectiveTo ? parseBusinessDate(input.effectiveTo) : null;
       }
 
       const shift = await tx.workShift.update({
-        where: { id },
+        where: { id, organizationId, deletedAt: null },
         data: updateData,
       });
 
@@ -294,7 +300,7 @@ export class ShiftService {
           action: 'UPDATE_SHIFT',
           entity: 'work_shifts',
           entityId: shift.id,
-          organizationId: currentShift.organizationId || session.organizationId || null,
+          organizationId,
           oldValues: {
             name: currentShift.name,
             startTime: currentShift.startTime,
@@ -328,17 +334,22 @@ export class ShiftService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền bật/tắt trạng thái ca làm việc.');
     }
 
-    const shift = await prisma.workShift.findUnique({
-      where: { id },
+    const organizationId = session.organizationId;
+    if (!organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+
+    const shift = await prisma.workShift.findFirst({
+      where: { id, organizationId, deletedAt: null },
     });
 
-    if (!shift || shift.deletedAt || (session?.organizationId && (shift as any).organizationId && (shift as any).organizationId !== session.organizationId)) {
+    if (!shift || shift.deletedAt || shift.organizationId !== organizationId) {
       throw ApiError.notFound(`Không tìm thấy ca làm việc với ID: ${id}`);
     }
 
     const updated = await prisma.$transaction(async (tx) => {
       const res = await tx.workShift.update({
-        where: { id },
+        where: { id, organizationId, deletedAt: null },
         data: { isActive },
       });
 
@@ -348,7 +359,7 @@ export class ShiftService {
           action: isActive ? 'ACTIVATE_SHIFT' : 'DEACTIVATE_SHIFT',
           entity: 'work_shifts',
           entityId: id,
-          organizationId: shift.organizationId || session.organizationId || null,
+          organizationId,
           oldValues: { isActive: shift.isActive },
           newValues: { isActive },
         },
@@ -368,11 +379,16 @@ export class ShiftService {
       throw ApiError.forbidden('Chỉ Quản trị viên hoặc Nhân sự mới có quyền xóa ca làm việc.');
     }
 
-    const shift = await prisma.workShift.findUnique({
-      where: { id },
+    const organizationId = session.organizationId;
+    if (!organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+
+    const shift = await prisma.workShift.findFirst({
+      where: { id, organizationId, deletedAt: null },
     });
 
-    if (!shift || shift.deletedAt || (session?.organizationId && (shift as any).organizationId && (shift as any).organizationId !== session.organizationId)) {
+    if (!shift || shift.deletedAt || shift.organizationId !== organizationId) {
       throw ApiError.notFound(`Không tìm thấy ca làm việc với ID: ${id}`);
     }
 
@@ -395,7 +411,7 @@ export class ShiftService {
     // Safe Soft Delete
     await prisma.$transaction(async (tx) => {
       await tx.workShift.update({
-        where: { id },
+        where: { id, organizationId, deletedAt: null },
         data: {
           deletedAt: new Date(),
           isActive: false,
@@ -408,7 +424,7 @@ export class ShiftService {
           action: 'DELETE_SHIFT',
           entity: 'work_shifts',
           entityId: id,
-          organizationId: shift.organizationId || session.organizationId || null,
+          organizationId,
           oldValues: { code: shift.code, name: shift.name },
           newValues: { deletedAt: new Date().toISOString() },
         },

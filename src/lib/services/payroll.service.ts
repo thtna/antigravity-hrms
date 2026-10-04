@@ -12,6 +12,11 @@ import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
 import { PayrollRuleConfig } from '@/lib/payroll/types';
 import { PayrollWorkflowService } from './payroll-workflow.service';
 import { Decimal } from 'decimal.js';
+import {
+  formatBusinessDate,
+  getBusinessWeekday,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
 
 export class PayrollService {
   // ── 1. Query Periods ───────────────────────────────────────────────────────
@@ -112,8 +117,8 @@ export class PayrollService {
       data: {
         code: input.code,
         name: input.name,
-        startDate: new Date(input.startDate),
-        endDate: new Date(input.endDate),
+        startDate: parseBusinessDate(input.startDate),
+        endDate: parseBusinessDate(input.endDate),
         standardWorkDays: input.standardWorkDays,
         payrollRuleId,
         status: 'DRAFT',
@@ -203,12 +208,16 @@ export class PayrollService {
       throw ApiError.forbidden('Chỉ Nhân sự hoặc Quản trị viên mới có quyền thực hiện tính lương.');
     }
 
-    const period = await prisma.payrollPeriod.findUnique({
-      where: { id: input.periodId },
+    if (!session.organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+
+    const period = await prisma.payrollPeriod.findFirst({
+      where: { id: input.periodId, organizationId: session.organizationId },
       include: { payrollRule: true },
     });
 
-    if (!period || (session?.organizationId && period.organizationId !== session.organizationId)) {
+    if (!period || period.organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
     }
 
@@ -407,7 +416,7 @@ export class PayrollService {
         }
 
         // Categorize overtime by day of week
-        const dayOfWeek = new Date(att.workDate).getDay(); // 0 = Sunday, 6 = Saturday
+        const dayOfWeek = getBusinessWeekday(formatBusinessDate(att.workDate)); // 0 = Sunday, 6 = Saturday
         if (dayOfWeek === 0 || dayOfWeek === 6) {
           weekendOtHours += ot;
         } else {
@@ -715,15 +724,19 @@ export class PayrollService {
       throw ApiError.forbidden('Chỉ Nhân sự hoặc Quản trị viên mới có quyền khóa kỳ lương.');
     }
 
-    const period = await prisma.payrollPeriod.findUnique({
-      where: { id: periodId },
+    if (!session.organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+
+    const period = await prisma.payrollPeriod.findFirst({
+      where: { id: periodId, organizationId: session.organizationId },
     });
-    if (!period || (session?.organizationId && period.organizationId !== session.organizationId)) {
+    if (!period || period.organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy kỳ tính lương.');
     }
 
     const updated = await prisma.payrollPeriod.update({
-      where: { id: periodId },
+      where: { id: periodId, organizationId: session.organizationId },
       data: {
         status: 'CLOSED',
         closedAt: new Date(),

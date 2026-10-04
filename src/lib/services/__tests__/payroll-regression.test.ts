@@ -14,6 +14,7 @@ const mockPrisma = vi.hoisted(() => ({
   },
   payroll: {
     findMany: vi.fn(),
+    findFirst: vi.fn(),
     create: vi.fn(),
     updateMany: vi.fn(),
     deleteMany: vi.fn(),
@@ -41,6 +42,7 @@ const mockPrisma = vi.hoisted(() => ({
   },
   attendance: {
     findMany: vi.fn(),
+    aggregate: vi.fn(),
   },
   leaveRequest: {
     findMany: vi.fn(),
@@ -63,6 +65,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { PayrollWorkflowService } from '../payroll-workflow.service';
+import { PayslipService } from '../payslip.service';
 import { UserSession } from '@/types';
 
 describe('PHASE 9 — PAYROLL REGRESSION & MULTI-TENANT MATHEMATICAL INVARIANCE', () => {
@@ -459,6 +462,70 @@ describe('PHASE 9 — PAYROLL REGRESSION & MULTI-TENANT MATHEMATICAL INVARIANCE'
       expect(resTenantA.tax).toBe(resTenantB.tax);
       expect(resTenantA.insurance).toBe(resTenantB.insurance);
       expect(resTenantA).toEqual(resTenantB);
+    });
+  });
+
+  describe('R2A-DERIVED-D1 payslip DATE rendering', () => {
+    const payrollRecord = {
+      id: 'payroll-date-rendering',
+      organizationId: 'org-tenant-a',
+      employeeId: 'emp-date-rendering',
+      actualWorkDays: 20,
+      otPay: 0,
+      socialInsurance: 0,
+      healthInsurance: 0,
+      unemploymentInsurance: 0,
+      pitTax: 0,
+      totalPenalties: 0,
+      kpiBonus: 0,
+      otherBonuses: 0,
+      allowances: 0,
+      contractSalary: 10000000,
+      proratedSalary: 10000000,
+      grossIncome: 10000000,
+      netSalary: 10000000,
+      paymentStatus: 'UNPAID',
+      period: {
+        code: '2026-09',
+        name: 'September 2026',
+        startDate: new Date('2026-09-01T00:00:00.000Z'),
+        endDate: new Date('2026-09-30T00:00:00.000Z'),
+        standardWorkDays: 22,
+      },
+      employee: {
+        id: 'emp-date-rendering',
+        userId: 'usr-owner',
+        employeeCode: 'EMP-DATE',
+        firstName: 'Date',
+        lastName: 'Carrier',
+        department: null,
+        position: null,
+        bankAccountNo: null,
+        bankName: null,
+      },
+      details: [],
+    };
+
+    it('renders payroll period DATE carriers without host-timezone drift', async () => {
+      mockPrisma.payroll.findFirst.mockResolvedValue(payrollRecord);
+      mockPrisma.attendance.aggregate.mockResolvedValue({
+        _sum: { actualWorkHours: 160, otHours: 0 },
+      });
+
+      const result = await PayslipService.getPayslipForPdf('payroll-date-rendering', adminSessionOrgA);
+
+      expect(result.period.startDate).toBe('01/09/2026');
+      expect(result.period.endDate).toBe('30/09/2026');
+    });
+
+    it('preserves the existing employee anti-IDOR guard', async () => {
+      mockPrisma.payroll.findFirst.mockResolvedValue(payrollRecord);
+
+      await expect(PayslipService.getPayslipForPdf('payroll-date-rendering', {
+        ...hrSessionOrgA,
+        userId: 'usr-other-employee',
+        roles: ['employee'],
+      })).rejects.toThrow(/chỉ có quyền xem/i);
     });
   });
 

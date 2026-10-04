@@ -25,9 +25,11 @@ import { BonusEditModal, BonusItem } from '@/components/bonus/BonusEditModal';
 import { BonusProcessModal } from '@/components/bonus/BonusProcessModal';
 import { BonusAuditModal } from '@/components/bonus/BonusAuditModal';
 import { formatBonusVnd } from '@/lib/kpi/kpi-calculator';
+import { getBusinessDateString } from '@/lib/time/business-time';
+import { formatClientBusinessInstantDate } from '@/lib/time/client-business-instant';
 
 export default function BonusPage() {
-  const currentPeriod = new Date().toISOString().slice(0, 7);
+  const currentPeriod = getBusinessDateString().slice(0, 7);
 
   const [period, setPeriod] = useState(currentPeriod);
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -348,7 +350,7 @@ export default function BonusPage() {
                             </p>
                             {bonus.approvedAt && (
                               <p className="text-[10px] text-slate-500 font-mono">
-                                {new Date(bonus.approvedAt).toLocaleDateString('vi-VN')}
+                                {formatClientBusinessInstantDate(bonus.approvedAt)}
                               </p>
                             )}
                           </div>

@@ -9,6 +9,7 @@ import {
   ProcessBonusInput,
   BonusQueryParams,
 } from '@/lib/validations/bonus';
+import { getBusinessDateString, parseBusinessDate } from '@/lib/time/business-time';
 
 export class BonusService {
   // ── Access Verification Helpers ────────────────────────────────────────────
@@ -74,16 +75,20 @@ export class BonusService {
       include: { department: true },
     });
 
-    if (!employee || employee.deletedAt || employee.status !== 'ACTIVE' || (session.organizationId && employee.organizationId !== session.organizationId)) {
+    const organizationId = session.organizationId;
+
+    if (!organizationId || !employee || employee.deletedAt || employee.status !== 'ACTIVE' || employee.organizationId !== organizationId) {
       throw ApiError.notFound('Nhân viên không tồn tại hoặc đã nghỉ việc.');
     }
 
-    const effectiveDate = input.effectiveDate ? new Date(input.effectiveDate) : new Date();
+    const effectiveDate = parseBusinessDate(
+      input.effectiveDate ?? getBusinessDateString()
+    );
 
     return prisma.$transaction(async (tx) => {
       const created = await tx.employeeBonusPenalty.create({
         data: {
-          organizationId: session.organizationId ?? '__no_org__',
+          organizationId,
           employeeId: input.employeeId,
           type: 'BONUS',
           category: input.category,
@@ -139,7 +144,7 @@ export class BonusService {
       include: { employee: true },
     });
 
-    if (!existing || (session?.organizationId && existing.organizationId && existing.organizationId !== session.organizationId)) {
+    if (!session?.organizationId || !existing || existing.organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy hồ sơ khen thưởng.');
     }
 
@@ -157,7 +162,7 @@ export class BonusService {
       if (input.category) data.category = input.category;
       if (input.amount !== undefined) data.amount = new Prisma.Decimal(input.amount);
       if (input.period) data.period = input.period;
-      if (input.effectiveDate) data.effectiveDate = new Date(input.effectiveDate);
+      if (input.effectiveDate) data.effectiveDate = parseBusinessDate(input.effectiveDate);
       if (input.reason) data.reason = input.reason;
       if (input.notes !== undefined) data.notes = input.notes;
 
@@ -208,7 +213,7 @@ export class BonusService {
       include: { employee: true },
     });
 
-    if (!existing || (session?.organizationId && existing.organizationId && existing.organizationId !== session.organizationId)) {
+    if (!session?.organizationId || !existing || existing.organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy khoản thưởng.');
     }
 
@@ -286,7 +291,14 @@ export class BonusService {
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
     const isManager = session.roles.includes('manager');
 
-    if (!isHrOrAdmin && isManager && session.employeeId) {
+    if (!isHrOrAdmin && !session.employeeId) {
+      throw ApiError.forbidden('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    }
+
+    if (!isHrOrAdmin && isManager) {
+      if (!session.employeeId) {
+        throw ApiError.forbidden('Tài khoản quản lý chưa được liên kết với hồ sơ nhân viên.');
+      }
       const manager = await prisma.employee.findUnique({
         where: { id: session.employeeId },
         include: { managedDepartments: { select: { id: true } } },
@@ -301,7 +313,7 @@ export class BonusService {
     }
 
     // Apply filters
-    if (query.employeeId) {
+    if (query.employeeId && (isHrOrAdmin || isManager)) {
       where.employeeId = query.employeeId;
     }
 
@@ -373,6 +385,7 @@ export class BonusService {
             firstName: true,
             lastName: true,
             employeeCode: true,
+            departmentId: true,
             department: { select: { id: true, name: true } },
           },
         },
@@ -388,11 +401,25 @@ export class BonusService {
 
     // RBAC check
     const isOwner = session.employeeId === bonus.employeeId;
-    const isPrivileged =
-      session.roles.includes('hr') || session.roles.includes('admin') || session.roles.includes('manager');
+    const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
+    const isManager = session.roles.includes('manager');
 
-    if (!isOwner && !isPrivileged) {
-      throw ApiError.forbidden('Bạn không có quyền xem khoản thưởng này.');
+    if (!isOwner && !isHrOrAdmin) {
+      if (isManager) {
+        if (!session.employeeId) {
+          throw ApiError.forbidden('Tài khoản quản lý chưa được liên kết với hồ sơ nhân viên.');
+        }
+        const manager = await prisma.employee.findUnique({
+          where: { id: session.employeeId },
+          include: { managedDepartments: { select: { id: true } } },
+        });
+        const deptIds = manager?.managedDepartments.map((d) => d.id) || [];
+        if (!bonus.employee?.departmentId || !deptIds.includes(bonus.employee.departmentId)) {
+          throw ApiError.forbidden('Bạn chỉ có quyền xem khoản thưởng của nhân viên thuộc phòng ban mình quản lý.');
+        }
+      } else {
+        throw ApiError.forbidden('Bạn không có quyền xem khoản thưởng này.');
+      }
     }
 
     return bonus;
@@ -436,7 +463,7 @@ export class BonusService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập.');
     }
 
-    const currentPeriod = new Date().toISOString().slice(0, 7);
+    const currentPeriod = getBusinessDateString().slice(0, 7);
 
     const isHrOrAdmin = session.roles.includes('hr') || session.roles.includes('admin');
     const isManager = session.roles.includes('manager');
@@ -447,6 +474,10 @@ export class BonusService {
       organizationId: session.organizationId ?? '__no_org__',
       employee: { organizationId: session.organizationId ?? '__no_org__' },
     };
+
+    if (!isHrOrAdmin && !session.employeeId) {
+      throw ApiError.forbidden('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    }
 
     if (!isHrOrAdmin && isManager && session.employeeId) {
       const manager = await prisma.employee.findUnique({

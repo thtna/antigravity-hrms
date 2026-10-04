@@ -1,4 +1,20 @@
 import { z } from 'zod';
+import { getBusinessDateString, parseBusinessDate } from '@/lib/time/business-time';
+
+const PenaltyEffectiveDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày vi phạm phải theo định dạng YYYY-MM-DD')
+  .refine(
+    (value) => {
+      try {
+        parseBusinessDate(value);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Ngày vi phạm không tồn tại trong lịch' }
+  );
 
 export const PenaltyCategoryEnum = z.enum([
   'LATE',
@@ -21,10 +37,7 @@ export const CreatePenaltySchema = z.object({
     .number({ message: 'Số tiền phạt phải là số hợp lệ' })
     .positive('Số tiền phạt phải lớn hơn 0')
     .max(1_000_000_000, 'Số tiền phạt tối đa 1.000.000.000 ₫'),
-  effectiveDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày vi phạm phải theo định dạng YYYY-MM-DD')
-    .default(() => new Date().toISOString().split('T')[0]),
+  effectiveDate: PenaltyEffectiveDateSchema.default(() => getBusinessDateString()),
   period: z
     .string()
     .regex(/^(\d{4}-\d{2}|\d{4}-Q[1-4]|\d{4})$/, 'Kỳ khấu trừ phải theo định dạng YYYY-MM, YYYY-QX hoặc YYYY'),
@@ -43,10 +56,7 @@ export const UpdatePenaltySchema = z.object({
     .positive('Số tiền phạt phải lớn hơn 0')
     .max(1_000_000_000, 'Số tiền phạt tối đa 1.000.000.000 ₫')
     .optional(),
-  effectiveDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày vi phạm phải theo định dạng YYYY-MM-DD')
-    .optional(),
+  effectiveDate: PenaltyEffectiveDateSchema.optional(),
   period: z
     .string()
     .regex(/^(\d{4}-\d{2}|\d{4}-Q[1-4]|\d{4})$/, 'Kỳ khấu trừ phải theo định dạng YYYY-MM, YYYY-QX hoặc YYYY')

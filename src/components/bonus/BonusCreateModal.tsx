@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { X, DollarSign, AlertCircle, CheckCircle2, Award } from 'lucide-react';
 import { formatBonusVnd } from '@/lib/kpi/kpi-calculator';
+import { getBusinessDateString } from '@/lib/time/business-time';
 
 export const BONUS_CATEGORY_LABELS: Record<
   string,
@@ -58,8 +59,9 @@ export function BonusCreateModal({
   onSuccess,
   defaultPeriod,
 }: BonusCreateModalProps) {
-  const currentPeriod = defaultPeriod || new Date().toISOString().slice(0, 7);
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const businessToday = getBusinessDateString();
+  const currentPeriod = defaultPeriod || businessToday.slice(0, 7);
+  const todayStr = businessToday;
 
   const [employees, setEmployees] = useState<EmployeeItem[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');

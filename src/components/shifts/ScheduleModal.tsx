@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { addBusinessDays, getBusinessDateString } from '@/lib/time/business-time';
 import { X, Loader2, AlertCircle, Calendar, Users, Repeat, CheckSquare } from 'lucide-react';
 
 interface ScheduleModalProps {
@@ -15,9 +16,8 @@ interface ScheduleModalProps {
 
 // Pure date helpers computed outside render
 function getScheduleDefaultDates() {
-  const now = new Date();
-  const today = now.toISOString().split('T')[0];
-  const nextWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7).toISOString().split('T')[0];
+  const today = getBusinessDateString();
+  const nextWeek = addBusinessDays(today, 7);
   return { today, nextWeek };
 }
 

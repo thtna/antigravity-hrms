@@ -14,6 +14,7 @@ import {
   VIETNAM_STATUTORY_RULE_2026,
 } from '@/lib/payroll/default-rules';
 import { PayrollRuleConfig } from '@/lib/payroll/types';
+import { getBusinessDateString, parseBusinessDate } from '@/lib/time/business-time';
 
 export class PayrollRuleService {
   // ── 1. Query Rules ─────────────────────────────────────────────────────────
@@ -129,8 +130,8 @@ export class PayrollRuleService {
           taxConfig: input.taxConfig as any,
           deductionConfig: input.deductionConfig as any,
           roundingConfig: input.roundingConfig as any,
-          effectiveFrom: new Date(input.effectiveFrom),
-          effectiveTo: input.effectiveTo ? new Date(input.effectiveTo) : null,
+          effectiveFrom: parseBusinessDate(input.effectiveFrom),
+          effectiveTo: input.effectiveTo ? parseBusinessDate(input.effectiveTo) : null,
         },
       });
 
@@ -180,10 +181,15 @@ export class PayrollRuleService {
       throw ApiError.forbidden('Chỉ HR hoặc Quản trị viên mới có quyền sửa đổi quy chế lương.');
     }
 
-    const existing = await prisma.payrollRule.findUnique({
-      where: { id },
+    const organizationId = session.organizationId;
+    if (!organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+
+    const existing = await prisma.payrollRule.findFirst({
+      where: { id, organizationId },
     });
-    if (!existing || (session?.organizationId && (existing as any).organizationId && (existing as any).organizationId !== session.organizationId)) {
+    if (!existing || existing.organizationId !== organizationId) {
       throw ApiError.notFound('Không tìm thấy quy chế tiền lương cần sửa.');
     }
 
@@ -208,13 +214,13 @@ export class PayrollRuleService {
       if (input.taxConfig) data.taxConfig = input.taxConfig;
       if (input.deductionConfig) data.deductionConfig = input.deductionConfig;
       if (input.roundingConfig) data.roundingConfig = input.roundingConfig;
-      if (input.effectiveFrom) data.effectiveFrom = new Date(input.effectiveFrom);
+      if (input.effectiveFrom) data.effectiveFrom = parseBusinessDate(input.effectiveFrom);
       if (input.effectiveTo !== undefined) {
-        data.effectiveTo = input.effectiveTo ? new Date(input.effectiveTo) : null;
+        data.effectiveTo = input.effectiveTo ? parseBusinessDate(input.effectiveTo) : null;
       }
 
       const updated = await tx.payrollRule.update({
-        where: { id },
+        where: { id, organizationId },
         data,
       });
 
@@ -258,8 +264,15 @@ export class PayrollRuleService {
       throw ApiError.forbidden('Chỉ HR hoặc Quản trị viên mới có quyền thiết lập quy chế mặc định.');
     }
 
-    const rule = await prisma.payrollRule.findUnique({ where: { id } });
-    if (!rule || (session?.organizationId && (rule as any).organizationId && (rule as any).organizationId !== session.organizationId)) {
+    const organizationId = session.organizationId;
+    if (!organizationId?.trim()) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+
+    const rule = await prisma.payrollRule.findFirst({
+      where: { id, organizationId },
+    });
+    if (!rule || rule.organizationId !== organizationId) {
       throw ApiError.notFound('Không tìm thấy quy chế tiền lương.');
     }
 
@@ -270,7 +283,7 @@ export class PayrollRuleService {
       });
 
       const updated = await tx.payrollRule.update({
-        where: { id },
+        where: { id, organizationId },
         data: { isDefault: true, isActive: true },
       });
 
@@ -299,13 +312,13 @@ export class PayrollRuleService {
     let ruleConfig: PayrollRuleConfig;
 
     if (parsed.ruleId) {
-      const dbRule = await prisma.payrollRule.findUnique({
-        where: { id: parsed.ruleId },
+      if (!session.organizationId?.trim()) {
+        throw ApiError.forbidden('Organization context is required.');
+      }
+      const dbRule = await prisma.payrollRule.findFirst({
+        where: { id: parsed.ruleId, organizationId: session.organizationId },
       });
-      if (
-        !dbRule ||
-        (session.organizationId && (dbRule as any).organizationId && (dbRule as any).organizationId !== session.organizationId)
-      ) {
+      if (!dbRule || dbRule.organizationId !== session.organizationId) {
         throw ApiError.notFound('Không tìm thấy quy chế lương được chọn.');
       }
       ruleConfig = this.mapDbRuleToConfig(dbRule);
@@ -330,7 +343,7 @@ export class PayrollRuleService {
       employee: parsed.employee,
       attendance: parsed.attendance,
       adjustments: parsed.adjustments,
-      period: parsed.period || new Date().toISOString().slice(0, 7),
+      period: parsed.period || getBusinessDateString().slice(0, 7),
       ruleConfig,
     });
 

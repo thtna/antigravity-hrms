@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Hoist Prisma & Logger Mocks ──────────────────────────────────────────────
 const mockPrisma = vi.hoisted(() => ({
@@ -28,11 +28,13 @@ vi.mock('@/lib/logger', () => ({
 
 import { BonusService } from '@/lib/services/bonus.service';
 import { UserSession } from '@/types';
+import { CreateBonusSchema, UpdateBonusSchema } from '@/lib/validations/bonus';
 
 // ── Fixture Sessions ─────────────────────────────────────────────────────────
 
 const adminSession: UserSession = {
   userId: 'usr-admin',
+  organizationId: 'org-test-bonus',
   employeeId: 'emp-admin',
   roles: ['admin'],
   email: 'admin@test.com',
@@ -54,6 +56,7 @@ const hrSession: UserSession = {
 
 const managerSession: UserSession = {
   userId: 'usr-mgr',
+  organizationId: 'org-test-bonus',
   employeeId: 'emp-mgr',
   roles: ['manager'],
   email: 'manager@test.com',
@@ -64,6 +67,7 @@ const managerSession: UserSession = {
 
 const employeeSession: UserSession = {
   userId: 'usr-emp',
+  organizationId: 'org-test-bonus',
   employeeId: 'emp-001',
   roles: ['employee'],
   email: 'emp@test.com',
@@ -130,6 +134,10 @@ describe('PHASE 12 — BONUS SYSTEM TEST SUITE', () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   // ── 1. Create Bonus ────────────────────────────────────────────────────────
 
   describe('1. BonusService.createBonus', () => {
@@ -154,6 +162,50 @@ describe('PHASE 12 — BONUS SYSTEM TEST SUITE', () => {
       expect(mockPrisma.auditLog.create).toHaveBeenCalledOnce();
       expect(result.status).toBe('PENDING');
       expect(result.category).toBe('PROJECT');
+      const data = mockPrisma.employeeBonusPenalty.create.mock.calls[0][0].data;
+      expect(data.effectiveDate.toISOString()).toBe('2026-09-15T00:00:00.000Z');
+    });
+
+    it('uses the Vietnam business date as the canonical default DATE carrier', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+      mockPrisma.employee.findUnique.mockResolvedValue(mockEmployee);
+      mockPrisma.employeeBonusPenalty.create.mockResolvedValue({ ...mockBonus });
+
+      await BonusService.createBonus(
+        {
+          employeeId: 'emp-001',
+          category: 'OTHER',
+          amount: 1_000_000,
+          period: '2026-10',
+          reason: 'Thưởng theo ngày nghiệp vụ',
+        },
+        hrSession
+      );
+
+      const data = mockPrisma.employeeBonusPenalty.create.mock.calls[0][0].data;
+      expect(data.effectiveDate.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    });
+
+    it('accepts leap-day DATE values and rejects malformed or impossible dates', () => {
+      const base = {
+        employeeId: '00000000-0000-4000-8000-000000000001',
+        category: 'OTHER' as const,
+        amount: 1_000_000,
+        period: '2028-02',
+        reason: 'Thưởng đúng ngày hợp lệ',
+      };
+
+      expect(CreateBonusSchema.safeParse({ ...base, effectiveDate: '2028-02-29' }).success).toBe(
+        true
+      );
+      expect(CreateBonusSchema.safeParse({ ...base, effectiveDate: '2028-2-29' }).success).toBe(
+        false
+      );
+      expect(CreateBonusSchema.safeParse({ ...base, effectiveDate: '2026-02-29' }).success).toBe(
+        false
+      );
+      expect(UpdateBonusSchema.safeParse({ effectiveDate: '2026-04-31' }).success).toBe(false);
     });
 
     it('supports all required bonus types (KPI, OVERTIME, PROJECT, TIME, OTHER)', async () => {
@@ -454,6 +506,8 @@ describe('PHASE 12 — BONUS SYSTEM TEST SUITE', () => {
 
   describe('6. BonusService.getBonusDashboardSummary', () => {
     it('aggregates approved amounts by category and counts', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
       mockPrisma.employeeBonusPenalty.count
         .mockResolvedValueOnce(3) // pendingCount
         .mockResolvedValueOnce(5); // approvedCount
@@ -476,6 +530,119 @@ describe('PHASE 12 — BONUS SYSTEM TEST SUITE', () => {
       expect(summary.categoryTotals.PROJECT).toBe(5_000_000);
       expect(summary.categoryTotals.TIME).toBe(1_000_000);
       expect(summary.categoryTotals.OTHER).toBe(500_000);
+      expect(summary.period).toBe('2026-10');
+      expect(mockPrisma.employeeBonusPenalty.count.mock.calls[0][0].where.period).toBe(
+        '2026-10'
+      );
+    });
+  });
+
+  describe('7. R7-B & R7-B1A Regression: Tenant Isolation and Fail-Closed Invariants', () => {
+    it('non-HR/Admin list caller without session.employeeId fails closed', async () => {
+      const empNoId = { ...employeeSession, employeeId: undefined };
+      await expect(
+        BonusService.listBonuses({ status: 'ALL', page: 1, limit: 20 }, empNoId)
+      ).rejects.toThrow('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    });
+
+    it('regular employee cannot override list scope with query.employeeId', async () => {
+      mockPrisma.employeeBonusPenalty.count.mockResolvedValue(0);
+      mockPrisma.employeeBonusPenalty.findMany.mockResolvedValue([]);
+
+      await BonusService.listBonuses(
+        { employeeId: 'emp-other', status: 'ALL', page: 1, limit: 20 },
+        employeeSession
+      );
+
+      const whereArg = mockPrisma.employeeBonusPenalty.findMany.mock.calls[0][0].where;
+      expect(whereArg.employeeId).toBe('emp-001');
+      expect(whereArg.employeeId).not.toBe('emp-other');
+    });
+
+    it('manager without session.employeeId fails closed in listBonuses', async () => {
+      const mgrNoId = { ...managerSession, employeeId: undefined };
+      await expect(
+        BonusService.listBonuses({ status: 'ALL', page: 1, limit: 20 }, mgrNoId)
+      ).rejects.toThrow('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
+    });
+
+    it('manager getById cannot read bonus of employee outside managed departments', async () => {
+      mockPrisma.employeeBonusPenalty.findFirst.mockResolvedValue({
+        ...mockBonus,
+        organizationId: 'org-test-bonus',
+        employeeId: 'emp-sales',
+        employee: {
+          ...mockEmployee,
+          id: 'emp-sales',
+          departmentId: 'dept-sales',
+        },
+      });
+      mockPrisma.employeeBonusPenalty.findUnique.mockResolvedValue({
+        ...mockBonus,
+        organizationId: 'org-test-bonus',
+        employeeId: 'emp-sales',
+        employee: {
+          ...mockEmployee,
+          id: 'emp-sales',
+          departmentId: 'dept-sales',
+        },
+      });
+      mockPrisma.employee.findUnique.mockResolvedValue({
+        id: 'emp-mgr',
+        managedDepartments: [{ id: 'dept-eng' }],
+      });
+
+      await expect(
+        BonusService.getBonusById('bon-001', managerSession)
+      ).rejects.toThrow('Bạn chỉ có quyền xem khoản thưởng của nhân viên thuộc phòng ban mình quản lý.');
+    });
+
+    it('createBonus with missing organizationId fails closed', async () => {
+      const sessionNoOrg = { ...hrSession, organizationId: undefined };
+      mockPrisma.employee.findUnique.mockResolvedValue(mockEmployee);
+      await expect(
+        BonusService.createBonus(
+          {
+            employeeId: 'emp-001',
+            category: 'KPI',
+            amount: 1000000,
+            period: '2026-10',
+            reason: 'Performance',
+          },
+          sessionNoOrg
+        )
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('updateBonus with missing organizationId fails closed', async () => {
+      const sessionNoOrg = { ...hrSession, organizationId: undefined };
+      mockPrisma.employeeBonusPenalty.findUnique.mockResolvedValue({
+        ...mockBonus,
+        organizationId: 'org-test-bonus',
+      });
+
+      await expect(
+        BonusService.updateBonus('bon-001', { amount: 2000000 }, sessionNoOrg)
+      ).rejects.toThrow('Không tìm thấy hồ sơ khen thưởng.');
+    });
+
+    it('processBonus with missing organizationId fails closed', async () => {
+      const sessionNoOrg = { ...hrSession, organizationId: undefined };
+      mockPrisma.employeeBonusPenalty.findUnique.mockResolvedValue({
+        ...mockBonus,
+        organizationId: 'org-test-bonus',
+      });
+
+      await expect(
+        BonusService.processBonus('bon-001', { decision: 'APPROVED' }, sessionNoOrg)
+      ).rejects.toThrow('Không tìm thấy khoản thưởng.');
+    });
+
+    it('dashboard non-HR/Admin without session.employeeId fails closed', async () => {
+      const empNoId = { ...employeeSession, employeeId: undefined };
+      await expect(
+        BonusService.getBonusDashboardSummary(empNoId)
+      ).rejects.toThrow('Tài khoản chưa được liên kết với hồ sơ nhân viên.');
     });
   });
 });

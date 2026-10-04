@@ -25,9 +25,12 @@ import { PenaltyEditModal, PenaltyItem } from '@/components/penalty/PenaltyEditM
 import { PenaltyProcessModal } from '@/components/penalty/PenaltyProcessModal';
 import { PenaltyAuditModal } from '@/components/penalty/PenaltyAuditModal';
 import { formatBonusVnd } from '@/lib/kpi/kpi-calculator';
+import { formatClientBusinessDate } from '@/lib/time/client-business-date-display';
+import { getBusinessDateString } from '@/lib/time/business-time';
+import { formatClientBusinessInstantDate } from '@/lib/time/client-business-instant';
 
 export default function PenaltiesPage() {
-  const currentPeriod = new Date().toISOString().slice(0, 7);
+  const currentPeriod = getBusinessDateString().slice(0, 7);
 
   const [period, setPeriod] = useState(currentPeriod);
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -351,7 +354,7 @@ export default function PenaltiesPage() {
                   };
                   const isPending = pen.status === 'PENDING';
                   const dateStr = pen.effectiveDate
-                    ? new Date(pen.effectiveDate).toLocaleDateString('vi-VN')
+                    ? formatClientBusinessDate(pen.effectiveDate)
                     : '—';
 
                   return (
@@ -416,7 +419,7 @@ export default function PenaltiesPage() {
                             </span>
                             {pen.approvedAt && (
                               <p className="text-[10px] text-slate-500">
-                                {new Date(pen.approvedAt).toLocaleDateString('vi-VN')}
+                                {formatClientBusinessInstantDate(pen.approvedAt)}
                               </p>
                             )}
                           </div>

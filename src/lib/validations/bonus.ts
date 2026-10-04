@@ -1,4 +1,20 @@
 import { z } from 'zod';
+import { parseBusinessDate } from '@/lib/time/business-time';
+
+const BonusEffectiveDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày hiệu lực phải theo định dạng YYYY-MM-DD')
+  .refine(
+    (value) => {
+      try {
+        parseBusinessDate(value);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Ngày hiệu lực không tồn tại trong lịch' }
+  );
 
 export const BonusCategoryEnum = z.enum([
   'KPI',
@@ -25,10 +41,7 @@ export const CreateBonusSchema = z.object({
   period: z
     .string()
     .regex(/^(\d{4}-\d{2}|\d{4}-Q[1-4]|\d{4})$/, 'Kỳ thưởng phải theo định dạng YYYY-MM, YYYY-QX hoặc YYYY'),
-  effectiveDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày hiệu lực phải theo định dạng YYYY-MM-DD')
-    .optional(),
+  effectiveDate: BonusEffectiveDateSchema.optional(),
   reason: z
     .string()
     .min(3, 'Lý do khen thưởng phải có ít nhất 3 ký tự')
@@ -48,10 +61,7 @@ export const UpdateBonusSchema = z.object({
     .string()
     .regex(/^(\d{4}-\d{2}|\d{4}-Q[1-4]|\d{4})$/, 'Kỳ thưởng phải theo định dạng YYYY-MM, YYYY-QX hoặc YYYY')
     .optional(),
-  effectiveDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Ngày hiệu lực phải theo định dạng YYYY-MM-DD')
-    .optional(),
+  effectiveDate: BonusEffectiveDateSchema.optional(),
   reason: z
     .string()
     .min(3, 'Lý do khen thưởng phải có ít nhất 3 ký tự')

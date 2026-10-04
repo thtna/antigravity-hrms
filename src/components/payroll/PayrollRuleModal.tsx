@@ -15,6 +15,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { getBusinessDateString } from '@/lib/time/business-time';
 
 interface PayrollRuleModalProps {
   isOpen: boolean;
@@ -37,7 +38,7 @@ export function PayrollRuleModal({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [isDefault, setIsDefault] = useState(false);
-  const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [effectiveFrom, setEffectiveFrom] = useState(getBusinessDateString());
 
   // Salary basis
   const [salaryMethod, setSalaryMethod] = useState<'FIXED_DAYS' | 'CALENDAR_WORKING_DAYS' | 'HOURLY'>('FIXED_DAYS');
@@ -102,7 +103,7 @@ export function PayrollRuleModal({
       setName('Quy Chế Tiền Lương Mới');
       setDescription('');
       setIsDefault(false);
-      setEffectiveFrom(new Date().toISOString().slice(0, 10));
+      setEffectiveFrom(getBusinessDateString());
 
       setSalaryMethod('FIXED_DAYS');
       setStandardWorkDays(22);
