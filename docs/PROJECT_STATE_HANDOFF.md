@@ -158,6 +158,105 @@ Neither R5G.3 nor R5G.11 accessed or revalidated Production DB. The values below
 - Tenant A must never access Tenant B.
 - Untracked operator/helper files must be preserved and must not be committed accidentally.
 
+### R7 Post-Release Verification & Staging DB Preflight Snapshot (03/10/2026)
+
+- **Branch**: `staging`
+- **HEAD**: `99b47733ffe8cf10c780c267c27c1f051ab115ed`
+- **Pre-reconciliation Git baseline**:
+  - Staged = 0
+  - Short = 148
+  - Porcelain = 182
+  - STATUS_SHA256 = `E96AA0A0F5D4C0704DBBCB7E0EB6006A87E3918318A784439FAD361BE5A526E1`
+- **13 locked historical hashes matched**: `ALL_13_MATCH = True`.
+- **Windows font references in src**: `0`.
+- **R7-B4 Full Local Verification = VERIFIED_COMPLETE**:
+  - Targeted PDF tests: 28/28 PASS (`payslip.service.test.ts`, `report.service.test.ts`).
+  - Typecheck (`tsc --noEmit`): PASS (0 diagnostics).
+  - Build (`next build`): PASS (92/92 routes compiled cleanly).
+  - Lint (`npm run lint`): PASS (0 errors, 174 non-blocking warnings, no `--fix`).
+  - Full suite (`npm test`): 69/69 files, 1214/1214 tests PASS.
+  - PDF standalone Windows-font trace issue remediated (`.next/standalone` fonts verified).
+- **R7-C0C Staging DB Credential Preflight = VERIFIED_COMPLETE**:
+  - Expected staging project ref: `rdpufonfascxgbydvtak`.
+  - DATABASE_URL topology verified for port 6543 (`SUPABASE_POOLER`).
+  - DIRECT_URL topology verified for port 5432 (`SUPABASE_POOLER`).
+  - Credential structural completeness = YES.
+  - Placeholder detected = NO.
+  - No remote connection was performed during R7-C0C.
+- **R7-C1 Remote Staging Migration Status = VERIFIED_COMPLETE**:
+  - Remote Staging connection verified via local Prisma binary 6.19.3.
+  - Prisma migrate status exit code = 0.
+  - Local migration inventory = 4.
+  - Prisma result: `Database schema is up to date!`.
+  - Pending local migrations = 0.
+  - Containment after R7-C1 = VERIFIED_PASS.
+- **Scope & Schema Qualification**:
+  - R7-C1 proves that all 4 local migrations are applied on the Staging database and no local migration is pending. It does NOT independently prove zero physical schema drift outside Prisma migration history.
+- **Project-State Boundaries**:
+  - `NEXT_CANONICAL_GATE = UNPROVEN`
+  - `Next product/development mutation approved = NONE`
+
+
+### Current Local Engineering Checkpoint (04/10/2026)
+
+- **Local branch**: `staging`
+- **Current local HEAD**: `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f`.
+- This is a **local engineering checkpoint**, not evidence that these commits were pushed to remote Staging or deployed to Production.
+- **Current local engineering commit chain after `99b47733ffe8cf10c780c267c27c1f051ab115ed`**:
+  - G03 `b5851128b36a3ee1e19b238891975ebf94171256` — `build: exclude local artifacts from Docker context`.
+  - G02 `e1da08ef84931f196330667444d2b6fef4a370ba` — `chore: scope CommonJS lint exception to operator scripts`.
+  - G01 `401e2174c795bbc9667d91c4b2bb27ee2647a9f5` — `fix: separate application startup from database initialization`.
+  - G04 `1a10092dd082f04da4da560fd03e54a6dd2e8fb1` — `feat: add canonical business time helpers`.
+  - G05 `0e5b7af4f16d49431eccd01e8894c59eeb2f9014` — `feat: harden attendance workflows and tenant scoping`.
+  - G06 `5a08a7e2397f866bc750b5f4de12f062eb201534` — `feat: harden finance and scheduling tenant workflows`.
+  - G07 `23629530ba61d81903a56a9563c0fc33c64d2e37` — `feat: harden tenant storage and provider fail-closed behavior`.
+  - G08 `804e2291b020cb93c35596bf6e071440b28a5568` — `fix: remove host-specific PDF font fallback`.
+  - G09 `46f39038003f731d6557825c79212857d26b3238` — `fix: enforce business-date validation across employee leave and onboarding`.
+  - G10 `6451938c31413d90043adcfac6dbe012d273187f` — `test: expand cross-group regression coverage`.
+  - G13 `eeee6866aa1b92d48ebbe3129b80355ab5af6409` — `feat: harden derived workflows and tenant-safe business time`.
+  - Residual business-time source-contract commit `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f` — `test: preserve business-time source contracts`.
+- **G01-G10 and G13 current engineering work**: `COMMITTED_LOCAL / POST_COMMIT_VERIFIED`.
+- **G13 current engineering scope**:
+  - Exact validated engineering scope = 26 paths.
+  - ESLint = PASS, 0 errors / 42 warnings.
+  - HOST = 182/182 PASS.
+  - UTC = 182/182 PASS.
+  - America/Los_Angeles = 182/182 PASS.
+  - Commit `eeee6866aa1b92d48ebbe3129b80355ab5af6409` = 26 paths, 24 modified + 2 added, 618 insertions / 146 deletions.
+- **Residual source-contract regression tests**:
+  - 5 source-contract tests classified as product regression tests.
+  - ESLint = PASS.
+  - HOST Vitest = 5 files / 28 tests / 28 passed / 0 failed / 0 pending.
+  - Commit `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f` = 5 added files, 344 insertions / 0 deletions.
+- **Historical G13 boundary remains separate**:
+  - Historical G13 scope was recorded as 26 paths.
+  - Historical tracked core = 23 verified paths.
+  - Historical exact untracked member count = 3.
+  - The identities of those exact historical 3 remain `UNPROVEN`.
+  - Do not reinterpret the current validated 26-path engineering scope as proof of historical G13 membership.
+- **G11 / operator-historical residual boundary**:
+  - Current residual untracked count = 56.
+  - These artifacts remain outside approved product/test commits and must not be staged or committed automatically.
+- **G12 documentation durability boundary**:
+  - This handoff records the verified local engineering checkpoint through HEAD `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f`.
+  - The live stage, commit, push, and deployment status of this document must be determined from current Git/runtime evidence, not from this checkpoint text.
+- **PROJECT_SPEC authority status**:
+  - `docs/PROJECT_SPEC.md` does not exist in the worktree.
+  - It is not tracked.
+  - It has no Git path history in the available repository evidence.
+  - Status = `MISSING / UNPROVEN`.
+  - Do not create or promote another document as its replacement without a separate approved governance decision.
+- **Validation boundary**:
+  - R7-B4 69-file / 1214-test full-suite evidence remains historical.
+  - This checkpoint does not claim a newly executed full suite, full typecheck, or full Production build.
+- **Remote / deployment boundary**:
+  - The new local commits through `6dba05efaf42c347ae0f2e1ce359914c1cfcb37f` have **no push evidence in this checkpoint**.
+  - They have **no Production deployment evidence in this checkpoint**.
+  - Existing R5G Production records remain historical release evidence only and do not prove deployment of these new local commits.
+- **Governance**:
+  - No push is authorized by this correction.
+  - No deployment is authorized by this correction.
+  - Production DB writes, migrations, seed, env/WAF changes, rollback, promotion, or deployment require separate explicit Human Owner approval.
 ---
 
 ## 1. THÔNG TIN CƠ BẢN VÀ KIẾN TRÚC HIỆN TẠI
