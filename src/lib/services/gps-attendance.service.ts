@@ -4,6 +4,11 @@ import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
 import { AttendanceService } from '@/lib/services/attendance.service';
 import {
+  formatBusinessTime,
+  getBusinessDateString,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
+import {
   calculateHaversineDistanceMeters,
   checkGeofenceProximity,
   validateGpsAccuracy,
@@ -43,6 +48,7 @@ export class GpsAttendanceService {
       where: { userId: session.userId },
       select: {
         id: true,
+        organizationId: true,
         employeeCode: true,
         firstName: true,
         lastName: true,
@@ -91,7 +97,7 @@ export class GpsAttendanceService {
       const worksite = await prisma.worksite.findUnique({
         where: { id: preferredWorksiteId },
       });
-      if (!worksite) {
+      if (!worksite || worksite.organizationId !== employee.organizationId) {
         throw ApiError.notFound('Địa điểm làm việc được chỉ định không tồn tại.');
       }
       if (!worksite.isActive) {
@@ -110,9 +116,12 @@ export class GpsAttendanceService {
       return employee.worksite;
     }
 
-    // 3. Find closest active worksite among all active worksites
+    // 3. Find closest active worksite among active worksites of the employee's organization
     const activeWorksites = await prisma.worksite.findMany({
-      where: { isActive: true },
+      where: {
+        organizationId: employee.organizationId,
+        isActive: true,
+      },
     });
 
     if (activeWorksites.length === 0) {
@@ -269,8 +278,8 @@ export class GpsAttendanceService {
   static async attendWithGps(input: GpsAttendanceInput, session: UserSession) {
     const employee = await this.resolveEmployee(session);
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const todayDate = new Date(todayStr);
+    const todayStr = getBusinessDateString(now);
+    const todayDate = parseBusinessDate(todayStr);
 
     // 1. Resolve Worksite
     const worksite = await this.resolveTargetWorksite(
@@ -315,14 +324,19 @@ export class GpsAttendanceService {
     });
 
     if (!action) {
-      if (!existingAttendance || !existingAttendance.checkInTime) {
-        action = 'CHECK_IN';
-      } else if (!existingAttendance.checkOutTime) {
+      if (existingAttendance?.checkInTime && !existingAttendance.checkOutTime) {
         action = 'CHECK_OUT';
-      } else {
+      } else if (existingAttendance?.checkInTime && existingAttendance.checkOutTime) {
         throw ApiError.conflict(
-          `Bạn đã hoàn thành cả Check-in (${existingAttendance.checkInTime.toLocaleTimeString('vi-VN')}) và Check-out (${existingAttendance.checkOutTime.toLocaleTimeString('vi-VN')}) hôm nay.`
+          `Bạn đã hoàn thành cả Check-in (${formatBusinessTime(existingAttendance.checkInTime)}) và Check-out (${formatBusinessTime(existingAttendance.checkOutTime)}) hôm nay.`
         );
+      } else {
+        const checkoutCandidate = await AttendanceService.resolveCheckoutAttendance(
+          employee.organizationId,
+          employee.id,
+          now
+        );
+        action = checkoutCandidate.attendance ? 'CHECK_OUT' : 'CHECK_IN';
       }
     }
 
@@ -338,25 +352,26 @@ export class GpsAttendanceService {
           employeeId: employee.id,
           workDate: todayStr,
           checkInTime: now.toISOString(),
-          checkInMethod: 'GPS',
           checkInLat: input.latitude,
           checkInLng: input.longitude,
           notes: formattedNotes,
         },
-        session
+        session,
+        undefined,
+        'GPS'
       );
     } else {
       attendanceRecord = await AttendanceService.checkOut(
         {
           employeeId: employee.id,
-          workDate: todayStr,
           checkOutTime: now.toISOString(),
-          checkOutMethod: 'GPS',
           checkOutLat: input.latitude,
           checkOutLng: input.longitude,
           notes: formattedNotes,
         },
-        session
+        session,
+        undefined,
+        'GPS'
       );
     }
 

@@ -7,6 +7,10 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
+  formatClientBusinessInstantLongDate,
+  formatClientBusinessInstantTime,
+} from '@/lib/time/client-business-instant';
+import {
   RefreshCw,
   ArrowLeft,
   Sparkles,
@@ -134,10 +138,10 @@ export default function QrKioskPage() {
         <div className="flex items-center gap-4">
           <div className="text-right">
             <div className="text-2xl font-black font-mono tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-white">
-              {currentTime ? currentTime.toLocaleTimeString('vi-VN') : '--:--:--'}
+              {currentTime ? formatClientBusinessInstantTime(currentTime) : '--:--:--'}
             </div>
             <div className="text-xs text-slate-400">
-              {currentTime ? currentTime.toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : ''}
+              {currentTime ? formatClientBusinessInstantLongDate(currentTime) : ''}
             </div>
           </div>
         </div>

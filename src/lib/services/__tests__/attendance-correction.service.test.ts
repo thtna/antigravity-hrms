@@ -83,6 +83,7 @@ import { AttendanceCorrectionService } from '@/lib/services/attendance-correctio
 
 const adminSession = {
   userId: 'usr-admin',
+  organizationId: 'org-001',
   roles: ['admin' as const],
   email: 'admin@test.com',
   fullName: 'Admin User',
@@ -92,6 +93,7 @@ const adminSession = {
 
 const hrSession = {
   userId: 'usr-hr',
+  organizationId: 'org-001',
   roles: ['hr' as const],
   email: 'hr@test.com',
   fullName: 'HR User',
@@ -101,6 +103,7 @@ const hrSession = {
 
 const managerSession = {
   userId: 'usr-mgr',
+  organizationId: 'org-001',
   roles: ['manager' as const],
   email: 'mgr@test.com',
   fullName: 'Manager User',
@@ -111,6 +114,8 @@ const managerSession = {
 
 const employeeSession = {
   userId: 'usr-emp1',
+  employeeId: 'emp-001',
+  organizationId: 'org-001',
   roles: ['employee' as const],
   email: 'emp1@test.com',
   fullName: 'Employee 1',
@@ -120,6 +125,8 @@ const employeeSession = {
 
 const otherEmployeeSession = {
   userId: 'usr-emp2',
+  employeeId: 'emp-002',
+  organizationId: 'org-001',
   roles: ['employee' as const],
   email: 'emp2@test.com',
   fullName: 'Employee 2',
@@ -147,6 +154,7 @@ const standardShift = {
 
 const emp1Record = {
   id: 'emp-001',
+  organizationId: 'org-001',
   userId: 'usr-emp1',
   employeeCode: 'EMP-001',
   firstName: 'Văn A',
@@ -158,6 +166,7 @@ const emp1Record = {
 
 const emp2Record = {
   id: 'emp-002',
+  organizationId: 'org-001',
   userId: 'usr-emp2',
   employeeCode: 'EMP-002',
   firstName: 'Thị B',
@@ -169,6 +178,7 @@ const emp2Record = {
 
 const managerEmpRecord = {
   id: 'emp-mgr',
+  organizationId: 'org-001',
   userId: 'usr-mgr',
   employeeCode: 'EMP-MGR',
   firstName: 'Quản Lý',
@@ -189,8 +199,8 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
       if (where.userId === 'usr-emp1' || where.id === 'emp-001') return emp1Record;
       if (where.userId === 'usr-emp2' || where.id === 'emp-002') return emp2Record;
       if (where.userId === 'usr-mgr' || where.id === 'emp-mgr') return managerEmpRecord;
-      if (where.userId === 'usr-admin') return { id: 'emp-admin', status: 'ACTIVE', deletedAt: null };
-      if (where.userId === 'usr-hr') return { id: 'emp-hr', status: 'ACTIVE', deletedAt: null };
+      if (where.userId === 'usr-admin') return { id: 'emp-admin', status: 'ACTIVE', deletedAt: null, organizationId: 'org-001' };
+      if (where.userId === 'usr-hr') return { id: 'emp-hr', status: 'ACTIVE', deletedAt: null, organizationId: 'org-001' };
       return null;
     });
 
@@ -213,7 +223,7 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
         employeeId: 'emp-001',
         workDate: new Date(PAST_DATE),
         correctionType: 'FORGOT_CHECKIN',
-        requestedCheckIn: new Date(`${PAST_DATE}T08:30:00`),
+        requestedCheckIn: new Date(`${PAST_DATE}T08:30:00+07:00`),
         requestedCheckOut: null,
         reason: 'Quên bấm máy chấm công buổi sáng do vội vào họp',
         status: 'PENDING',
@@ -250,7 +260,7 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
         id: 'att-001',
         employeeId: 'emp-001',
         workDate: new Date(PAST_DATE),
-        checkInTime: new Date(`${PAST_DATE}T08:30:00`),
+        checkInTime: new Date(`${PAST_DATE}T08:30:00+07:00`),
         checkOutTime: null,
       });
       mockPrisma.attendanceAdjustment.findFirst.mockResolvedValue(null);
@@ -279,8 +289,8 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
         id: 'att-001',
         employeeId: 'emp-001',
         workDate: new Date(PAST_DATE),
-        checkInTime: new Date(`${PAST_DATE}T08:30:00`),
-        checkOutTime: new Date(`${PAST_DATE}T17:30:00`),
+        checkInTime: new Date(`${PAST_DATE}T08:30:00+07:00`),
+        checkOutTime: new Date(`${PAST_DATE}T17:30:00+07:00`),
       });
 
       await expect(
@@ -376,8 +386,8 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
         id: 'att-005',
         employeeId: 'emp-001',
         workDate: new Date(PAST_DATE),
-        checkInTime: new Date(`${PAST_DATE}T08:30:00`),
-        checkOutTime: new Date(`${PAST_DATE}T20:00:00`),
+        checkInTime: new Date(`${PAST_DATE}T08:30:00+07:00`),
+        checkOutTime: new Date(`${PAST_DATE}T20:00:00+07:00`),
       });
       mockPrisma.attendanceAdjustment.findFirst.mockResolvedValue(null);
       mockPrisma.attendanceAdjustment.create.mockResolvedValue({
@@ -487,6 +497,61 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
         )
       ).rejects.toThrow('Chỉ Quản trị viên hoặc Nhân sự mới có quyền');
     });
+
+    it('1.13 interprets offsetless overnight correction times as Vietnam wall-clock values', async () => {
+      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      mockPrisma.attendanceAdjustment.findFirst.mockResolvedValue(null);
+      mockPrisma.workShift.findFirst.mockResolvedValue({
+        ...standardShift,
+        startTime: '22:00',
+        endTime: '06:00',
+        isOvernight: true,
+      });
+      mockPrisma.attendanceAdjustment.create.mockImplementation(async ({ data }: any) => ({
+        id: 'adj-overnight-vn',
+        ...data,
+      }));
+
+      await AttendanceCorrectionService.createCorrection(
+        {
+          workDate: PAST_DATE,
+          correctionType: 'MISSING_ATTENDANCE',
+          requestedCheckIn: `${PAST_DATE}T22:00:00`,
+          requestedCheckOut: `${PAST_DATE}T02:00:00`,
+          reason: 'Bổ sung bản ghi ca đêm bị thiếu hoàn toàn',
+        },
+        employeeSession
+      );
+
+      const data = mockPrisma.attendanceAdjustment.create.mock.calls[0][0].data;
+      expect(data.requestedCheckIn.toISOString()).toBe('2026-09-02T15:00:00.000Z');
+      expect(data.requestedCheckOut.toISOString()).toBe('2026-09-02T19:00:00.000Z');
+      expect(mockPrisma.employeeSchedule.create).not.toHaveBeenCalled();
+    });
+
+    it('1.14 preserves explicit correction instants', async () => {
+      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      mockPrisma.attendanceAdjustment.findFirst.mockResolvedValue(null);
+      mockPrisma.attendanceAdjustment.create.mockImplementation(async ({ data }: any) => ({
+        id: 'adj-explicit-offset',
+        ...data,
+      }));
+
+      await AttendanceCorrectionService.createCorrection(
+        {
+          workDate: PAST_DATE,
+          correctionType: 'MISSING_ATTENDANCE',
+          requestedCheckIn: `${PAST_DATE}T01:30:00Z`,
+          requestedCheckOut: `${PAST_DATE}T10:30:00Z`,
+          reason: 'Bổ sung bản ghi với thời điểm UTC đã xác định',
+        },
+        employeeSession
+      );
+
+      const data = mockPrisma.attendanceAdjustment.create.mock.calls[0][0].data;
+      expect(data.requestedCheckIn.toISOString()).toBe('2026-09-02T01:30:00.000Z');
+      expect(data.requestedCheckOut.toISOString()).toBe('2026-09-02T10:30:00.000Z');
+    });
   });
 
   // ===========================================================================
@@ -495,11 +560,12 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
   describe('2. Process Correction Requests (Approval Workflow)', () => {
     const pendingAdjustment = {
       id: 'adj-pending-1',
+      organizationId: 'org-001',
       employeeId: 'emp-001',
       workDate: new Date(PAST_DATE),
       correctionType: 'FORGOT_CHECKOUT',
       requestedCheckIn: null,
-      requestedCheckOut: new Date(`${PAST_DATE}T17:30:00`),
+      requestedCheckOut: new Date(`${PAST_DATE}T17:30:00+07:00`),
       overtimeMinutes: null,
       status: 'PENDING',
       reason: 'Quên check-out',
@@ -593,7 +659,7 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
         id: 'att-orig-1',
         employeeId: 'emp-001',
         workDate: new Date(PAST_DATE),
-        checkInTime: new Date(`${PAST_DATE}T08:30:00`),
+        checkInTime: new Date(`${PAST_DATE}T08:30:00+07:00`),
         checkOutTime: null,
         checkInMethod: 'WEB',
         checkOutMethod: null,
@@ -610,7 +676,7 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
 
       const updatedAttendanceRecord = {
         ...originalAttendance,
-        checkOutTime: new Date(`${PAST_DATE}T17:30:00`),
+        checkOutTime: new Date(`${PAST_DATE}T17:30:00+07:00`),
         checkOutMethod: 'CORRECTED',
         actualWorkHours: new Prisma.Decimal(8.0),
         status: 'ON_TIME',
@@ -635,7 +701,14 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
 
       expect(res.status).toBe('APPROVED');
       // Verify attendance upsert was called to apply the correction
-      expect(mockPrisma.attendance.upsert).toHaveBeenCalled();
+      expect(mockPrisma.attendance.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            checkInMethod: 'WEB',
+            checkOutMethod: 'CORRECTED',
+          }),
+        })
+      );
 
       // Verify audit log captured both oldValues (original snapshot) and newValues
       expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(
@@ -648,14 +721,69 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
                 id: 'att-orig-1',
                 checkInTime: expect.any(String),
                 checkOutTime: null,
+                checkInMethod: 'WEB',
+                checkOutMethod: null,
               }),
             }),
             newValues: expect.objectContaining({
               attendance: expect.objectContaining({
                 id: 'att-orig-1',
+                checkInMethod: 'WEB',
                 checkOutMethod: 'CORRECTED',
               }),
             }),
+          }),
+        })
+      );
+    });
+
+    it('2.5b marks only a corrected check-in and preserves existing check-out provenance', async () => {
+      const checkInAdjustment = {
+        ...pendingAdjustment,
+        id: 'adj-checkin-only',
+        correctionType: 'FORGOT_CHECKIN',
+        requestedCheckIn: new Date(`${PAST_DATE}T08:30:00+07:00`),
+        requestedCheckOut: null,
+      };
+      const originalAttendance = {
+        id: 'att-checkin-only',
+        employeeId: 'emp-001',
+        workDate: new Date(PAST_DATE),
+        checkInTime: null,
+        checkOutTime: new Date(`${PAST_DATE}T17:30:00+07:00`),
+        checkInMethod: null,
+        checkOutMethod: 'GPS',
+        lateMinutes: 0,
+        earlyMinutes: 0,
+        actualWorkHours: new Prisma.Decimal(0),
+        otHours: new Prisma.Decimal(0),
+        status: 'IN_PROGRESS',
+        notes: null,
+      };
+
+      mockPrisma.attendanceAdjustment.findUnique.mockResolvedValue(checkInAdjustment);
+      mockPrisma.attendance.findUnique.mockResolvedValue(originalAttendance);
+      mockPrisma.attendance.upsert.mockResolvedValue({
+        ...originalAttendance,
+        checkInTime: checkInAdjustment.requestedCheckIn,
+        checkInMethod: 'CORRECTED',
+      });
+      mockPrisma.attendanceAdjustment.update.mockResolvedValue({
+        ...checkInAdjustment,
+        status: 'APPROVED',
+      });
+
+      await AttendanceCorrectionService.processCorrection(
+        checkInAdjustment.id,
+        { decision: 'APPROVED' },
+        hrSession
+      );
+
+      expect(mockPrisma.attendance.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            checkInMethod: 'CORRECTED',
+            checkOutMethod: 'GPS',
           }),
         })
       );
@@ -674,8 +802,8 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
         id: 'att-late-1',
         employeeId: 'emp-001',
         workDate: new Date(PAST_DATE),
-        checkInTime: new Date(`${PAST_DATE}T09:15:00`),
-        checkOutTime: new Date(`${PAST_DATE}T17:30:00`),
+        checkInTime: new Date(`${PAST_DATE}T09:15:00+07:00`),
+        checkOutTime: new Date(`${PAST_DATE}T17:30:00+07:00`),
         checkInMethod: 'WEB',
         checkOutMethod: 'WEB',
         lateMinutes: 45,
@@ -707,6 +835,8 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
       expect(mockPrisma.attendance.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           update: expect.objectContaining({
+            checkInMethod: 'WEB',
+            checkOutMethod: 'WEB',
             lateMinutes: 0,
             status: 'ON_TIME',
           }),
@@ -728,8 +858,10 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
         id: 'att-ot-1',
         employeeId: 'emp-001',
         workDate: new Date(PAST_DATE),
-        checkInTime: new Date(`${PAST_DATE}T08:30:00`),
-        checkOutTime: new Date(`${PAST_DATE}T17:30:00`),
+        checkInTime: new Date(`${PAST_DATE}T08:30:00+07:00`),
+        checkOutTime: new Date(`${PAST_DATE}T17:30:00+07:00`),
+        checkInMethod: 'QR',
+        checkOutMethod: 'GPS',
         lateMinutes: 0,
         earlyMinutes: 0,
         actualWorkHours: new Prisma.Decimal(8.0),
@@ -758,6 +890,8 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
       expect(mockPrisma.attendance.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           update: expect.objectContaining({
+            checkInMethod: 'QR',
+            checkOutMethod: 'GPS',
             otHours: new Prisma.Decimal(2.0),
             status: 'OVERTIME',
           }),
@@ -779,6 +913,70 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
         )
       ).rejects.toThrow('đã được xử lý trước đó');
     });
+
+    it('2.9 interprets offsetless approval overrides in Vietnam time across an overnight shift', async () => {
+      const overnightShift = {
+        ...standardShift,
+        id: 'shift-overnight',
+        code: 'NIGHT',
+        startTime: '22:00',
+        endTime: '06:00',
+        isOvernight: true,
+      };
+      const overnightCorrection = {
+        ...pendingAdjustment,
+        id: 'adj-overnight-override',
+        correctionType: 'FULL_CORRECTION',
+        requestedCheckIn: null,
+        requestedCheckOut: null,
+      };
+      const originalAttendance = {
+        id: 'att-overnight-override',
+        employeeId: 'emp-001',
+        workDate: new Date(`${PAST_DATE}T00:00:00.000Z`),
+        checkInTime: null,
+        checkOutTime: null,
+        checkInMethod: null,
+        checkOutMethod: null,
+        lateMinutes: 0,
+        earlyMinutes: 0,
+        actualWorkHours: new Prisma.Decimal(0),
+        otHours: new Prisma.Decimal(0),
+        status: 'IN_PROGRESS',
+        notes: null,
+      };
+
+      mockPrisma.workShift.findFirst.mockResolvedValue(overnightShift);
+      mockPrisma.attendanceAdjustment.findUnique.mockResolvedValue(overnightCorrection);
+      mockPrisma.attendance.findUnique.mockResolvedValue(originalAttendance);
+      mockPrisma.attendance.upsert.mockImplementation(async ({ update }: any) => ({
+        ...originalAttendance,
+        ...update,
+      }));
+      mockPrisma.attendanceAdjustment.update.mockImplementation(async ({ data }: any) => ({
+        ...overnightCorrection,
+        ...data,
+      }));
+
+      await AttendanceCorrectionService.processCorrection(
+        'adj-overnight-override',
+        {
+          decision: 'APPROVED',
+          overrideCheckIn: `${PAST_DATE}T22:00:00`,
+          overrideCheckOut: `${PAST_DATE}T02:00:00`,
+        },
+        hrSession
+      );
+
+      const adjustmentData = mockPrisma.attendanceAdjustment.update.mock.calls[0][0].data;
+      const attendanceData = mockPrisma.attendance.upsert.mock.calls[0][0].update;
+      expect(adjustmentData.overrideCheckIn.toISOString()).toBe('2026-09-02T15:00:00.000Z');
+      expect(adjustmentData.overrideCheckOut.toISOString()).toBe('2026-09-02T19:00:00.000Z');
+      expect(attendanceData.checkInTime.toISOString()).toBe('2026-09-02T15:00:00.000Z');
+      expect(attendanceData.checkOutTime.toISOString()).toBe('2026-09-02T19:00:00.000Z');
+      expect(attendanceData.checkInMethod).toBe('CORRECTED');
+      expect(attendanceData.checkOutMethod).toBe('CORRECTED');
+    });
   });
 
   // ===========================================================================
@@ -789,6 +987,7 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
       mockPrisma.attendanceAdjustment.findUnique.mockResolvedValue({
         id: 'adj-cancel-1',
         employeeId: 'emp-001',
+        organizationId: 'org-001',
         status: 'PENDING',
       });
       mockPrisma.attendanceAdjustment.update.mockResolvedValue({
@@ -816,6 +1015,7 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
       mockPrisma.attendanceAdjustment.findUnique.mockResolvedValue({
         id: 'adj-cancel-2',
         employeeId: 'emp-002', // belongs to emp-002
+        organizationId: 'org-001',
         status: 'PENDING',
       });
 
@@ -832,6 +1032,7 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
       mockPrisma.attendanceAdjustment.findUnique.mockResolvedValue({
         id: 'adj-cancel-3',
         employeeId: 'emp-001',
+        organizationId: 'org-001',
         status: 'APPROVED',
       });
 
@@ -912,6 +1113,165 @@ describe('PHASE 9 — ATTENDANCE CORRECTION & EXCEPTIONS TEST SUITE', () => {
           }),
         })
       );
+    });
+  });
+
+  describe('G05 correction employee resolution fail-closed', () => {
+    const input = {
+      workDate: PAST_DATE,
+      correctionType: 'MISSING_ATTENDANCE' as const,
+      requestedCheckIn: `${PAST_DATE}T08:30:00`,
+      requestedCheckOut: `${PAST_DATE}T17:30:00`,
+      reason: 'Missing attendance needs correction.',
+    };
+
+    it.each([
+      { role: 'admin', session: adminSession },
+      { role: 'hr', session: hrSession },
+    ])('$role createCorrection fails closed without organization context', async ({ session }) => {
+      for (const organizationId of [undefined, null, '']) {
+        await expect(
+          AttendanceCorrectionService.createCorrection(input, { ...session, organizationId }, 'emp-002')
+        ).rejects.toMatchObject({ statusCode: 403, errorCode: 'FORBIDDEN' });
+      }
+
+      expect(mockPrisma.employee.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.attendanceAdjustment.create).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { role: 'admin', session: adminSession },
+      { role: 'hr', session: hrSession },
+    ])('$role cannot createCorrection for an employee in another organization', async ({ session }) => {
+      mockPrisma.employee.findUnique.mockResolvedValue({ ...emp2Record, organizationId: 'org-foreign' });
+
+      await expect(
+        AttendanceCorrectionService.createCorrection(input, session, 'emp-002')
+      ).rejects.toMatchObject({ statusCode: 400, errorCode: 'BAD_REQUEST' });
+
+      expect(mockPrisma.attendance.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.attendanceAdjustment.create).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { resolution: 'employeeId', session: employeeSession },
+      { resolution: 'userId', session: { ...employeeSession, employeeId: undefined } },
+    ])('self createCorrection via $resolution rejects an organization mismatch', async ({ session }) => {
+      mockPrisma.employee.findUnique.mockResolvedValue({ ...emp1Record, organizationId: 'org-foreign' });
+
+      await expect(
+        AttendanceCorrectionService.createCorrection(input, session)
+      ).rejects.toMatchObject({ statusCode: 400, errorCode: 'BAD_REQUEST' });
+
+      expect(mockPrisma.employee.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: session.employeeId ? { id: session.employeeId } : { userId: session.userId },
+        })
+      );
+      expect(mockPrisma.attendance.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.attendanceAdjustment.create).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('6. R7-B Regression: Tenant Isolation and Self-Scope', () => {
+    it('regular employee cannot use employeeId query override to read another employee', async () => {
+      mockPrisma.attendanceAdjustment.count.mockResolvedValue(1);
+      mockPrisma.attendanceAdjustment.findMany.mockResolvedValue([]);
+
+      await AttendanceCorrectionService.listCorrections(
+        { employeeId: 'emp-other', status: 'ALL', page: 1, limit: 10 },
+        employeeSession
+      );
+
+      expect(mockPrisma.attendanceAdjustment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            employeeId: employeeSession.employeeId,
+          }),
+        })
+      );
+      const whereArg = mockPrisma.attendanceAdjustment.findMany.mock.calls[0][0].where;
+      expect(whereArg.employeeId).not.toBe('emp-other');
+    });
+
+    it('processCorrection fails closed when caller lacks organizationId', async () => {
+      const adminNoOrg = {
+        ...adminSession,
+        organizationId: undefined as any,
+      };
+      mockPrisma.attendanceAdjustment.findUnique.mockResolvedValue({
+        id: 'adj-001',
+        organizationId: 'org-001',
+        status: 'PENDING',
+      });
+
+      await expect(
+        AttendanceCorrectionService.processCorrection(
+          'adj-001',
+          { decision: 'APPROVED' },
+          adminNoOrg
+        )
+      ).rejects.toThrow('Không tìm thấy yêu cầu điều chỉnh có ID: adj-001');
+    });
+
+    it('processCorrection fails closed when target correction belongs to different organization', async () => {
+      const adminWithOrg = {
+        ...adminSession,
+        organizationId: 'org-001',
+      };
+      mockPrisma.attendanceAdjustment.findUnique.mockResolvedValue({
+        id: 'adj-001',
+        organizationId: 'org-foreign',
+        status: 'PENDING',
+      });
+
+      await expect(
+        AttendanceCorrectionService.processCorrection(
+          'adj-001',
+          { decision: 'APPROVED' },
+          adminWithOrg
+        )
+      ).rejects.toThrow('Không tìm thấy yêu cầu điều chỉnh có ID: adj-001');
+    });
+
+    it('cancelCorrection fails closed when caller lacks organizationId', async () => {
+      const empNoOrg = {
+        ...employeeSession,
+        organizationId: undefined as any,
+      };
+      mockPrisma.attendanceAdjustment.findUnique.mockResolvedValue({
+        id: 'adj-001',
+        employeeId: employeeSession.employeeId,
+        organizationId: 'org-001',
+        status: 'PENDING',
+      });
+
+      await expect(
+        AttendanceCorrectionService.cancelCorrection('adj-001', {}, empNoOrg)
+      ).rejects.toThrow('Không tìm thấy yêu cầu điều chỉnh có ID: adj-001');
+    });
+
+    it('cancelCorrection fails closed when target correction belongs to different organization', async () => {
+      const empWithOrg = {
+        ...employeeSession,
+        organizationId: 'org-001',
+      };
+      mockPrisma.attendanceAdjustment.findUnique.mockResolvedValue({
+        id: 'adj-001',
+        employeeId: employeeSession.employeeId,
+        organizationId: 'org-foreign',
+        status: 'PENDING',
+      });
+
+      await expect(
+        AttendanceCorrectionService.cancelCorrection('adj-001', {}, empWithOrg)
+      ).rejects.toThrow('Không tìm thấy yêu cầu điều chỉnh có ID: adj-001');
     });
   });
 });

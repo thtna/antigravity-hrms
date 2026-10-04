@@ -16,7 +16,14 @@ import { ApiError } from '@/lib/errors';
 import { UserSession } from '@/types';
 import { AttendanceService } from '@/lib/services/attendance.service';
 import {
+  formatBusinessTime,
+  getBusinessDateString,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
+import {
   GenerateQrTokenInput,
+  QrTokenPayload,
+  QrTokenPayloadSchema,
   ScanQrAttendanceInput,
   QrTokenQueryParams,
 } from '@/lib/validations/qr-attendance';
@@ -59,15 +66,6 @@ export function getQrSecret(): string {
   throw ApiError.internal(
     'Cấu hình bảo mật lỗi: Yêu cầu thiết lập QR_SECRET (hoặc AUTH_SECRET trong môi trường phát triển).'
   );
-}
-
-export interface QrTokenPayload {
-  v: string;         // Protocol version
-  code: string;      // Nonce / Unique code
-  type: string;      // CHECK_IN | CHECK_OUT | ANY
-  exp: number;       // Expiration timestamp in ms
-  sig: string;       // HMAC-SHA256 signature
-  loc?: string;      // Optional location tag
 }
 
 export class QrAttendanceService {
@@ -113,8 +111,7 @@ export class QrAttendanceService {
       throw ApiError.unauthorized('Yêu cầu đăng nhập để khởi tạo mã QR.');
     }
 
-    const targetOrgId = session.organizationId || ((session.roles.includes('super_admin') && (input as any).organizationId) ? (input as any).organizationId : null);
-    if (!targetOrgId) {
+    if (!session.organizationId) {
       throw ApiError.badRequest('Tổ chức (organizationId) là bắt buộc để khởi tạo mã QR điểm danh.');
     }
 
@@ -128,7 +125,7 @@ export class QrAttendanceService {
     // Save token to database for anti-replay tracking
     const tokenRecord = await prisma.qrAttendanceToken.create({
       data: {
-        organizationId: targetOrgId,
+        organizationId: session.organizationId,
         code,
         tokenType,
         signature,
@@ -200,144 +197,135 @@ export class QrAttendanceService {
       throw ApiError.unauthorized('Bạn cần đăng nhập để thực hiện chấm công bằng mã QR.');
     }
 
-    // 2. Active Employee Status Check
-    const employee = await prisma.employee.findUnique({
-      where: { userId: session.userId },
-      select: {
-        id: true,
-        employeeCode: true,
-        firstName: true,
-        lastName: true,
-        status: true,
-        deletedAt: true,
-        organizationId: true,
-      },
-    });
+    if (!session.organizationId) {
+      throw ApiError.forbidden('Phiên đăng nhập không thuộc tổ chức hợp lệ để chấm công bằng mã QR.');
+    }
+    const organizationId = session.organizationId;
 
-    if (!employee || employee.deletedAt) {
-      throw ApiError.notFound('Hồ sơ nhân viên của bạn không tồn tại trong hệ thống.');
+    // 2. Strictly parse and authenticate the signed v1 payload. Raw codes are never accepted.
+    let rawPayload: unknown;
+    try {
+      rawPayload = JSON.parse(input.qrPayload.trim());
+    } catch {
+      throw ApiError.badRequest('Mã QR có cấu trúc không hợp lệ.');
     }
 
-    if (employee.status !== 'ACTIVE') {
-      throw ApiError.forbidden('Tài khoản nhân viên của bạn không ở trạng thái hoạt động.');
+    const parsedPayload = QrTokenPayloadSchema.safeParse(rawPayload);
+    if (!parsedPayload.success) {
+      throw ApiError.badRequest('Mã QR có cấu trúc không hợp lệ.');
     }
 
-    // 3. Parse QR Payload
-    let code = input.qrPayload.trim();
-    let expectedType = 'ANY';
-    let expTimestamp: number | null = null;
-    let signature = '';
-
-    if (code.startsWith('{') && code.endsWith('}')) {
-      try {
-        const parsed: QrTokenPayload = JSON.parse(code);
-        if (!parsed.code || !parsed.sig || !parsed.exp) {
-          throw new Error('Payload structure missing fields');
-        }
-        code = parsed.code;
-        expectedType = parsed.type || 'ANY';
-        expTimestamp = parsed.exp;
-        signature = parsed.sig;
-
-        // Verify cryptographic signature
-        const isValidSig = this.verifySignature(code, expectedType, expTimestamp, signature);
-        if (!isValidSig) {
-          throw ApiError.badRequest('Mã QR không hợp lệ hoặc đã bị chỉnh sửa.');
-        }
-      } catch (err: any) {
-        if (err instanceof ApiError) throw err;
-        throw ApiError.badRequest('Mã QR có cấu trúc không hợp lệ.');
-      }
-    }
-
-    // 4. Database Token Lookup
-    const qrToken = await prisma.qrAttendanceToken.findUnique({
-      where: { code },
-    });
-
-    if (!qrToken) {
-      throw ApiError.badRequest('Mã QR không tồn tại trong hệ thống hoặc không hợp lệ.');
-    }
-
-    if (qrToken.organizationId && qrToken.organizationId !== employee.organizationId) {
-      throw ApiError.forbidden('Mã QR này thuộc về một tổ chức khác.');
+    const { code, type: expectedType, exp: expTimestamp, sig: signature } = parsedPayload.data;
+    if (!this.verifySignature(code, expectedType, expTimestamp, signature)) {
+      throw ApiError.badRequest('Mã QR không hợp lệ hoặc đã bị chỉnh sửa.');
     }
 
     const now = new Date();
-
-    // 5. Expiration Check
-    if (now.getTime() > qrToken.expiresAt.getTime()) {
+    if (now.getTime() > expTimestamp) {
       throw ApiError.badRequest('Mã QR đã hết hạn. Vui lòng quét mã mới vừa được tạo.');
     }
 
-    // 6. Anti-Replay Protection (Zero-Reuse)
-    if (qrToken.isUsed) {
-      throw ApiError.badRequest('Mã QR này đã được sử dụng (Anti-replay). Vui lòng quét mã mới.');
-    }
+    // 3. All database-dependent QR work uses one transaction client.
+    const result = await prisma.$transaction(async (tx) => {
+      const employee = await tx.employee.findUnique({
+        where: { userId: session.userId, organizationId },
+        select: {
+          id: true,
+          employeeCode: true,
+          firstName: true,
+          lastName: true,
+          status: true,
+          deletedAt: true,
+          organizationId: true,
+        },
+      });
 
-    // 7. Resolve Action (CHECK_IN or CHECK_OUT)
-    const todayStr = now.toISOString().split('T')[0];
-    const todayDate = new Date(todayStr);
+      if (!employee || employee.deletedAt) {
+        throw ApiError.notFound('Hồ sơ nhân viên của bạn không tồn tại trong hệ thống.');
+      }
+      if (employee.organizationId !== organizationId) {
+        throw ApiError.forbidden('Hồ sơ nhân viên không thuộc tổ chức của phiên đăng nhập.');
+      }
+      if (employee.status !== 'ACTIVE') {
+        throw ApiError.forbidden('Tài khoản nhân viên của bạn không ở trạng thái hoạt động.');
+      }
 
-    let action = input.action;
+      const qrToken = await tx.qrAttendanceToken.findUnique({
+        where: { code, organizationId },
+      });
 
-    // If action not specified by scanner, auto-detect based on token or today's attendance state
-    if (!action) {
-      if (qrToken.tokenType === 'CHECK_IN' || qrToken.tokenType === 'CHECK_OUT') {
-        action = qrToken.tokenType as 'CHECK_IN' | 'CHECK_OUT';
-      } else {
-        // Query today's attendance
-        const existing = await prisma.attendance.findUnique({
-          where: { employeeId_workDate: { employeeId: employee.id, workDate: todayDate } },
-        });
+      if (!qrToken) {
+        throw ApiError.badRequest('Mã QR không tồn tại trong hệ thống hoặc không hợp lệ.');
+      }
+      if (qrToken.organizationId !== organizationId) {
+        throw ApiError.forbidden('Mã QR này thuộc về một tổ chức khác.');
+      }
 
-        if (!existing || !existing.checkInTime) {
-          action = 'CHECK_IN';
-        } else {
+      const dbExpiryTimestamp = qrToken.expiresAt.getTime();
+      if (
+        qrToken.code !== code ||
+        qrToken.tokenType !== expectedType ||
+        dbExpiryTimestamp !== expTimestamp ||
+        qrToken.signature !== signature
+      ) {
+        throw ApiError.badRequest('Mã QR không khớp với dữ liệu đã phát hành.');
+      }
+      if (now.getTime() > dbExpiryTimestamp) {
+        throw ApiError.badRequest('Mã QR đã hết hạn. Vui lòng quét mã mới vừa được tạo.');
+      }
+      if (qrToken.isUsed) {
+        throw ApiError.badRequest('Mã QR này đã được sử dụng (Anti-replay). Vui lòng quét mã mới.');
+      }
+
+      const todayStr = getBusinessDateString(now);
+      const todayDate = parseBusinessDate(todayStr);
+      let action = input.action;
+      const currentAttendance = await tx.attendance.findUnique({
+        where: { employeeId_workDate: { employeeId: employee.id, workDate: todayDate } },
+      });
+
+      if (!action) {
+        if (qrToken.tokenType === 'CHECK_IN' || qrToken.tokenType === 'CHECK_OUT') {
+          action = qrToken.tokenType as 'CHECK_IN' | 'CHECK_OUT';
+        } else if (currentAttendance?.checkInTime && !currentAttendance.checkOutTime) {
           action = 'CHECK_OUT';
+        } else if (currentAttendance?.checkInTime && currentAttendance.checkOutTime) {
+          throw ApiError.conflict(
+            `Ban da hoan thanh ca lam viec hom nay luc ${formatBusinessTime(currentAttendance.checkOutTime)}.`
+          );
+        } else {
+          const checkoutCandidate = await AttendanceService.resolveCheckoutAttendance(
+            organizationId,
+            employee.id,
+            now,
+            {},
+            tx
+          );
+          action = checkoutCandidate.attendance ? 'CHECK_OUT' : 'CHECK_IN';
         }
       }
-    }
 
-    // Validate action compatibility with restricted token
-    if (qrToken.tokenType !== 'ANY' && qrToken.tokenType !== action) {
-      throw ApiError.badRequest(
-        `Mã QR này chỉ dành cho thao tác ${qrToken.tokenType === 'CHECK_IN' ? 'Check-in (Vào ca)' : 'Check-out (Tan ca)'}.`
-      );
-    }
-
-    // 8. Pre-validate Attendance State Before Consuming Token
-    if (action === 'CHECK_IN') {
-      const existing = await prisma.attendance.findUnique({
-        where: { employeeId_workDate: { employeeId: employee.id, workDate: todayDate } },
-      });
-      if (existing && existing.checkInTime) {
-        throw ApiError.conflict(
-          `Nhân viên đã thực hiện check-in cho ngày ${todayStr} lúc ${existing.checkInTime.toLocaleTimeString('vi-VN')}.`
-        );
-      }
-    } else {
-      // CHECK_OUT
-      const existing = await prisma.attendance.findUnique({
-        where: { employeeId_workDate: { employeeId: employee.id, workDate: todayDate } },
-      });
-      if (!existing || !existing.checkInTime) {
+      if (qrToken.tokenType !== 'ANY' && qrToken.tokenType !== action) {
         throw ApiError.badRequest(
-          'Không tìm thấy bản ghi check-in cho ngày làm việc này. Bạn phải thực hiện Check-in trước khi Check-out.'
+          `Mã QR này chỉ dành cho thao tác ${qrToken.tokenType === 'CHECK_IN' ? 'Check-in (Vào ca)' : 'Check-out (Tan ca)'}.`
         );
       }
-      if (existing.checkOutTime) {
-        throw ApiError.badRequest(
-          `Bản ghi đã được check-out lúc ${existing.checkOutTime.toLocaleTimeString('vi-VN')}.`
-        );
-      }
-    }
 
-    // 9. Atomic Execution: Consume QR token & Perform Attendance
-    const result = await prisma.$transaction(async (tx) => {
-      // Consume token (Anti-Replay mark)
-      await tx.qrAttendanceToken.update({
-        where: { id: qrToken.id },
+      if (action === 'CHECK_IN') {
+        if (currentAttendance?.checkInTime) {
+          throw ApiError.conflict(
+            `Nhân viên đã thực hiện check-in cho ngày ${todayStr} lúc ${formatBusinessTime(currentAttendance.checkInTime)}.`
+          );
+        }
+      }
+
+      const consumed = await tx.qrAttendanceToken.updateMany({
+        where: {
+          id: qrToken.id,
+          organizationId,
+          isUsed: false,
+          expiresAt: { gte: now },
+        },
         data: {
           isUsed: true,
           usedAt: now,
@@ -345,56 +333,60 @@ export class QrAttendanceService {
         },
       });
 
-      let attendanceRecord;
+      if (consumed.count !== 1) {
+        throw ApiError.badRequest('Mã QR đã được sử dụng, hết hạn hoặc không còn hợp lệ.');
+      }
 
+      let attendanceRecord;
       if (action === 'CHECK_IN') {
         attendanceRecord = await AttendanceService.checkIn(
           {
             employeeId: employee.id,
             workDate: todayStr,
             checkInTime: now.toISOString(),
-            checkInMethod: 'QR',
             checkInLat: input.lat,
             checkInLng: input.lng,
             notes: input.notes ? `[QR Kiosk: ${qrToken.location || 'N/A'}] ${input.notes}` : `[QR Kiosk: ${qrToken.location || 'N/A'}]`,
           },
-          session
+          session,
+          tx,
+          'QR'
         );
       } else {
         attendanceRecord = await AttendanceService.checkOut(
           {
             employeeId: employee.id,
-            workDate: todayStr,
             checkOutTime: now.toISOString(),
-            checkOutMethod: 'QR',
             checkOutLat: input.lat,
             checkOutLng: input.lng,
             notes: input.notes ? `[QR Kiosk: ${qrToken.location || 'N/A'}] ${input.notes}` : `[QR Kiosk: ${qrToken.location || 'N/A'}]`,
           },
-          session
+          session,
+          tx,
+          'QR'
         );
       }
 
-      return attendanceRecord;
+      return { attendanceRecord, employee, action, qrToken };
     });
 
-    logger.info(`QR Attendance ${action} successful`, {
-      employeeId: employee.id,
-      qrTokenId: qrToken.id,
-      action,
-      attendanceId: result.id,
+    logger.info(`QR Attendance ${result.action} successful`, {
+      employeeId: result.employee.id,
+      qrTokenId: result.qrToken.id,
+      action: result.action,
+      attendanceId: result.attendanceRecord.id,
     });
 
     return {
-      action,
-      attendance: result,
+      action: result.action,
+      attendance: result.attendanceRecord,
       employee: {
-        id: employee.id,
-        employeeCode: employee.employeeCode,
-        fullName: `${employee.lastName} ${employee.firstName}`,
+        id: result.employee.id,
+        employeeCode: result.employee.employeeCode,
+        fullName: `${result.employee.lastName} ${result.employee.firstName}`,
       },
       scannedAt: now.toISOString(),
-      location: qrToken.location,
+      location: result.qrToken.location,
     };
   }
 

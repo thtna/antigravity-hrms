@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
 const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-const isoDatetimeRegex = /^\d{4}-\d{2}-\d{2}T/;
+const isoDatetimeRegex =
+  /^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?$/;
 
 const emptyToUndefined = (v: unknown) => (v === '' || v === null ? undefined : v);
 
@@ -92,18 +93,6 @@ export const CreateCorrectionSchema = z
       });
     }
 
-    // Validate check-in before check-out
-    if (data.requestedCheckIn && data.requestedCheckOut) {
-      const inDate = new Date(data.requestedCheckIn);
-      const outDate = new Date(data.requestedCheckOut);
-      if (outDate.getTime() <= inDate.getTime()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Thời gian check-out phải sau thời gian check-in',
-          path: ['requestedCheckOut'],
-        });
-      }
-    }
   });
 
 export type CreateCorrectionInput = z.infer<typeof CreateCorrectionSchema>;

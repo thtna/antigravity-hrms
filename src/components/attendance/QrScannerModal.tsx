@@ -5,6 +5,7 @@ import jsQR from 'jsqr';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { formatClientBusinessInstantTime } from '@/lib/time/client-business-instant';
 import {
   QrCode,
   Camera,
@@ -324,7 +325,7 @@ export function QrScannerModal({ isOpen, onClose, onSuccess }: QrScannerModalPro
             <div className="text-xs text-slate-300 space-y-1 pt-1">
               <div>Thao tác: <Badge variant="success">{successResult.action === 'CHECK_IN' ? 'Check-in (Vào ca)' : 'Check-out (Tan ca)'}</Badge></div>
               <div>Nhân viên: <strong className="text-white">{successResult.employee?.fullName}</strong> ({successResult.employee?.employeeCode})</div>
-              <div>Thời gian: <span className="font-mono text-emerald-300">{new Date(successResult.scannedAt).toLocaleTimeString('vi-VN')}</span></div>
+              <div>Thời gian: <span className="font-mono text-emerald-300">{formatClientBusinessInstantTime(successResult.scannedAt)}</span></div>
               {successResult.attendance?.actualWorkHours > 0 && (
                 <div>Giờ làm việc: <strong className="text-white font-mono">{successResult.attendance.actualWorkHours}h</strong></div>
               )}

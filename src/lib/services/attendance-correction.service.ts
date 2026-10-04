@@ -11,12 +11,23 @@ import {
 } from '@/lib/validations/attendance-correction';
 import { AttendanceService } from './attendance.service';
 import { Prisma } from '@prisma/client';
+import {
+  addBusinessDays,
+  formatBusinessDate,
+  getBusinessDateString,
+  parseBusinessDate,
+} from '@/lib/time/business-time';
 
 export class AttendanceCorrectionService {
   /**
    * Resolve an employee ID and verified organizationId for a given session.
    */
   private static async resolveEmployeeId(session: UserSession, targetEmployeeId?: string): Promise<{ id: string; organizationId: string }> {
+    const organizationId = session.organizationId;
+    if (!organizationId) {
+      throw ApiError.forbidden('Organization context is required.');
+    }
+
     const isPrivileged = session.roles.includes('admin') || session.roles.includes('hr');
 
     if (targetEmployeeId) {
@@ -27,7 +38,7 @@ export class AttendanceCorrectionService {
         where: { id: targetEmployeeId },
         select: { id: true, status: true, deletedAt: true, organizationId: true },
       });
-      if (!target || target.deletedAt || target.status === 'TERMINATED' || (session.organizationId && target.organizationId !== session.organizationId)) {
+      if (!target || target.deletedAt || target.status === 'TERMINATED' || target.organizationId !== organizationId) {
         throw ApiError.badRequest('Nhân viên không tồn tại, đã nghỉ việc hoặc không thuộc tổ chức hiện tại.');
       }
       return { id: target.id, organizationId: target.organizationId };
@@ -38,7 +49,7 @@ export class AttendanceCorrectionService {
       select: { id: true, status: true, deletedAt: true, organizationId: true },
     });
 
-    if (!self || self.deletedAt || self.status === 'TERMINATED') {
+    if (!self || self.deletedAt || self.status === 'TERMINATED' || self.organizationId !== organizationId) {
       throw ApiError.badRequest('Không tìm thấy thông tin nhân viên hợp lệ hoặc nhân viên đã nghỉ việc.');
     }
 
@@ -60,20 +71,17 @@ export class AttendanceCorrectionService {
     const organizationId = emp.organizationId;
 
     // Parse and validate work date
-    const workDate = new Date(input.workDate);
-    const today = new Date();
-    today.setHours(23, 59, 59, 999);
+    const workDate = parseBusinessDate(input.workDate);
+    const today = getBusinessDateString();
 
-    if (workDate.getTime() > today.getTime()) {
+    if (input.workDate > today) {
       throw ApiError.badRequest('Không thể tạo yêu cầu điều chỉnh cho ngày trong tương lai.');
     }
 
     // Limit back-dated requests (e.g. 90 days)
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-    ninetyDaysAgo.setHours(0, 0, 0, 0);
+    const ninetyDaysAgo = addBusinessDays(today, -90);
 
-    if (workDate.getTime() < ninetyDaysAgo.getTime()) {
+    if (input.workDate < ninetyDaysAgo) {
       throw ApiError.badRequest('Không thể điều chỉnh chấm công quá 90 ngày trong quá khứ.');
     }
 
@@ -119,8 +127,32 @@ export class AttendanceCorrectionService {
       );
     }
 
-    const requestedCheckIn = input.requestedCheckIn ? new Date(input.requestedCheckIn) : null;
-    const requestedCheckOut = input.requestedCheckOut ? new Date(input.requestedCheckOut) : null;
+    const resolvedShift = await AttendanceService.resolveShiftForDate(
+      employeeId,
+      workDate,
+      undefined,
+      { createSchedule: false }
+    );
+    const requestedCheckIn = input.requestedCheckIn
+      ? AttendanceService.parseAttendanceDateTime(
+          input.requestedCheckIn,
+          input.workDate,
+          resolvedShift.shift,
+          'CHECK_IN'
+        )
+      : null;
+    const requestedCheckOut = input.requestedCheckOut
+      ? AttendanceService.parseAttendanceDateTime(
+          input.requestedCheckOut,
+          input.workDate,
+          resolvedShift.shift,
+          'CHECK_OUT'
+        )
+      : null;
+
+    if (requestedCheckIn && requestedCheckOut && requestedCheckOut.getTime() <= requestedCheckIn.getTime()) {
+      throw ApiError.badRequest('Thời gian check-out đề xuất phải sau thời gian check-in đề xuất.');
+    }
 
     // Create AttendanceAdjustment in transaction with AuditLog
     const adjustment = await prisma.$transaction(async (tx) => {
@@ -290,7 +322,7 @@ export class AttendanceCorrectionService {
       },
     });
 
-    if (!correction || (session?.organizationId && (correction as any).organizationId && (correction as any).organizationId !== session.organizationId)) {
+    if (!session?.organizationId || !correction || (correction as any).organizationId !== session.organizationId) {
       throw ApiError.notFound(`Không tìm thấy yêu cầu điều chỉnh có ID: ${id}`);
     }
 
@@ -337,13 +369,6 @@ export class AttendanceCorrectionService {
     }
 
     const processedAt = new Date();
-    const overrideCheckIn = input.overrideCheckIn ? new Date(input.overrideCheckIn) : null;
-    const overrideCheckOut = input.overrideCheckOut ? new Date(input.overrideCheckOut) : null;
-
-    if (overrideCheckIn && overrideCheckOut && overrideCheckOut.getTime() <= overrideCheckIn.getTime()) {
-      throw ApiError.badRequest('Thời gian check-out điều chỉnh phải lớn hơn thời gian check-in điều chỉnh.');
-    }
-
     // Process inside atomic transaction
     const result = await prisma.$transaction(async (tx) => {
       // If REJECTED: simply update adjustment status and record audit log. Original attendance is completely untouched!
@@ -385,15 +410,16 @@ export class AttendanceCorrectionService {
       }
 
       // If APPROVED: Apply changes to attendance with strict audit logging of old vs new values
-      const effectiveCheckIn = overrideCheckIn || correction.requestedCheckIn;
-      const effectiveCheckOut = overrideCheckOut || correction.requestedCheckOut;
-
       // Apply to attendance table
-      const { updatedAttendance, oldSnapshot, newSnapshot } = await this.applyApprovedCorrection(
+      const {
+        updatedAttendance,
+        oldSnapshot,
+        newSnapshot,
+        overrideCheckIn,
+        overrideCheckOut,
+      } = await this.applyApprovedCorrection(
         tx,
         correction,
-        effectiveCheckIn,
-        effectiveCheckOut,
         input
       );
 
@@ -457,8 +483,6 @@ export class AttendanceCorrectionService {
   private static async applyApprovedCorrection(
     tx: Prisma.TransactionClient,
     correction: any,
-    effectiveCheckIn: Date | null,
-    effectiveCheckOut: Date | null,
     processInput: ProcessCorrectionInput
   ) {
     const employeeId = correction.employeeId;
@@ -491,11 +515,40 @@ export class AttendanceCorrectionService {
       : null;
 
     // Resolve shift schedule for this date
-    const resolvedShift = await AttendanceService.resolveShiftForDate(employeeId, workDate);
+    const resolvedShift = await AttendanceService.resolveShiftForDate(employeeId, workDate, tx);
+    const workDateString = formatBusinessDate(workDate);
+    const overrideCheckIn = processInput.overrideCheckIn
+      ? AttendanceService.parseAttendanceDateTime(
+          processInput.overrideCheckIn,
+          workDateString,
+          resolvedShift.shift,
+          'CHECK_IN'
+        )
+      : null;
+    const overrideCheckOut = processInput.overrideCheckOut
+      ? AttendanceService.parseAttendanceDateTime(
+          processInput.overrideCheckOut,
+          workDateString,
+          resolvedShift.shift,
+          'CHECK_OUT'
+        )
+      : null;
 
-    // Prepare target check-in and check-out
-    const finalCheckIn = effectiveCheckIn || (existing ? existing.checkInTime : null);
-    const finalCheckOut = effectiveCheckOut || (existing ? existing.checkOutTime : null);
+    // Prepare target punches and track which timestamp was actually changed.
+    const proposedCheckIn = overrideCheckIn ?? correction.requestedCheckIn ?? null;
+    const proposedCheckOut = overrideCheckOut ?? correction.requestedCheckOut ?? null;
+    const finalCheckIn = proposedCheckIn ?? existing?.checkInTime ?? null;
+    const finalCheckOut = proposedCheckOut ?? existing?.checkOutTime ?? null;
+    const checkInChanged =
+      proposedCheckIn !== null &&
+      (!existing?.checkInTime || proposedCheckIn.getTime() !== existing.checkInTime.getTime());
+    const checkOutChanged =
+      proposedCheckOut !== null &&
+      (!existing?.checkOutTime || proposedCheckOut.getTime() !== existing.checkOutTime.getTime());
+
+    if (finalCheckIn && finalCheckOut && finalCheckOut.getTime() <= finalCheckIn.getTime()) {
+      throw ApiError.badRequest('Thời gian check-out điều chỉnh phải lớn hơn thời gian check-in điều chỉnh.');
+    }
 
     let lateMinutes = existing?.lateMinutes ?? 0;
     let earlyMinutes = existing?.earlyMinutes ?? 0;
@@ -509,7 +562,8 @@ export class AttendanceCorrectionService {
       const metrics = AttendanceService.calculateAttendanceMetrics(
         finalCheckIn,
         finalCheckOut,
-        resolvedShift.shift
+        resolvedShift.shift,
+        workDate
       );
       lateMinutes = metrics.lateMinutes;
       earlyMinutes = metrics.earlyMinutes;
@@ -562,8 +616,8 @@ export class AttendanceCorrectionService {
         workDate,
         checkInTime: finalCheckIn,
         checkOutTime: finalCheckOut,
-        checkInMethod: 'CORRECTED',
-        checkOutMethod: 'CORRECTED',
+        checkInMethod: finalCheckIn ? 'CORRECTED' : null,
+        checkOutMethod: finalCheckOut ? 'CORRECTED' : null,
         lateMinutes,
         earlyMinutes,
         actualWorkHours: new Prisma.Decimal(actualWorkHours),
@@ -575,8 +629,8 @@ export class AttendanceCorrectionService {
         scheduleId: resolvedShift.scheduleId || existing?.scheduleId || null,
         checkInTime: finalCheckIn,
         checkOutTime: finalCheckOut,
-        checkInMethod: finalCheckIn ? 'CORRECTED' : existing?.checkInMethod,
-        checkOutMethod: finalCheckOut ? 'CORRECTED' : existing?.checkOutMethod,
+        checkInMethod: checkInChanged ? 'CORRECTED' : existing?.checkInMethod ?? null,
+        checkOutMethod: checkOutChanged ? 'CORRECTED' : existing?.checkOutMethod ?? null,
         lateMinutes,
         earlyMinutes,
         actualWorkHours: new Prisma.Decimal(actualWorkHours),
@@ -600,7 +654,13 @@ export class AttendanceCorrectionService {
       notes: updatedAttendance.notes,
     };
 
-    return { updatedAttendance, oldSnapshot, newSnapshot };
+    return {
+      updatedAttendance,
+      oldSnapshot,
+      newSnapshot,
+      overrideCheckIn,
+      overrideCheckOut,
+    };
   }
 
   /**
@@ -616,7 +676,7 @@ export class AttendanceCorrectionService {
       where: { id },
     });
 
-    if (!correction || (session?.organizationId && (correction as any).organizationId && (correction as any).organizationId !== session.organizationId)) {
+    if (!session?.organizationId || !correction || (correction as any).organizationId !== session.organizationId) {
       throw ApiError.notFound(`Không tìm thấy yêu cầu điều chỉnh có ID: ${id}`);
     }
 
@@ -701,7 +761,7 @@ export class AttendanceCorrectionService {
     }
 
     // Explicit employee filter
-    if (query.employeeId) {
+    if (query.employeeId && (isHrOrAdmin || isManager)) {
       where.employeeId = query.employeeId;
     }
 
@@ -727,8 +787,8 @@ export class AttendanceCorrectionService {
     // Date range filter
     if (query.startDate || query.endDate) {
       where.workDate = {};
-      if (query.startDate) where.workDate.gte = new Date(query.startDate);
-      if (query.endDate) where.workDate.lte = new Date(query.endDate);
+      if (query.startDate) where.workDate.gte = parseBusinessDate(query.startDate);
+      if (query.endDate) where.workDate.lte = parseBusinessDate(query.endDate);
     }
 
     const page = query.page || 1;
@@ -781,7 +841,7 @@ export class AttendanceCorrectionService {
     return {
       items: items.map((item) => ({
         ...item,
-        workDate: item.workDate.toISOString().split('T')[0],
+        workDate: formatBusinessDate(item.workDate),
       })),
       meta: {
         page,
@@ -847,7 +907,7 @@ export class AttendanceCorrectionService {
 
     return {
       ...correction,
-      workDate: correction.workDate.toISOString().split('T')[0],
+      workDate: formatBusinessDate(correction.workDate),
       attendance: correction.attendance
         ? {
             ...correction.attendance,

@@ -18,6 +18,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorBanner } from '@/components/ui/error-state';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useToastHelpers } from '@/components/ui/toast';
+import { getClientBusinessMonthRange } from '@/lib/time/client-business-time';
+import { formatClientBusinessInstantTime } from '@/lib/time/client-business-instant';
 import {
   Clock,
   Calendar,
@@ -42,13 +44,7 @@ import {
 
 // Pure date helper computed outside render
 function getAttendanceDefaultDates() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1); // first day of current month
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0); // last day of current month
-  return {
-    startDate: start.toISOString().split('T')[0],
-    endDate: end.toISOString().split('T')[0],
-  };
+  return getClientBusinessMonthRange();
 }
 
 const defaultDates = getAttendanceDefaultDates();
@@ -510,7 +506,7 @@ export default function AttendancePage() {
                             <div className="flex items-center gap-1">
                               <span>
                                 {item.checkInTime
-                                  ? new Date(item.checkInTime).toLocaleTimeString('vi-VN')
+                                  ? formatClientBusinessInstantTime(item.checkInTime)
                                   : '—'}
                               </span>
                               {item.checkInMethod && (
@@ -529,7 +525,7 @@ export default function AttendancePage() {
                             <div className="flex items-center gap-1">
                               <span>
                                 {item.checkOutTime
-                                  ? new Date(item.checkOutTime).toLocaleTimeString('vi-VN')
+                                  ? formatClientBusinessInstantTime(item.checkOutTime)
                                   : '—'}
                               </span>
                               {item.checkOutMethod && (
@@ -654,12 +650,12 @@ export default function AttendancePage() {
                           <td className="px-5 py-4">{item.workDate}</td>
                           <td className="px-5 py-4 font-mono text-xs">
                             {item.checkInTime
-                              ? new Date(item.checkInTime).toLocaleTimeString('vi-VN')
+                              ? formatClientBusinessInstantTime(item.checkInTime)
                               : '—'}
                           </td>
                           <td className="px-5 py-4 font-mono text-xs">
                             {item.checkOutTime
-                              ? new Date(item.checkOutTime).toLocaleTimeString('vi-VN')
+                              ? formatClientBusinessInstantTime(item.checkOutTime)
                               : '—'}
                           </td>
                           <td className="px-5 py-4 font-semibold text-emerald-400 font-mono">
@@ -808,12 +804,12 @@ export default function AttendancePage() {
                             <div className="space-y-0.5">
                               {item.requestedCheckIn && (
                                 <div className="text-slate-300">
-                                  Vào: <span className="font-mono text-amber-300">{new Date(item.requestedCheckIn).toLocaleTimeString('vi-VN')}</span>
+                                  Vào: <span className="font-mono text-amber-300">{formatClientBusinessInstantTime(item.requestedCheckIn)}</span>
                                 </div>
                               )}
                               {item.requestedCheckOut && (
                                 <div className="text-slate-300">
-                                  Ra: <span className="font-mono text-amber-300">{new Date(item.requestedCheckOut).toLocaleTimeString('vi-VN')}</span>
+                                  Ra: <span className="font-mono text-amber-300">{formatClientBusinessInstantTime(item.requestedCheckOut)}</span>
                                 </div>
                               )}
                               {item.overtimeMinutes && (

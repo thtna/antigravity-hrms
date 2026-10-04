@@ -4,6 +4,7 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { formatClientBusinessInstantTime } from '@/lib/time/client-business-instant';
 import {
   X,
   Clock,
@@ -37,11 +38,7 @@ export function AttendanceDetailModal({
 
   const formatTime = (timeStr?: string | null) => {
     if (!timeStr) return '—';
-    try {
-      return new Date(timeStr).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch {
-      return timeStr;
-    }
+    return formatClientBusinessInstantTime(timeStr);
   };
 
   const getStatusBadge = (status: string) => {
