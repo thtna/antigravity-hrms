@@ -19,20 +19,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const provider = StorageManager.getProvider();
 
-    // Verify token using LocalStorageProvider's secret
-    if (provider instanceof LocalStorageProvider) {
-      const isValid = provider.verifySignedToken(bucket, key, token, exp);
-      if (!isValid) {
-        throw ApiError.unauthorized('Signed URL không hợp lệ hoặc đã hết hạn.');
-      }
-    } else {
-      // In production with Supabase, signed URLs hit Supabase directly.
-      // If this endpoint is called, verify token against standard local secret.
-      const local = new LocalStorageProvider();
-      const isValid = local.verifySignedToken(bucket, key, token, exp);
-      if (!isValid) {
-        throw ApiError.unauthorized('Signed URL không hợp lệ hoặc đã hết hạn.');
-      }
+    if (!(provider instanceof LocalStorageProvider)) {
+      throw ApiError.notFound('Local signed URL route khong kha dung cho storage provider hien tai.');
+    }
+
+    const isValid = provider.verifySignedToken(bucket, key, token, exp);
+    if (!isValid) {
+      throw ApiError.unauthorized('Signed URL không hợp lệ hoặc đã hết hạn.');
     }
 
     // Download file buffer

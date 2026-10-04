@@ -54,14 +54,9 @@ export async function readAvatarFile(
 ): Promise<Buffer> {
   const provider = StorageManager.getProvider();
   const orgId = requireOrganizationId(organizationId);
-  try {
-    const key = `organizations/${orgId}/avatars/${filename}`;
-    const res = await provider.download('avatars', key);
-    return res.buffer;
-  } catch {
-    const res = await provider.download('avatars', filename);
-    return res.buffer;
-  }
+  const key = `organizations/${orgId}/avatars/${filename}`;
+  const res = await provider.download('avatars', key);
+  return res.buffer;
 }
 
 /**

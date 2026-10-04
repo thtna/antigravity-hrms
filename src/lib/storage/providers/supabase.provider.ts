@@ -22,11 +22,12 @@ import {
   DownloadResult,
   StorageMetadata,
 } from '../types';
+import {
+  SupabaseStorageConfig,
+  validateSupabaseStorageConfig,
+} from '../storage-config';
 
-export interface SupabaseStorageConfig {
-  supabaseUrl: string;
-  serviceRoleKey: string;
-}
+export type { SupabaseStorageConfig } from '../storage-config';
 
 export type SanitizedStorageErrorCode =
   | 'NONE'
@@ -62,24 +63,10 @@ export class SupabaseStorageProvider implements StorageProvider {
   private supabaseUrl: string;
   private serviceRoleKey: string;
 
-  constructor(config?: Partial<SupabaseStorageConfig>) {
-    this.supabaseUrl = (
-      config?.supabaseUrl ||
-      process.env.SUPABASE_URL ||
-      ''
-    ).replace(/\/$/, '');
-
-    this.serviceRoleKey =
-      config?.serviceRoleKey ||
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      process.env.SUPABASE_SERVICE_KEY ||
-      '';
-
-    if (!this.supabaseUrl || !this.serviceRoleKey) {
-      logger.warn(
-        '[SupabaseStorageProvider] Initialized without full credentials. Will fail at runtime if invoked.'
-      );
-    }
+  constructor(config: SupabaseStorageConfig) {
+    const validated = validateSupabaseStorageConfig(config);
+    this.supabaseUrl = validated.supabaseUrl;
+    this.serviceRoleKey = validated.serviceRoleKey;
   }
 
   private getHeaders(extraHeaders: Record<string, string> = {}): HeadersInit {
@@ -149,7 +136,10 @@ export class SupabaseStorageProvider implements StorageProvider {
 
     if (!res.ok) {
       if (res.status === 404) {
-        throw ApiError.notFound('Tệp tin không tồn tại trên Supabase Storage.');
+        if (await this.isValidatedObjectNotFoundResponse(res)) {
+          throw ApiError.notFound('Tệp tin không tồn tại trên Supabase Storage.');
+        }
+        throw ApiError.internal('Supabase Storage returned an unvalidated 404 response.');
       }
       throw ApiError.internal(`Lỗi tải tệp tin từ Supabase Storage: ${res.statusText}`);
     }
@@ -189,7 +179,7 @@ export class SupabaseStorageProvider implements StorageProvider {
     return { present: true, valid: false, value: null };
   }
 
-  private classifyDeleteResponse(
+  private classifyStorageResponse(
     status: number,
     redirectDetected: boolean,
     json: any
@@ -384,6 +374,30 @@ export class SupabaseStorageProvider implements StorageProvider {
     };
   }
 
+  private async isValidatedObjectNotFoundResponse(res: Response): Promise<boolean> {
+    if (res.status !== 404) return false;
+
+    let parsedJson: any = null;
+    try {
+      const text = await res.text();
+      if (text && text.trim().length > 0) {
+        parsedJson = JSON.parse(text);
+      }
+    } catch {
+      parsedJson = null;
+    }
+
+    const classification = this.classifyStorageResponse(res.status, false, parsedJson);
+    return (
+      classification.success &&
+      classification.errorCode === 'NoSuchKey' &&
+      classification.errorClass === 'NoSuchKey' &&
+      classification.bodyStatusParseValid === 'YES' &&
+      classification.bodyStatusConflict !== 'YES' &&
+      classification.errorSignalConflict === 'NO'
+    );
+  }
+
   async deleteWithDetails(bucket: StorageBucket, key: string): Promise<StorageDeleteResult> {
     if (!this.supabaseUrl || !this.serviceRoleKey) {
       throw ApiError.internal('Supabase Storage chưa được cấu hình.');
@@ -431,7 +445,7 @@ export class SupabaseStorageProvider implements StorageProvider {
       parsedJson = null;
     }
 
-    const classification = this.classifyDeleteResponse(res.status, redirectDetected, parsedJson);
+    const classification = this.classifyStorageResponse(res.status, redirectDetected, parsedJson);
 
     if (!classification.success) {
       const keyHash = createHash('sha256').update(cleanKey).digest('hex').slice(0, 8);
@@ -488,20 +502,30 @@ export class SupabaseStorageProvider implements StorageProvider {
   }
 
   async exists(bucket: StorageBucket, key: string): Promise<boolean> {
-    if (!this.supabaseUrl || !this.serviceRoleKey) return false;
+    if (!this.supabaseUrl || !this.serviceRoleKey) {
+      throw ApiError.internal('Supabase Storage chua duoc cau hinh.');
+    }
 
     const cleanKey = key.replace(/^\/+/, '');
     const url = `${this.supabaseUrl}/storage/v1/object/info/authenticated/${bucket}/${encodeURI(cleanKey)}`;
 
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: this.getHeaders(),
-      });
-      return res.status === 200;
-    } catch {
-      return false;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    if (res.status === 200) return true;
+    if (res.status === 404) {
+      if (await this.isValidatedObjectNotFoundResponse(res)) return false;
+      throw ApiError.internal('Khong the xac minh tep tin khong ton tai tren Supabase Storage.');
     }
+    if (res.status === 401) {
+      throw ApiError.unauthorized('Xac thuc Supabase Storage khong hop le.');
+    }
+    if (res.status === 403) {
+      throw ApiError.forbidden('Khong co quyen truy cap Supabase Storage.');
+    }
+    throw ApiError.internal(`Khong the kiem tra ton tai tren Supabase Storage (Status: ${res.status}).`);
   }
 
   async getSignedUrl(
@@ -552,26 +576,37 @@ export class SupabaseStorageProvider implements StorageProvider {
   }
 
   async getMetadata(bucket: StorageBucket, key: string): Promise<StorageMetadata | null> {
-    if (!this.supabaseUrl || !this.serviceRoleKey) return null;
+    if (!this.supabaseUrl || !this.serviceRoleKey) {
+      throw ApiError.internal('Supabase Storage chua duoc cau hinh.');
+    }
 
     const cleanKey = key.replace(/^\/+/, '');
     const url = `${this.supabaseUrl}/storage/v1/object/info/authenticated/${bucket}/${encodeURI(cleanKey)}`;
 
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: this.getHeaders(),
-      });
-      if (!res.ok) return null;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
 
-      const data = (await res.json()) as any;
-      return {
-        size: Number(data.size || data.contentLength || 0),
-        contentType: data.mimetype || data.contentType || 'application/octet-stream',
-        eTag: data.etag,
-      };
-    } catch {
-      return null;
+    if (res.status === 404) {
+      if (await this.isValidatedObjectNotFoundResponse(res)) return null;
+      throw ApiError.internal('Khong the xac minh metadata khong ton tai tren Supabase Storage.');
     }
+    if (res.status === 401) {
+      throw ApiError.unauthorized('Xac thuc Supabase Storage khong hop le.');
+    }
+    if (res.status === 403) {
+      throw ApiError.forbidden('Khong co quyen truy cap Supabase Storage.');
+    }
+    if (!res.ok) {
+      throw ApiError.internal(`Khong the doc metadata Supabase Storage (Status: ${res.status}).`);
+    }
+
+    const data = (await res.json()) as any;
+    return {
+      size: Number(data.size || data.contentLength || 0),
+      contentType: data.mimetype || data.contentType || 'application/octet-stream',
+      eTag: data.etag,
+    };
   }
 }

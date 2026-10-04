@@ -13,7 +13,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { ApiError } from '@/lib/errors';
-import { logger } from '@/lib/logger';
 import {
   StorageProvider,
   StorageBucket,
@@ -52,13 +51,22 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   private resolveFilePath(bucket: StorageBucket, key: string): string {
-    // Prevent any directory traversal escaping bucket root
-    const normalizedKey = key.replace(/\\/g, '/').replace(/^\/+/, '');
-    const fullPath = path.resolve(this.resolveBucketPath(bucket), normalizedKey);
     const bucketRoot = path.resolve(this.resolveBucketPath(bucket));
+    if (path.isAbsolute(key) || path.posix.isAbsolute(key) || path.win32.isAbsolute(key)) {
+      throw ApiError.badRequest('Phat hien hanh vi Path Traversal bat hop phap.');
+    }
 
-    if (!fullPath.startsWith(bucketRoot)) {
-      throw ApiError.badRequest('Phát hiện hành vi Path Traversal bất hợp pháp.');
+    const normalizedKey = key.replace(/\\/g, '/');
+    const fullPath = path.resolve(bucketRoot, normalizedKey);
+    const relativePath = path.relative(bucketRoot, fullPath);
+
+    if (
+      !relativePath ||
+      path.isAbsolute(relativePath) ||
+      relativePath === '..' ||
+      relativePath.startsWith(`..${path.sep}`)
+    ) {
+      throw ApiError.badRequest('Phat hien hanh vi Path Traversal bat hop phap.');
     }
 
     return fullPath;
@@ -113,9 +121,8 @@ export class LocalStorageProvider implements StorageProvider {
     try {
       await fs.unlink(filePath);
     } catch (err: any) {
-      if (err.code !== 'ENOENT') {
-        logger.warn(`[LocalStorageProvider] Could not delete file: ${filePath}`, { error: String(err) });
-      }
+      if (err.code === 'ENOENT') return;
+      throw err;
     }
   }
 
@@ -124,8 +131,9 @@ export class LocalStorageProvider implements StorageProvider {
     try {
       await fs.access(filePath);
       return true;
-    } catch {
-      return false;
+    } catch (err: any) {
+      if (err.code === 'ENOENT') return false;
+      throw err;
     }
   }
 
@@ -164,8 +172,9 @@ export class LocalStorageProvider implements StorageProvider {
         contentType: 'application/octet-stream',
         updatedAt: stat.mtime,
       };
-    } catch {
-      return null;
+    } catch (err: any) {
+      if (err.code === 'ENOENT') return null;
+      throw err;
     }
   }
 
