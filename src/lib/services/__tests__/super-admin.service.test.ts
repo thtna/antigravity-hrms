@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SuperAdminService, MAX_TENANTS } from '../super-admin.service';
+import { SuperAdminService, type TenantAction } from '../super-admin.service';
+import { MAX_REGISTERED_TENANTS } from '@/lib/constants/tenant-quota';
 import { prisma } from '@/lib/db/prisma';
 import { ApiError } from '@/lib/errors';
 import { UserSession } from '@/types';
@@ -178,19 +179,32 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
       expect(metrics.rejected).toBe(1);
       expect(metrics.closed).toBe(1);
       expect(metrics.maxTenants).toBe(5);
-      expect(metrics.activeQuotaDisplay).toBe('4 / 5');
-      expect(metrics.canActivateMore).toBe(true);
+      expect(metrics.registeredQuotaDisplay).toBe('10 / 5');
+      expect(metrics.canRegisterMore).toBe(false);
+      expect(prisma.organization.count).toHaveBeenCalledWith({ where: { deletedAt: null } });
     });
 
-    it('flags canActivateMore as false when active tenants reach 5 / 5', async () => {
+    it('flags canRegisterMore as false when registered tenants reach 5 / 5', async () => {
       (prisma.organization.count as any).mockImplementation((args: any) => {
         if (args?.where?.status === 'ACTIVE') return Promise.resolve(5);
         return Promise.resolve(5);
       });
 
       const metrics = await SuperAdminService.getTenantMetrics(superAdminSession);
-      expect(metrics.activeQuotaDisplay).toBe('5 / 5');
-      expect(metrics.canActivateMore).toBe(false);
+      expect(metrics.registeredQuotaDisplay).toBe('5 / 5');
+      expect(metrics.canRegisterMore).toBe(false);
+    });
+
+    it.each([0, 4, 5, 7])('uses %i registered tenants for quota with no active tenants', async (total) => {
+      (prisma.organization.count as any).mockImplementation((args: any) =>
+        Promise.resolve(args?.where?.status ? 0 : total)
+      );
+      const metrics = await SuperAdminService.getTenantMetrics(superAdminSession);
+      expect(metrics.active).toBe(0);
+      expect(metrics.registeredQuotaDisplay).toBe(`${total} / ${MAX_REGISTERED_TENANTS}`);
+      expect(metrics.canRegisterMore).toBe(total < MAX_REGISTERED_TENANTS);
+      expect(metrics).not.toHaveProperty('activeQuotaDisplay');
+      expect(metrics).not.toHaveProperty('canActivateMore');
     });
   });
 
@@ -235,11 +249,11 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
     });
   });
 
-  // ── 4. Lifecycle Actions & Strict Quota Enforcement ─────────────────────────
-  describe('4. Lifecycle Actions & MAX_TENANTS = 5 Quota Enforcement', () => {
-    it('successfully APPROVES a PENDING organization when active count is under limit (e.g. 3)', async () => {
+  // ── 4. Lifecycle Actions For Existing Registered Tenants ────────────────────
+  describe('4. Lifecycle Actions Preserve Registration Slots', () => {
+    it('successfully APPROVES a PENDING organization and records the audit trail', async () => {
       (prisma.organization.findUnique as any).mockResolvedValue(mockOrgPending);
-      // Active count is 3 (< 5)
+      // Metrics are refreshed after the transition.
       (prisma.organization.count as any).mockResolvedValue(3);
       (prisma.organization.update as any).mockResolvedValue({
         ...mockOrgPending,
@@ -280,25 +294,15 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
       );
     });
 
-    it('BLOCKS APPROVE when 5 active tenants already exist (MAX_TENANTS = 5) — CANNOT activate 6th tenant', async () => {
+    it('APPROVES an existing PENDING tenant even when 5 tenants are active', async () => {
       (prisma.organization.findUnique as any).mockResolvedValue(mockOrgPending);
-      // Active count is already 5!
       (prisma.organization.count as any).mockResolvedValue(5);
-
-      await expect(
-        SuperAdminService.processTenantAction('org-001', 'APPROVE', superAdminSession)
-      ).rejects.toThrow(ApiError);
-
-      try {
-        await SuperAdminService.processTenantAction('org-001', 'APPROVE', superAdminSession);
-      } catch (err: any) {
-        expect(err.statusCode).toBe(400);
-        expect(err.message).toContain('Không thể kích hoạt tenant thứ 6');
-        expect(err.message).toContain('MAX_TENANTS = 5');
-      }
-
-      // Organization update must NOT have been called
-      expect(prisma.organization.update).not.toHaveBeenCalled();
+      (prisma.organization.update as any).mockResolvedValue({ ...mockOrgPending, status: 'ACTIVE' });
+      const result = await SuperAdminService.processTenantAction('org-001', 'APPROVE', superAdminSession);
+      expect(result.organization.status).toBe('ACTIVE');
+      expect(prisma.organization.update).toHaveBeenCalledTimes(1);
+      expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+      expect(prisma.organization.count).toHaveBeenCalledTimes(6); // Post-action metrics only.
     });
 
     it('rejects APPROVE if organization is not in PENDING status', async () => {
@@ -369,9 +373,9 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
       ).rejects.toThrow(ApiError);
     });
 
-    it('successfully ACTIVATES a SUSPENDED organization when active quota is available', async () => {
+    it('successfully ACTIVATES a SUSPENDED organization and records the audit trail', async () => {
       (prisma.organization.findUnique as any).mockResolvedValue(mockOrgSuspended);
-      // Active count is 2 (< 5)
+      // Metrics are refreshed after the transition.
       (prisma.organization.count as any).mockResolvedValue(2);
       (prisma.organization.update as any).mockResolvedValue({
         ...mockOrgSuspended,
@@ -397,20 +401,27 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
       );
     });
 
-    it('BLOCKS ACTIVATE when active tenants count is already 5 (MAX_TENANTS = 5)', async () => {
+    it('ACTIVATES an existing SUSPENDED tenant even when 5 tenants are active', async () => {
       (prisma.organization.findUnique as any).mockResolvedValue(mockOrgSuspended);
-      // Active count is already 5!
       (prisma.organization.count as any).mockResolvedValue(5);
+      (prisma.organization.update as any).mockResolvedValue({ ...mockOrgSuspended, status: 'ACTIVE' });
+      const result = await SuperAdminService.processTenantAction('org-003', 'ACTIVATE', superAdminSession);
+      expect(result.organization.status).toBe('ACTIVE');
+      expect(prisma.organization.update).toHaveBeenCalledTimes(1);
+      expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+      expect(prisma.organization.count).toHaveBeenCalledTimes(6);
+    });
 
-      await expect(
-        SuperAdminService.processTenantAction('org-003', 'ACTIVATE', superAdminSession)
-      ).rejects.toThrow(ApiError);
-      try {
-        await SuperAdminService.processTenantAction('org-003', 'ACTIVATE', superAdminSession);
-      } catch (err: any) {
-        expect(err.statusCode).toBe(400);
-        expect(err.message).toContain('Không thể kích hoạt tenant thứ 6');
-      }
+    it.each([
+      ['APPROVE', 'ACTIVE'], ['REJECT', 'ACTIVE'], ['SUSPEND', 'PENDING'],
+      ['ACTIVATE', 'ACTIVE'], ['CLOSE', 'CLOSED'], ['INVALID', 'PENDING'],
+    ])('rejects invalid %s from %s without writes or audit', async (action, status) => {
+      vi.mocked(prisma.organization.findUnique).mockResolvedValue({ ...mockOrgPending, status } as any);
+      await expect(SuperAdminService.processTenantAction('org-001', action as TenantAction, superAdminSession))
+        .rejects.toMatchObject({ statusCode: 400, errorCode: 'BAD_REQUEST' });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.organization.update).not.toHaveBeenCalled();
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
 
     it('successfully CLOSES an organization permanently and logs audit trail', async () => {

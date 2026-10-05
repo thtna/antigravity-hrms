@@ -33,7 +33,8 @@ import {
   ArrowRight,
   Info,
 } from 'lucide-react';
-import { TenantListItem, TenantMetrics, MAX_TENANTS } from '@/lib/services/super-admin.service';
+import type { TenantListItem, TenantMetrics } from '@/lib/services/super-admin.service';
+import { MAX_REGISTERED_TENANTS } from '@/lib/constants/tenant-quota';
 import {
   formatClientBusinessInstantDate,
   formatClientBusinessInstantDateTime,
@@ -113,12 +114,6 @@ export default function SuperAdminPage() {
 
   // Open Action Modal
   const handleOpenAction = (tenant: TenantListItem, action: 'APPROVE' | 'REJECT' | 'SUSPEND' | 'ACTIVATE' | 'CLOSE') => {
-    // Quota warning check on client
-    if ((action === 'APPROVE' || action === 'ACTIVATE') && metrics && metrics.active >= MAX_TENANTS) {
-      toastError(`Không thể ${action}: Đã đạt giới hạn tối đa ${MAX_TENANTS} tenants hoạt động (${metrics.activeQuotaDisplay})!`);
-      return;
-    }
-
     setActionTenant(tenant);
     setActionType(action);
     setActionReason('');
@@ -215,8 +210,8 @@ export default function SuperAdminPage() {
     }
   };
 
-  const quotaPercent = metrics ? Math.min(100, Math.round((metrics.active / MAX_TENANTS) * 100)) : 0;
-  const isQuotaFull = metrics ? metrics.active >= MAX_TENANTS : false;
+  const quotaPercent = metrics ? Math.min(100, Math.round((metrics.totalTenants / MAX_REGISTERED_TENANTS) * 100)) : 0;
+  const isQuotaFull = metrics ? !metrics.canRegisterMore : false;
 
   return (
     <AppShell
@@ -269,28 +264,28 @@ export default function SuperAdminPage() {
           <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
             <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div className="text-xs text-amber-300">
-              <span className="font-bold">Đã đạt giới hạn tối đa {MAX_TENANTS} tenants hoạt động ({metrics?.activeQuotaDisplay}): </span>
-              Hệ thống nghiêm ngặt chặn kích hoạt thêm tenant thứ 6 để đảm bảo giới hạn tài nguyên và tính ổn định. Để kích hoạt thêm, vui lòng tạm đình chỉ hoặc đóng bớt một tổ chức đang chạy.
+              <span className="font-bold">Đã đạt giới hạn đăng ký tenant ({metrics?.registeredQuotaDisplay}, tối đa {MAX_REGISTERED_TENANTS}): </span>
+              Không thể đăng ký tổ chức mới. Phê duyệt hoặc kích hoạt lại tổ chức đã đăng ký không thay đổi số slot đã sử dụng.
             </div>
           </div>
         )}
 
         {/* ── 1. Top Metrics Cards ────────────────────────────────────────── */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {/* Active Quota Card */}
+          {/* Registration Quota Card */}
           <div className="col-span-2 sm:col-span-3 lg:col-span-2 p-4 rounded-xl glass-panel border border-indigo-500/30 bg-gradient-to-br from-indigo-950/40 via-slate-900/60 to-slate-950 flex flex-col justify-between">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-indigo-300 uppercase tracking-wider">Hạn Mức Hoạt Động (Quota)</span>
+              <span className="text-xs font-semibold text-indigo-300 uppercase tracking-wider">Giới hạn đăng ký tenant</span>
               <Badge className="bg-indigo-500/20 text-indigo-300 border-indigo-500/40 font-mono text-xs">
-                MAX = {MAX_TENANTS}
+                MAX = {MAX_REGISTERED_TENANTS}
               </Badge>
             </div>
             <div className="my-2 flex items-baseline justify-between">
               <span className="text-3xl font-black text-white font-mono tracking-tight">
-                {metrics?.activeQuotaDisplay || `0 / ${MAX_TENANTS}`}
+                {metrics?.registeredQuotaDisplay || `0 / ${MAX_REGISTERED_TENANTS}`}
               </span>
               <span className="text-xs text-slate-400 font-medium">
-                {isQuotaFull ? 'Hết quota khả dụng' : `Còn trống ${MAX_TENANTS - (metrics?.active || 0)} slot`}
+                {isQuotaFull ? 'Hết quota khả dụng' : `Còn trống ${Math.max(0, MAX_REGISTERED_TENANTS - (metrics?.totalTenants || 0))} slot`}
               </span>
             </div>
             {/* Progress bar */}
@@ -502,14 +497,9 @@ export default function SuperAdminPage() {
                           {/* APPROVE (PENDING only) */}
                           {t.status === 'PENDING' && (
                             <button
-                              title={isQuotaFull ? `Không thể duyệt (Đã đạt tối đa ${MAX_TENANTS} tenants active)` : 'Phê duyệt tổ chức'}
-                              disabled={isQuotaFull}
+                              title="Phê duyệt tổ chức"
                               onClick={() => handleOpenAction(t, 'APPROVE')}
-                              className={`p-1.5 rounded-lg transition-colors ${
-                                isQuotaFull
-                                  ? 'bg-slate-800/50 text-slate-600 cursor-not-allowed'
-                                  : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40'
-                              }`}
+                              className="p-1.5 rounded-lg transition-colors bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40"
                             >
                               <Check className="w-4 h-4" />
                             </button>
@@ -540,14 +530,9 @@ export default function SuperAdminPage() {
                           {/* ACTIVATE (SUSPENDED only) */}
                           {t.status === 'SUSPENDED' && (
                             <button
-                              title={isQuotaFull ? `Không thể kích hoạt (Đã đạt tối đa ${MAX_TENANTS} active)` : 'Kích hoạt lại'}
-                              disabled={isQuotaFull}
+                              title="Kích hoạt lại"
                               onClick={() => handleOpenAction(t, 'ACTIVATE')}
-                              className={`p-1.5 rounded-lg transition-colors ${
-                                isQuotaFull
-                                  ? 'bg-slate-800/50 text-slate-600 cursor-not-allowed'
-                                  : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40'
-                              }`}
+                              className="p-1.5 rounded-lg transition-colors bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40"
                             >
                               <Play className="w-4 h-4" />
                             </button>
@@ -732,7 +717,7 @@ export default function SuperAdminPage() {
               </p>
               {(actionType === 'APPROVE' || actionType === 'ACTIVATE') && (
                 <p className="text-indigo-300 text-[11px]">
-                  📌 Hạn mức hiện tại: {metrics?.activeQuotaDisplay}. Sau khi duyệt, số tenant hoạt động sẽ tăng lên 1 (tối đa {MAX_TENANTS}).
+                  Tenant đã đăng ký: {metrics?.registeredQuotaDisplay}. Thao tác này không sử dụng thêm slot đăng ký.
                 </p>
               )}
               <p className="text-slate-400 text-[11px]">
