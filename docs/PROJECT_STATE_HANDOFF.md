@@ -8,6 +8,129 @@
 
 ## 0. R5G STABLE RELEASE BASELINE & VERIFIED DEPLOYMENT SNAPSHOT
 
+### Current Production Release Closure Snapshot (04/10/2026)
+
+This snapshot is the latest verified Production release state. Older R5G/R7 records below remain historical evidence and must not be reinterpreted as the current live deployment state.
+
+- **PRODUCTION_RELEASE_CLOSURE_AUDIT**: `PASS / VERIFIED`.
+- **Release PR**: PR #5 — `Release: promote validated staging checkpoint to main`.
+- **PR #5 state**: `MERGED`.
+- **Production/main release SHA**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Production release tree**: `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Staging HEAD at closure**: `fb884fee763a4aa54a9b3f71488c09f23803d5f2`.
+- **Staging tree at closure**: `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Main/Staging source-content drift**: `NO`; their Git histories differ, but their verified trees are identical.
+- **CI #44**: `SUCCESS`.
+- **CI Quality Gate**: `SUCCESS`.
+- **Docker Build & Publish #11**: `SUCCESS`.
+- **Vercel Production deployment status**: `4 / 4 READY`.
+- **Vercel commit status contexts**: `4 / 4 SUCCESS`.
+- **Canonical Vercel project**: `antigravity-hrms`.
+- **Canonical Production deployment ID**: `dpl_3KyVMKAd5QuQqVzY2mveiXXJWEfn`.
+- **Canonical Production domain**: `antigravity-hrms-six.vercel.app`.
+- **Canonical deployment source**: `git`.
+- **Canonical deployment branch**: `main`.
+- **Canonical deployment Git SHA**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Production `/` smoke test**: HTTP `200 OK`.
+- **Production `/login` smoke test**: HTTP `200 OK`.
+- **Production `/api/health` smoke test**: HTTP `200 OK`.
+- **Health response**: application reports `HEALTHY`, version `1.0.0`.
+- **Runtime errors observed in closure audit window**: `NONE`.
+- **Observed returned runtime status-code group**: HTTP `200`.
+- **Manual Production deployment**: `NO`; Production deployment was triggered by the approved `main` merge through Git integration.
+- **Force push**: `NO`.
+- **Production DB access during release closure**: `NO`.
+- **Production DB mutation during release closure**: `NO`.
+- `/api/health` verifies application/process responsiveness only. It does **not** query the database and therefore does not prove Production DB connectivity, migration state, seed/bootstrap completion, or business-data correctness.
+- Any future Production DB access, migration, seed, environment change, WAF change, rollback, promotion, or deployment still requires separate explicit Human Owner authorization.
+
+### Phase 11A.0D Real Email Staging E2E Closure Snapshot (05/10/2026)
+
+- **PHASE_11A_0D_FULL_E2E**: `PASS / VERIFIED`.
+- **Execution environment**: `STAGING ONLY`.
+- **Production touched by this E2E gate**: `NO`.
+- **Read-only reconciliation before execution**:
+  - Live `main`: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+  - Live `staging`: `4a680c673434a6aae5db29bd0e78f9144712bf90`.
+  - Canonical Vercel Production deployment remained `READY` at the exact `main` SHA above.
+  - Latest staging Preview remained `READY` at the exact staging SHA above.
+  - Supabase staging project `antigravity-hrms-staging`, ref `rdpufonfascxgbydvtak`, remained `ACTIVE_HEALTHY`.
+  - Production DB was not accessed or revalidated.
+- **Staging test tenant owner**: `namcharm040889+r5g15a4c-owner@gmail.com`.
+- **Staging test tenant**: `R5G15A4C Staging Test Tenant`.
+- **Live staging tenant state before execution**:
+  - user active = `YES`
+  - deleted = `NO`
+  - membership = `OWNER`
+  - membership active = `YES`
+  - application role = `Administrator`
+  - organization status = `ACTIVE`
+  - onboarding step = `9`
+- **Email provider**: `sendgrid`.
+- **Verified sender**: `nguyennam040889.dongsaigon@gmail.com`.
+- **Fresh Forgot Password retry request**: `PASS / VERIFIED`.
+- **Fresh email received**: `PASS / VERIFIED`.
+- **Fresh email timestamp**: `2026-10-04T19:03:21Z`.
+- **Fresh email location in Gmail**: `SPAM`.
+- **Reset link reached Staging**: `PASS / VERIFIED`.
+- **Password reset**: `PASS / VERIFIED`.
+  - Staging runtime: `POST /api/v1/auth/reset-password` = HTTP `200`.
+  - Runtime logged `Password reset successfully completed for user`.
+- **New-password login**: `PASS / VERIFIED`.
+  - Staging runtime: `POST /api/v1/auth/login` = HTTP `200`.
+  - Runtime logged successful login for the exact staging tenant owner.
+- **Old-password login**: `FAIL AS EXPECTED / VERIFIED`.
+  - Staging runtime: `POST /api/v1/auth/login` = HTTP `400`.
+  - Runtime logged `Login failed: invalid password`.
+- **Token reuse**: `BLOCKED / VERIFIED`.
+  - Reuse attempt reached Staging `POST /api/v1/auth/reset-password`.
+  - Response = HTTP `400`.
+  - UI reported reset link expired after the 15-minute TTL.
+- **Token-reuse evidence qualification**:
+  - The live E2E proves that the previously used reset URL could not perform another reset.
+  - The observed reuse failure occurred after the token TTL had also elapsed.
+  - Therefore this live test must NOT be represented as isolated causal proof that password-hash-bound one-time invalidation alone caused the rejection.
+  - Source code separately implements password-hash binding and atomic old-hash protection against token reuse/races.
+- **Old reset tokens**: `DO NOT REUSE`.
+- **Phase result**: `PHASE_11A_0D_FULL_E2E = PASS / VERIFIED`.
+
+### Phase 11A.0F Public Data API / RLS Hardening Closure Snapshot (05/10/2026)
+
+- **PHASE_11A_0F_STAGING_RLS_HARDENING**: `PASS / VERIFIED / RUNTIME-SAFE`.
+- **Execution environment**: `STAGING ONLY`.
+- **Production touched**: `NO`.
+- **Production/main SHA remained**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Final remote staging SHA**: `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
+- **Phase 11A.0F Git commit**: `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
+- **Commit subject**: `security: add phase 11a.0f public data api hardening migration`.
+- **Migration path**: `prisma/migrations/20261005000000_phase_11a_0f_public_data_api_hardening/migration.sql`.
+- **Migration SHA256**: `3EB9E1DB99B6A168D560B2EE044DCF5E33BF88325B5BB7B45F5D32D560CB0ADD`.
+- **Migration execution path**: Prisma Migrate remained canonical; staging used `prisma migrate deploy`.
+- **Migration apply**: `PASS / VERIFIED`.
+- **Post-deploy Prisma status**: `PASS`; database schema reported up to date.
+- **Supabase staging**: `antigravity-hrms-staging`, ref `rdpufonfascxgbydvtak`, remained `ACTIVE_HEALTHY`.
+- **Public table topology**: exact `34` public ordinary tables.
+- **RLS after hardening**: `34 / 34` public tables enabled.
+- **FORCE RLS**: `NO`, intentionally.
+- **Public RLS policies**: `0`, intentionally.
+- **anon/authenticated direct public-table privileges**: revoked.
+- **postgres default privileges for future public tables/sequences/functions**: hardened against anon/authenticated.
+- **service_role SELECT coverage**: preserved across all 34 public tables by migration assertion.
+- **Business authentication architecture**: HRMS JWT/cookie model remains authoritative; no Supabase Auth `auth.uid()` client-policy model was introduced.
+- **Staging database password rotation**: `PASS / VERIFIED`; no password is recorded here.
+- **Vercel staging DATABASE_URL rebind**: `PASS / VERIFIED`; branch-scoped Preview/staging configuration was rebound to the rotated credential.
+- **New-password Prisma authentication through Session Pooler port 5432**: `PASS / VERIFIED`.
+- **Post-rotation staging runtime DB connectivity**: `PASS / VERIFIED`.
+- **Post-RLS staging runtime DB connectivity**: `PASS / VERIFIED`.
+- **Canonical staging Preview after push**: `dpl_CSVhDuohpYKeqcq8CRW1btu3F8mc`.
+- **Canonical staging Preview state**: `READY`.
+- **Canonical staging Preview branch/SHA**: `staging` / `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
+- **Canonical Vercel status for pushed commit**: `SUCCESS`.
+- **Residual platform boundary**: `supabase_admin` default ACL hardening was intentionally outside this Prisma migration scope.
+- **Residual untracked operator/evidence artifacts**: `56`; preserve untouched.
+- **PROJECT_SPEC.md**: `MISSING / UNPROVEN`; do not create automatically.
+- **Phase result**: `PHASE_11A_0F = PASS / VERIFIED / CLOSED`.
+
 This section is authoritative for the stable application release lineage and dated verification evidence. Older phase reports remain historical evidence, not live deployment-state checks.
 
 ### Stable Application/Code Release Baseline
@@ -298,6 +421,7 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 | **Phase 11A.0B** | **Production Environment Plan**: Phân loại 4 nhóm biến môi trường; phát hiện và phân tích rào cản `PRODUCTION BLOCKER FOR FILE UPLOADS` trên Vercel do cơ chế `fs/promises`. | **PRODUCTION ENV PLAN COMPLETED** |
 | **Phase 11A.0C** | **Production Storage Hardening**: Xây dựng kiến trúc `StorageProvider Abstraction`, `LocalStorageProvider`, `SupabaseStorageProvider`, `StorageManager`, xác thực Magic Bytes (%PDF-, PNG, JPEG), Signed URL ngắn hạn, bảo mật tài liệu riêng tư. | **PRODUCTION STORAGE READY** |
 | **Phase 11A.0C2** | **Live Supabase Storage Staging Verification**: Kiểm thử thực tế trên Supabase Storage Staging thật (`antigravity-hrms-staging`). Khởi tạo 2 private buckets (`avatars`, `documents`), thực hiện upload/download/signed-url/delete thật, kiểm chứng $A \leftrightarrow B$ DENIED, unauthenticated client signed URL fetch HTTP 200, zero secrets logged. | **LIVE STAGING STORAGE VERIFIED** |
+| **Phase 11A.0D** | **Real Email Staging E2E**: xác minh Forgot Password bằng email thật qua SendGrid trên Staging, reset link đúng Staging, reset password thành công, mật khẩu mới đăng nhập PASS, mật khẩu cũ bị từ chối, và reset URL cũ không thể thực hiện reset lại. | **LIVE STAGING REAL EMAIL / PASSWORD RESET E2E VERIFIED** |
 | **Phase 11A.0E** | **Onboarding Step 6 P2028 Transaction Hardening**: Khắc phục triệt để lỗi Prisma P2028: phân loại rủi ro serverless lifecycle; rút gọn transaction xuống tối thiểu các DB writes nguyên tử; pre-lookup Role và băm mật khẩu ngoài transaction; bảo toàn RBAC bằng cờ `allowOwnerOnboarding`; hoàn thiện cơ chế idempotent retry (409 khi collision); xác nhận rollback an toàn (zero orphan user/partial employee); read-only staging DB clean. | **P2028 TRANSACTION HARDENING VERIFIED** |
 | **Phase 5I-G -> 5J-F** | Release gate sequence completed through controlled Production validation, public access restoration, and post-release smoke verification. | **PASS** |
 | **Phase 5K-A** | Post-release resume revalidation: Git refs, Vercel deployment, Production public root/health, and no drift. | **PASS** |
@@ -308,8 +432,34 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 
 ## 3. TRẠNG THÁI RELEASE HIỆN HÀNH (CURRENT RELEASE STATE)
 
-- **R5G Production release**: complete and healthy; deployment `READY`, public root and health HTTP 200.
-- **Next product/development mutation approved**: NONE. Any new scope requires separate Human Owner approval.
+- **Current Production release**: `PASS / VERIFIED`.
+- **Current Production/main SHA**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Current Production release tree**: `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Release PR**: PR #5 merged successfully into `main`.
+- **CI #44**: `SUCCESS`.
+- **Docker Build & Publish #11**: `SUCCESS`.
+- **Vercel Production**: 4/4 deployments `READY` for the exact release SHA.
+- **Canonical Production project**: `antigravity-hrms`.
+- **Canonical Production domain**: `antigravity-hrms-six.vercel.app`.
+- **Runtime verification**: `/`, `/login`, and `/api/health` returned HTTP 200.
+- **Runtime errors during closure audit window**: none observed.
+- **Main/Staging content drift at Production release closure**: `NO`; both resolved to tree `d82487cab83cd237ae7c2d3f2de8487350b47674` at that historical closure point.
+- **Current remote staging SHA**: `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
+- **Current main/staging drift after Phase 11A.0F**: `YES / EXPECTED`; staging contains approved staging-only security work not promoted to Production.
+- **Canonical staging Preview after Phase 11A.0F**: `dpl_CSVhDuohpYKeqcq8CRW1btu3F8mc`, `READY`, exact staging SHA `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
+- **Production database boundary**: Production DB was not accessed or mutated by this release-closure audit; database state is not revalidated by the HTTP health endpoint.
+- **Next product/development mutation approved**: `NONE`. Any new scope requires separate Human Owner approval.
+- **Phase 11A.0D closure**: `PASS / VERIFIED`.
+- **Phase 11A.0F closure**: `PASS / VERIFIED / RUNTIME-SAFE`.
+- **Staging RLS state**: `34 / 34` public tables RLS-enabled; no public RLS policies intentionally created.
+- **Staging credential rotation/rebind**: `PASS / VERIFIED`; secret values are not recorded.
+- **Current open product-development phase**: `NOT YET SELECTED`.
+- **SuperAdmin candidate**: `namcharm040889@gmail.com`.
+- **SuperAdmin role assignment**: `NOT APPROVED / NOT PERFORMED`.
+- **PROJECT_SPEC authority status**: `MISSING / UNPROVEN`.
+- **Residual untracked operator/evidence artifacts**: `56`; preserve and do not touch without separate approval.
+- **Known Phase 11A.0F residual platform boundary**: `supabase_admin` default ACL hardening remains outside the completed Prisma migration scope.
+- **Next mutation approved**: `NONE`.
 
 ---
 
@@ -319,24 +469,43 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 - **Documentation control**: Propose reconciliation when the handoff becomes stale; file mutation requires a Human Owner-approved gate. Determine document commit/push status from Git, not from this handoff.
 - **Production guard**: Production remains protected. Any Production DB write, env change, WAF change, deploy, rollback, or promotion requires explicit operator authorization.
 - **Operator/helper files**: Existing untracked helper files must remain uncommitted unless the operator explicitly approves.
+- **Phase 11A.0D blocker**: `CLOSED / PASS / VERIFIED`.
+- **Phase 11A.0F blocker**: `CLOSED / PASS / VERIFIED / RUNTIME-SAFE`.
+- **Documentation governance**: handoff mutation and Git publication are controlled by separate Human Owner-approved gates; no broader source, database, Vercel, or Production mutation is implied by documentation reconciliation.
+- **Current product-development blocker**: no new phase has been selected or approved.
+- **SuperAdmin staging assignment**: remains a separate DB mutation gate; `NOT APPROVED / NOT PERFORMED`.
+- **PROJECT_SPEC.md**: `MISSING / UNPROVEN`; do not create or promote a substitute without a separate governance decision.
+- **Phase 11A.0F residual platform boundary**: `supabase_admin` default ACL hardening remains separately governed.
+- **Residual untracked artifacts**: `56`; preserve untouched.
 
 ---
 
 ## 5. CÁC GIAI ĐOẠN TIẾP THEO (NEXT PHASES ROADMAP)
 
-1. **Next product/development phase**: propose a bounded scope and obtain separate Human Owner approval before any code, DB, env, WAF, or deployment change.
-2. **Documentation reconciliation when needed**: verify the live state and Git status, then request explicit approval before editing, committing, or pushing.
+1. **Phase 11A.0D**: `COMPLETED / PASS / VERIFIED`.
+2. **Phase 11A.0F**: `COMPLETED / PASS / VERIFIED / RUNTIME-SAFE`.
+3. **Canonical documentation reconciliation**: records the verified Phase 11A.0F closure; any Git publication or later documentation change remains governed by its own Human Owner-approved gate.
+4. **Staging SuperAdmin readiness/mutation**: remains a separate DB mutation gate and is `NOT APPROVED / NOT PERFORMED`.
+5. **New product-development phase selection**: perform a fresh read-only gap analysis before proposing any new mutation scope. Do not return to stale `Phase 0 (HIỆN TẠI)`.
+6. **Residual platform security review**: `supabase_admin` default ACL hardening remains a separate optional governance/platform gate.
 
 ---
 
 ## 6. NGUYÊN TẮC CỐT TỬ: PRODUCTION ĐÃ RELEASE, KHÔNG TỰ Ý THAY ĐỔI
 
-- **Production deployed**: **YES**. The stable application/code baseline is `e31e9b3e8aae3c944964babdbb83cc0fb9e09e50`; the latest recorded R5G.11 verified deployment snapshot is `aaacbb6cfa1c95a8571e0b2cf412804aa6e6da7b`. Check GitHub/Vercel for the live current deployment SHA before any operational action.
-- **R5G.11 snapshot deployment status**: **READY**.
-- **Production public access**: **RESTORED**.
-- **Production WAF freeze**: removed after validation; health-check rule preserved.
+- **Production deployed**: **YES**.
+- **Current verified Production/main SHA**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Current verified Production tree**: `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Current Production deployment status**: **4 / 4 Vercel projects READY**.
+- **Canonical Production domain**: `antigravity-hrms-six.vercel.app`.
+- **Production runtime closure**: `/` = HTTP 200, `/login` = HTTP 200, `/api/health` = HTTP 200.
+- **Current release CI**: CI #44 `SUCCESS`; Docker Build & Publish #11 `SUCCESS`.
+- **Current release closure audit**: `PASS / VERIFIED`.
+- Older R5G release SHAs and deployment snapshots remain historical evidence only. They do not override the current verified Production release above.
+- `/api/health` proves application/process responsiveness only and does not establish Production database connectivity or business-data state.
 - **Production DB access**: exceptional only; no casual checks.
-- **Chỉ thị chấp hành**: Không tự ý deploy, rollback, migrate, seed, thay đổi env/WAF, hoặc ghi vào Production Database khi chưa có văn bản/lệnh trực tiếp từ Người Phụ Trách.
+- **Production DB mutation**: not performed by the release closure audit.
+- **Chỉ thị chấp hành**: Không tự ý deploy, rollback, migrate, seed, thay đổi env/WAF, hoặc ghi vào Production Database khi chưa có lệnh/phê duyệt riêng trực tiếp từ Human Owner.
 
 ---
 
