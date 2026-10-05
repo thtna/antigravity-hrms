@@ -94,6 +94,43 @@ This snapshot is the latest verified Production release state. Older R5G/R7 reco
 - **Old reset tokens**: `DO NOT REUSE`.
 - **Phase result**: `PHASE_11A_0D_FULL_E2E = PASS / VERIFIED`.
 
+### Phase 11A.0F Public Data API / RLS Hardening Closure Snapshot (05/10/2026)
+
+- **PHASE_11A_0F_STAGING_RLS_HARDENING**: `PASS / VERIFIED / RUNTIME-SAFE`.
+- **Execution environment**: `STAGING ONLY`.
+- **Production touched**: `NO`.
+- **Production/main SHA remained**: `a8eca8daef87fa51a6efdf7bf60d8b005249444f`.
+- **Final remote staging SHA**: `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
+- **Phase 11A.0F Git commit**: `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
+- **Commit subject**: `security: add phase 11a.0f public data api hardening migration`.
+- **Migration path**: `prisma/migrations/20261005000000_phase_11a_0f_public_data_api_hardening/migration.sql`.
+- **Migration SHA256**: `3EB9E1DB99B6A168D560B2EE044DCF5E33BF88325B5BB7B45F5D32D560CB0ADD`.
+- **Migration execution path**: Prisma Migrate remained canonical; staging used `prisma migrate deploy`.
+- **Migration apply**: `PASS / VERIFIED`.
+- **Post-deploy Prisma status**: `PASS`; database schema reported up to date.
+- **Supabase staging**: `antigravity-hrms-staging`, ref `rdpufonfascxgbydvtak`, remained `ACTIVE_HEALTHY`.
+- **Public table topology**: exact `34` public ordinary tables.
+- **RLS after hardening**: `34 / 34` public tables enabled.
+- **FORCE RLS**: `NO`, intentionally.
+- **Public RLS policies**: `0`, intentionally.
+- **anon/authenticated direct public-table privileges**: revoked.
+- **postgres default privileges for future public tables/sequences/functions**: hardened against anon/authenticated.
+- **service_role SELECT coverage**: preserved across all 34 public tables by migration assertion.
+- **Business authentication architecture**: HRMS JWT/cookie model remains authoritative; no Supabase Auth `auth.uid()` client-policy model was introduced.
+- **Staging database password rotation**: `PASS / VERIFIED`; no password is recorded here.
+- **Vercel staging DATABASE_URL rebind**: `PASS / VERIFIED`; branch-scoped Preview/staging configuration was rebound to the rotated credential.
+- **New-password Prisma authentication through Session Pooler port 5432**: `PASS / VERIFIED`.
+- **Post-rotation staging runtime DB connectivity**: `PASS / VERIFIED`.
+- **Post-RLS staging runtime DB connectivity**: `PASS / VERIFIED`.
+- **Canonical staging Preview after push**: `dpl_CSVhDuohpYKeqcq8CRW1btu3F8mc`.
+- **Canonical staging Preview state**: `READY`.
+- **Canonical staging Preview branch/SHA**: `staging` / `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
+- **Canonical Vercel status for pushed commit**: `SUCCESS`.
+- **Residual platform boundary**: `supabase_admin` default ACL hardening was intentionally outside this Prisma migration scope.
+- **Residual untracked operator/evidence artifacts**: `56`; preserve untouched.
+- **PROJECT_SPEC.md**: `MISSING / UNPROVEN`; do not create automatically.
+- **Phase result**: `PHASE_11A_0F = PASS / VERIFIED / CLOSED`.
+
 This section is authoritative for the stable application release lineage and dated verification evidence. Older phase reports remain historical evidence, not live deployment-state checks.
 
 ### Stable Application/Code Release Baseline
@@ -406,15 +443,22 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 - **Canonical Production domain**: `antigravity-hrms-six.vercel.app`.
 - **Runtime verification**: `/`, `/login`, and `/api/health` returned HTTP 200.
 - **Runtime errors during closure audit window**: none observed.
-- **Main/Staging content drift at closure**: `NO`; both resolve to tree `d82487cab83cd237ae7c2d3f2de8487350b47674`.
+- **Main/Staging content drift at Production release closure**: `NO`; both resolved to tree `d82487cab83cd237ae7c2d3f2de8487350b47674` at that historical closure point.
+- **Current remote staging SHA**: `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
+- **Current main/staging drift after Phase 11A.0F**: `YES / EXPECTED`; staging contains approved staging-only security work not promoted to Production.
+- **Canonical staging Preview after Phase 11A.0F**: `dpl_CSVhDuohpYKeqcq8CRW1btu3F8mc`, `READY`, exact staging SHA `68e5976f47a97e0c731b5d10292ab0979bb13d75`.
 - **Production database boundary**: Production DB was not accessed or mutated by this release-closure audit; database state is not revalidated by the HTTP health endpoint.
 - **Next product/development mutation approved**: `NONE`. Any new scope requires separate Human Owner approval.
-- **Current operational phase closure**: `Phase 11A.0D — Real Email Staging E2E = PASS / VERIFIED`.
+- **Phase 11A.0D closure**: `PASS / VERIFIED`.
+- **Phase 11A.0F closure**: `PASS / VERIFIED / RUNTIME-SAFE`.
+- **Staging RLS state**: `34 / 34` public tables RLS-enabled; no public RLS policies intentionally created.
+- **Staging credential rotation/rebind**: `PASS / VERIFIED`; secret values are not recorded.
 - **Current open product-development phase**: `NOT YET SELECTED`.
 - **SuperAdmin candidate**: `namcharm040889@gmail.com`.
 - **SuperAdmin role assignment**: `NOT APPROVED / NOT PERFORMED`.
 - **PROJECT_SPEC authority status**: `MISSING / UNPROVEN`.
 - **Residual untracked operator/evidence artifacts**: `56`; preserve and do not touch without separate approval.
+- **Known Phase 11A.0F residual platform boundary**: `supabase_admin` default ACL hardening remains outside the completed Prisma migration scope.
 - **Next mutation approved**: `NONE`.
 
 ---
@@ -426,9 +470,12 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 - **Production guard**: Production remains protected. Any Production DB write, env change, WAF change, deploy, rollback, or promotion requires explicit operator authorization.
 - **Operator/helper files**: Existing untracked helper files must remain uncommitted unless the operator explicitly approves.
 - **Phase 11A.0D blocker**: `CLOSED / PASS / VERIFIED`.
+- **Phase 11A.0F blocker**: `CLOSED / PASS / VERIFIED / RUNTIME-SAFE`.
+- **Documentation governance**: handoff mutation and Git publication are controlled by separate Human Owner-approved gates; no broader source, database, Vercel, or Production mutation is implied by documentation reconciliation.
 - **Current product-development blocker**: no new phase has been selected or approved.
 - **SuperAdmin staging assignment**: remains a separate DB mutation gate; `NOT APPROVED / NOT PERFORMED`.
 - **PROJECT_SPEC.md**: `MISSING / UNPROVEN`; do not create or promote a substitute without a separate governance decision.
+- **Phase 11A.0F residual platform boundary**: `supabase_admin` default ACL hardening remains separately governed.
 - **Residual untracked artifacts**: `56`; preserve untouched.
 
 ---
@@ -436,10 +483,11 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 ## 5. CÁC GIAI ĐOẠN TIẾP THEO (NEXT PHASES ROADMAP)
 
 1. **Phase 11A.0D**: `COMPLETED / PASS / VERIFIED`.
-2. **Canonical documentation reconciliation**: this gate records the verified Phase 11A.0D closure only; commit/push require separate Human Owner approval.
-3. **Staging SuperAdmin readiness/mutation**: may be proposed separately if the Human Owner wants to proceed; role assignment is not authorized by this documentation gate.
-4. **New product-development phase selection**: perform read-only gap analysis against current source/runtime/tests and architecture, then propose a bounded scope. Do not return to stale `Phase 0 (HIỆN TẠI)`.
-5. **Security findings**: do not fold unrelated security remediation into this documentation gate; any such work requires separate triage and approval.
+2. **Phase 11A.0F**: `COMPLETED / PASS / VERIFIED / RUNTIME-SAFE`.
+3. **Canonical documentation reconciliation**: records the verified Phase 11A.0F closure; any Git publication or later documentation change remains governed by its own Human Owner-approved gate.
+4. **Staging SuperAdmin readiness/mutation**: remains a separate DB mutation gate and is `NOT APPROVED / NOT PERFORMED`.
+5. **New product-development phase selection**: perform a fresh read-only gap analysis before proposing any new mutation scope. Do not return to stale `Phase 0 (HIỆN TẠI)`.
+6. **Residual platform security review**: `supabase_admin` default ACL hardening remains a separate optional governance/platform gate.
 
 ---
 
