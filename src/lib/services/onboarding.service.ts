@@ -168,29 +168,17 @@ export class OnboardingService {
     const org = await this.ensureOwnerOrAdmin(session);
     const orgId = org.id;
 
-    const [
-      employees,
-      departments,
-      positions,
-      branches,
-      shifts,
-      worksites,
-      attendances,
-      leaves,
-      payrolls,
-      kpis,
-    ] = await Promise.all([
-      prisma.employee.count({ where: { organizationId: orgId, deletedAt: null } }),
-      prisma.department.count({ where: { organizationId: orgId, deletedAt: null } }),
-      prisma.position.count({ where: { organizationId: orgId, deletedAt: null } }),
-      prisma.branch.count({ where: { organizationId: orgId, deletedAt: null } }),
-      prisma.workShift.count({ where: { organizationId: orgId, deletedAt: null } }),
-      prisma.worksite.count({ where: { organizationId: orgId } }),
-      prisma.attendance.count({ where: { organizationId: orgId } }),
-      prisma.leaveRequest.count({ where: { employee: { organizationId: orgId } } }),
-      prisma.payroll.count({ where: { organizationId: orgId } }),
-      prisma.kpi.count({ where: { organizationId: orgId } }),
-    ]);
+    // Keep status reads within a single available Prisma connection.
+    const employees = await prisma.employee.count({ where: { organizationId: orgId, deletedAt: null } });
+    const departments = await prisma.department.count({ where: { organizationId: orgId, deletedAt: null } });
+    const positions = await prisma.position.count({ where: { organizationId: orgId, deletedAt: null } });
+    const branches = await prisma.branch.count({ where: { organizationId: orgId, deletedAt: null } });
+    const shifts = await prisma.workShift.count({ where: { organizationId: orgId, deletedAt: null } });
+    const worksites = await prisma.worksite.count({ where: { organizationId: orgId } });
+    const attendances = await prisma.attendance.count({ where: { organizationId: orgId } });
+    const leaves = await prisma.leaveRequest.count({ where: { employee: { organizationId: orgId } } });
+    const payrolls = await prisma.payroll.count({ where: { organizationId: orgId } });
+    const kpis = await prisma.kpi.count({ where: { organizationId: orgId } });
 
     const currentStep = org.onboardingStep;
     const isCompleted = currentStep >= 9 || org.onboardingSkipped;

@@ -229,6 +229,118 @@ describe('PHASE 7 — EMPTY TENANT & ONBOARDING SERVICE TEST SUITE', () => {
     });
   });
 
+  describe('Single-connection onboarding status reads', () => {
+    const orgId = 'org-fresh-01';
+    const countQueries = [
+      { count: mockPrisma.employee.count, where: { organizationId: orgId, deletedAt: null }, value: 1 },
+      { count: mockPrisma.department.count, where: { organizationId: orgId, deletedAt: null }, value: 2 },
+      { count: mockPrisma.position.count, where: { organizationId: orgId, deletedAt: null }, value: 3 },
+      { count: mockPrisma.branch.count, where: { organizationId: orgId, deletedAt: null }, value: 4 },
+      { count: mockPrisma.workShift.count, where: { organizationId: orgId, deletedAt: null }, value: 5 },
+      { count: mockPrisma.worksite.count, where: { organizationId: orgId }, value: 6 },
+      { count: mockPrisma.attendance.count, where: { organizationId: orgId }, value: 7 },
+      { count: mockPrisma.leaveRequest.count, where: { employee: { organizationId: orgId } }, value: 8 },
+      { count: mockPrisma.payroll.count, where: { organizationId: orgId }, value: 9 },
+      { count: mockPrisma.kpi.count, where: { organizationId: orgId }, value: 10 },
+    ];
+
+    function instrumentCountConcurrency() {
+      const concurrency = { active: 0, maximum: 0 };
+      for (const { count, value } of countQueries) {
+        count.mockImplementation(async () => {
+          concurrency.active++;
+          concurrency.maximum = Math.max(concurrency.maximum, concurrency.active);
+          try {
+            // Yield deterministically so a Promise.all fan-out exposes overlapping reads.
+            await Promise.resolve();
+            return value;
+          } finally {
+            concurrency.active--;
+          }
+        });
+      }
+      return concurrency;
+    }
+
+    const ownerOnlySession: UserSession = { ...ownerSession, roles: ['employee'], permissions: [] };
+    it.each([
+      { role: 'OWNER', session: ownerOnlySession },
+      { role: 'ADMIN', session: adminSession },
+    ])('serializes all ten scoped counts for $role and preserves the result contract', async ({ session }) => {
+      mockPrisma.organization.findUnique.mockResolvedValue({ ...mockFreshOrg, onboardingStep: 3 });
+      const concurrency = instrumentCountConcurrency();
+
+      const status = await OnboardingService.getOnboardingStatus(session);
+
+      expect(concurrency.maximum).toBe(1);
+      expect(concurrency.active).toBe(0);
+      for (const { count, where } of countQueries) {
+        expect(count).toHaveBeenCalledExactlyOnceWith({ where });
+      }
+      expect(mockPrisma.organization.findUnique).toHaveBeenCalledExactlyOnceWith({ where: { id: orgId } });
+      expect(Object.keys(status).sort()).toEqual([
+        'counts', 'isCompleted', 'onboardingSkipped', 'onboardingStep', 'organization', 'steps',
+      ]);
+      expect(status.organization).toEqual({
+        id: orgId,
+        name: mockFreshOrg.name,
+        taxCode: mockFreshOrg.taxCode,
+        email: mockFreshOrg.email,
+        phone: mockFreshOrg.phone,
+        address: mockFreshOrg.address,
+        status: mockFreshOrg.status,
+      });
+      expect(status.counts).toEqual({
+        employees: 1, departments: 2, positions: 3, branches: 4, shifts: 5,
+        worksites: 6, attendances: 7, leaves: 8, payrolls: 9, kpis: 10,
+      });
+      expect(status.onboardingStep).toBe(3);
+      expect(status.onboardingSkipped).toBe(false);
+      expect(status.isCompleted).toBe(false);
+      expect(status.steps.map(({ step, key, completed }) => ({ step, key, completed }))).toEqual([
+        { step: 1, key: 'business', completed: true },
+        { step: 2, key: 'branch', completed: true },
+        { step: 3, key: 'department', completed: true },
+        { step: 4, key: 'position', completed: true },
+        { step: 5, key: 'shift', completed: true },
+        { step: 6, key: 'employee', completed: true },
+        { step: 7, key: 'attendance', completed: true },
+        { step: 8, key: 'payroll', completed: false },
+      ]);
+      expect(mockPrisma.organization.update).not.toHaveBeenCalled();
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('detects the old concurrent fan-out with the same count instrumentation', async () => {
+      const concurrency = instrumentCountConcurrency();
+
+      await Promise.all(countQueries.map(({ count, where }) => count({ where })));
+
+      expect(concurrency.maximum).toBe(10);
+      expect(concurrency.active).toBe(0);
+    });
+
+    it.each([
+      { step: 0, skipped: false, completed: false, steps: [false, false, false, false, false, false, false, false] },
+      { step: 3, skipped: false, completed: false, steps: [true, true, false, false, false, false, false, false] },
+      { step: 8, skipped: false, completed: false, steps: [true, true, true, true, true, true, true, false] },
+      { step: 9, skipped: false, completed: true, steps: [true, true, true, true, true, true, true, true] },
+      { step: 3, skipped: true, completed: true, steps: [true, true, false, false, false, false, false, true] },
+    ])('preserves completion mapping at step $step with skipped=$skipped', async ({ step, skipped, completed, steps }) => {
+      mockPrisma.organization.findUnique.mockResolvedValue({
+        ...mockFreshOrg, onboardingStep: step, onboardingSkipped: skipped,
+      });
+
+      const status = await OnboardingService.getOnboardingStatus(ownerSession);
+
+      expect(status.onboardingStep).toBe(step);
+      expect(status.onboardingSkipped).toBe(skipped);
+      expect(status.isCompleted).toBe(completed);
+      expect(status.steps.map((entry) => entry.completed)).toEqual(steps);
+    });
+  });
+
   // ───────────────────────────────────────────────────────────────────────────
   // 2. ONBOARDING STEP-BY-STEP FLOW
   // ───────────────────────────────────────────────────────────────────────────
