@@ -19,6 +19,7 @@ import {
   Loader2,
   AlertCircle,
   ShieldCheck,
+  RefreshCw,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -42,6 +43,20 @@ interface OnboardingStatus {
     name: string;
     completed: boolean;
   }>;
+}
+
+interface Step6Department {
+  id: string;
+  name: string;
+  code: string;
+  isActive: boolean;
+}
+
+interface Step6Position {
+  id: string;
+  title: string;
+  code: string;
+  isActive: boolean;
 }
 
 const STEP_DEFINITIONS = [
@@ -103,6 +118,11 @@ export default function OnboardingPage() {
   const [currentStep, setCurrentStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [step6Departments, setStep6Departments] = useState<Step6Department[]>([]);
+  const [step6Positions, setStep6Positions] = useState<Step6Position[]>([]);
+  const [step6ReferencesLoading, setStep6ReferencesLoading] = useState(true);
+  const [step6ReferenceError, setStep6ReferenceError] = useState<string | null>(null);
+  const [step6ReferenceRetry, setStep6ReferenceRetry] = useState(0);
 
   // Form states for all 8 steps
   const [step1Data, setStep1Data] = useState({
@@ -155,6 +175,8 @@ export default function OnboardingPage() {
     email: 'nhanvien@company.vn',
     phoneNumber: '0987654321',
     contractSalary: 18000000,
+    departmentId: '',
+    positionId: '',
   });
 
   const [step7Data, setStep7Data] = useState({
@@ -213,9 +235,72 @@ export default function OnboardingPage() {
     loadStatus();
   }, []);
 
+  useEffect(() => {
+    if (currentStep !== 6) return;
+
+    const controller = new AbortController();
+
+    async function loadStep6References() {
+      setStep6ReferencesLoading(true);
+      setStep6ReferenceError(null);
+      setStep6Departments([]);
+      setStep6Positions([]);
+
+      try {
+        const [departmentRes, positionRes] = await Promise.all([
+          fetch('/api/v1/departments', { signal: controller.signal }),
+          fetch('/api/v1/positions', { signal: controller.signal }),
+        ]);
+        const [departmentJson, positionJson] = await Promise.all([
+          departmentRes.json(),
+          positionRes.json(),
+        ]);
+
+        if (
+          !departmentRes.ok || !departmentJson.success || !Array.isArray(departmentJson.data) ||
+          !positionRes.ok || !positionJson.success || !Array.isArray(positionJson.data)
+        ) {
+          throw new Error('STEP6_REFERENCE_DATA_UNAVAILABLE');
+        }
+
+        if (controller.signal.aborted) return;
+        setStep6Departments(departmentJson.data.filter((department: Step6Department) => department.isActive === true));
+        setStep6Positions(positionJson.data.filter((position: Step6Position) => position.isActive === true));
+      } catch {
+        if (!controller.signal.aborted) {
+          setStep6ReferenceError('Không thể tải phòng ban hoặc chức danh. Vui lòng thử tải lại danh sách.');
+        }
+      } finally {
+        if (!controller.signal.aborted) setStep6ReferencesLoading(false);
+      }
+    }
+
+    loadStep6References();
+    return () => controller.abort();
+  }, [currentStep, step6ReferenceRetry]);
+
   const handleSaveStep = async (step: number) => {
     setError(null);
     setSuccessMessage(null);
+
+    if (step === 6) {
+      if (step6ReferencesLoading || step6ReferenceError) {
+        setError(step6ReferenceError || 'Vui lòng chờ tải xong danh sách phòng ban và chức danh.');
+        return;
+      }
+      if (!step6Data.departmentId || !step6Data.positionId) {
+        setError('Vui lòng chọn đầy đủ Phòng Ban và Chức Danh trước khi tạo nhân sự đầu tiên.');
+        return;
+      }
+      if (
+        !step6Departments.some((department) => department.id === step6Data.departmentId) ||
+        !step6Positions.some((position) => position.id === step6Data.positionId)
+      ) {
+        setError('Phòng Ban hoặc Chức Danh đã chọn không còn trong danh sách hoạt động. Vui lòng chọn lại.');
+        return;
+      }
+    }
+
     setSubmitting(true);
 
     let payload: any = {};
@@ -696,6 +781,60 @@ export default function OnboardingPage() {
             {/* STEP 6: EMPLOYEE */}
             {currentStep === 6 && (
               <div className="space-y-4">
+                {step6ReferencesLoading && (
+                  <div role="status" className="flex items-center gap-2 text-sm text-slate-400">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Đang tải phòng ban và chức danh...
+                  </div>
+                )}
+                {step6ReferenceError && (
+                  <div role="alert" className="space-y-2 text-sm text-red-300">
+                    <p>{step6ReferenceError}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setStep6ReferenceRetry((retry) => retry + 1)}
+                    >
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                      Tải lại danh sách
+                    </Button>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="min-w-0 space-y-1.5">
+                    <label htmlFor="step6-department" className="text-xs font-medium text-slate-300">Phòng Ban *</label>
+                    <select
+                      id="step6-department"
+                      required
+                      value={step6Data.departmentId}
+                      onChange={(e) => setStep6Data({ ...step6Data, departmentId: e.target.value })}
+                      disabled={submitting || step6ReferencesLoading || !!step6ReferenceError}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                    >
+                      <option value="">{step6Departments.length ? 'Chọn phòng ban' : 'Chưa có phòng ban hoạt động'}</option>
+                      {step6Departments.map((department) => (
+                        <option key={department.id} value={department.id}>{department.name} ({department.code})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="min-w-0 space-y-1.5">
+                    <label htmlFor="step6-position" className="text-xs font-medium text-slate-300">Chức Danh *</label>
+                    <select
+                      id="step6-position"
+                      required
+                      value={step6Data.positionId}
+                      onChange={(e) => setStep6Data({ ...step6Data, positionId: e.target.value })}
+                      disabled={submitting || step6ReferencesLoading || !!step6ReferenceError}
+                      className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-sm text-white focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                    >
+                      <option value="">{step6Positions.length ? 'Chọn chức danh' : 'Chưa có chức danh hoạt động'}</option>
+                      {step6Positions.map((position) => (
+                        <option key={position.id} value={position.id}>{position.title} ({position.code})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-xs font-medium text-slate-300">Họ và Đệm *</label>
@@ -900,7 +1039,7 @@ export default function OnboardingPage() {
             <Button
               type="button"
               onClick={() => handleSaveStep(currentStep)}
-              disabled={submitting}
+              disabled={submitting || (currentStep === 6 && (step6ReferencesLoading || !!step6ReferenceError))}
               className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs px-6 py-2 shadow-lg shadow-blue-500/20"
             >
               {submitting ? (
