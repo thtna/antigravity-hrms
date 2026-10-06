@@ -47,6 +47,7 @@ export interface AttendanceQueryTiming {
   countMs?: number;
   findManyMs?: number;
   dbParallelMs?: number;
+  dbTransactionMs?: number;
 }
 
 export class AttendanceService {
@@ -849,49 +850,45 @@ export class AttendanceService {
 
     const skip = (params.page - 1) * params.limit;
 
-    const dbParallelStart = performance.now();
+    const dbTransactionStart = performance.now();
 
-    const countPromise = (async () => {
-      const start = performance.now();
-      try {
-        return await prisma.attendance.count({ where });
-      } finally {
-        if (timing) timing.countMs = performance.now() - start;
-      }
-    })();
+    const [total, records] = await prisma.$transaction(async (tx) => {
+      const countStart = performance.now();
+      const total = await tx.attendance.count({ where });
+      if (timing) timing.countMs = performance.now() - countStart;
 
-    const recordsPromise = (async () => {
-      const start = performance.now();
-      try {
-        return await prisma.attendance.findMany({
-          where,
-          include: {
-            employee: {
-              select: {
-                id: true,
-                employeeCode: true,
-                firstName: true,
-                lastName: true,
-                avatarUrl: true,
-                department: { select: { id: true, name: true, code: true } },
-                position: { select: { id: true, title: true, code: true } },
-              },
-            },
-            schedule: {
-              include: { shift: true },
+      const findManyStart = performance.now();
+      const records = await tx.attendance.findMany({
+        where,
+        include: {
+          employee: {
+            select: {
+              id: true,
+              employeeCode: true,
+              firstName: true,
+              lastName: true,
+              avatarUrl: true,
+              department: { select: { id: true, name: true, code: true } },
+              position: { select: { id: true, title: true, code: true } },
             },
           },
-          orderBy: [{ workDate: 'desc' }, { checkInTime: 'desc' }],
-          skip,
-          take: params.limit,
-        });
-      } finally {
-        if (timing) timing.findManyMs = performance.now() - start;
-      }
-    })();
+          schedule: {
+            include: { shift: true },
+          },
+        },
+        orderBy: [{ workDate: 'desc' }, { checkInTime: 'desc' }],
+        skip,
+        take: params.limit,
+      });
+      if (timing) timing.findManyMs = performance.now() - findManyStart;
 
-    const [total, records] = await Promise.all([countPromise, recordsPromise]);
-    if (timing) timing.dbParallelMs = performance.now() - dbParallelStart;
+      return [total, records] as const;
+    });
+
+    if (timing) {
+      timing.dbTransactionMs = performance.now() - dbTransactionStart;
+      timing.dbParallelMs = timing.dbTransactionMs;
+    }
 
     return {
       records: records.map((r) => ({

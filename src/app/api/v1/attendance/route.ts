@@ -28,6 +28,7 @@ function attachAttendanceServerTiming<T>(
         `attendance_count;dur=${(timings.query.countMs ?? 0).toFixed(1)}`,
         `attendance_find_many;dur=${(timings.query.findManyMs ?? 0).toFixed(1)}`,
         `db_parallel;dur=${(timings.query.dbParallelMs ?? 0).toFixed(1)}`,
+        `db_transaction;dur=${(timings.query.dbTransactionMs ?? 0).toFixed(1)}`,
         `service;dur=${timings.serviceMs.toFixed(1)}`,
         `total;dur=${timings.totalMs.toFixed(1)}`,
       ].join(', ')
