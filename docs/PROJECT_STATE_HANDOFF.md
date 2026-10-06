@@ -74,8 +74,10 @@ This snapshot is the latest verified Production release state as of 06/10/2026. 
 - **Production DB mutation in this release/UAT cycle**: `YES`, but only through the explicitly approved Production onboarding UAT Steps 6 → 8; no unrelated DB mutation was authorized.
 - **Manual Production deployment**: `NO`; deployment was triggered by the approved `main` merge through Git integration.
 - **Force push**: `NO`.
-- **C4R7 documentation reconciliation scope**: `docs/PROJECT_STATE_HANDOFF.md` only, local-only; no stage, commit, push, deploy, DB, env or Vercel mutation is authorized by C4R7.
-- **CUSTOMER_HANDOFF_READY**: `PENDING CANONICAL HANDOFF PUBLICATION AND FINAL HANDOFF AUDIT`.
+- **PHASE_12F-R1-C4R7**: `PASS / VERIFIED / CLOSED`; canonical handoff reconciliation completed.
+- **PHASE_12F-R1-C4R8**: `PASS / VERIFIED / CLOSED`; canonical handoff committed on `staging` as `3c9c30c65cf0b242fb9e88a67dc5d6ae84454e20`.
+- **PHASE_12F-R1-C4R9**: `PASS / VERIFIED / CLOSED`; exact commit `3c9c30c65cf0b242fb9e88a67dc5d6ae84454e20` pushed to remote `staging` and exact Vercel Preview `dpl_GcYURdbCdgnsvhw4vJ5KsfTw31oV` reached `READY`.
+- **CUSTOMER_HANDOFF_READY**: `PENDING CANONICAL HANDOFF MERGE TO MAIN AND FINAL HANDOFF AUDIT`.
 
 
 ### Current Production Release Closure Snapshot (04/10/2026)
@@ -537,17 +539,19 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 - **PROJECT_SPEC authority status**: `MISSING / UNPROVEN`.
 - **Residual untracked operator/evidence artifacts**: `56`; preserve and do not touch without separate approval.
 - **Known Phase 11A.0F residual platform boundary**: `supabase_admin` default ACL hardening remains outside the completed Prisma migration scope.
-- **C4R7 documentation state**: local-only reconciliation authorized; no stage/commit/push is authorized by this gate.
-- **CUSTOMER_HANDOFF_READY**: `PENDING CANONICAL HANDOFF PUBLICATION AND FINAL HANDOFF AUDIT`.
+- **PHASE_12F-R1-C4R7**: `PASS / VERIFIED / CLOSED`.
+- **PHASE_12F-R1-C4R8**: `PASS / VERIFIED / CLOSED`; handoff commit `3c9c30c65cf0b242fb9e88a67dc5d6ae84454e20`.
+- **PHASE_12F-R1-C4R9**: `PASS / VERIFIED / CLOSED`; remote `staging` = `3c9c30c65cf0b242fb9e88a67dc5d6ae84454e20`; Vercel Preview `dpl_GcYURdbCdgnsvhw4vJ5KsfTw31oV` = `READY`.
+- **CUSTOMER_HANDOFF_READY**: `PENDING CANONICAL HANDOFF MERGE TO MAIN AND FINAL HANDOFF AUDIT`.
 - **Next product/development mutation approved**: `NONE`.
 
 ---
 ## 4. RÀO CẢN VÀ ĐIỀU KIỆN TIẾP TỤC (CURRENT BLOCKERS)
 
 - **Release blocker**: `NONE`. Production release, Production onboarding UAT and authenticated Admin/HR Dashboard verification are `PASS / VERIFIED`.
-- **Customer handoff blocker**: canonical handoff reconciliation must be published through separately approved Git gates, followed by a final read-only handoff audit.
+- **Customer handoff blocker**: reconciled canonical handoff is published on remote `staging` at `3c9c30c65cf0b242fb9e88a67dc5d6ae84454e20`, but `main` still contains the older handoff. Customer handoff remains blocked until the canonical handoff is merged to `main` and a final read-only handoff audit passes.
 - **Known accepted product limitation**: `NIGHT_OT_END_TO_END = BLOCKED_BY_DATA_MODEL / ACCEPTED LIMITATION`; this is documented and is not being represented as implemented end-to-end functionality.
-- **Documentation control**: C4R7 authorizes only local mutation of `docs/PROJECT_STATE_HANDOFF.md`; staging, commit, push, PR and merge require separate Human Owner approvals.
+- **Documentation control**: C4R7, C4R8 and C4R9 are closed. Any further documentation mutation, PR creation, merge or publication to `main` requires a new explicit Human Owner-approved gate.
 - **Production guard**: any additional Production DB write, migration, seed, env change, WAF change, deploy, rollback, account/password mutation or promotion requires explicit Human Owner authorization.
 - **Operator/helper files**: residual untracked files remain outside approved product/documentation scope and must not be staged or deleted automatically.
 - **Phase 11A.0D blocker**: `CLOSED / PASS / VERIFIED`.
@@ -560,13 +564,15 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 ---
 ## 5. CÁC GIAI ĐOẠN TIẾP THEO (NEXT PHASES ROADMAP)
 
-1. **PHASE_12F-R1-C4R7 — Canonical Handoff Reconciliation**: update only `docs/PROJECT_STATE_HANDOFF.md` locally from verified evidence; `NO STAGE / NO COMMIT / NO PUSH` under the current gate.
-2. **Canonical handoff publication gate**: after C4R7 diff verification, request separate Human Owner approval to stage and commit only the canonical handoff document on `staging`.
-3. **Documentation push / PR / merge gates**: each remains separately governed; no direct `main` push and no force-push.
-4. **Final customer-handoff read-only audit**: after canonical documentation reaches the intended authoritative branch, verify exact Git SHA, CI/Preview as applicable, Production release pointers and handoff consistency.
-5. **CUSTOMER_HANDOFF_READY decision**: may be changed to `YES` only after the final handoff audit is complete and no unresolved release/documentation blocker remains.
-6. **New product-development phase selection**: only after handoff closure or an explicit Human Owner decision to continue development.
-7. **Residual platform security review**: `supabase_admin` default ACL hardening remains an optional, separately governed platform gate.
+1. **PHASE_12F-R1-C4R7**: `PASS / VERIFIED / CLOSED`.
+2. **PHASE_12F-R1-C4R8**: `PASS / VERIFIED / CLOSED`; canonical handoff committed on `staging`.
+3. **PHASE_12F-R1-C4R9**: `PASS / VERIFIED / CLOSED`; canonical handoff pushed to remote `staging`; exact Vercel Preview is `READY`.
+4. **Next canonical gate**: create a documentation-only PR from `staging` to `main` for the canonical handoff reconciliation, only after separate Human Owner approval; do not merge within the PR-creation gate.
+5. **Canonical handoff merge gate**: merge only after PR/read-only verification and separate Human Owner approval.
+6. **Final customer-handoff read-only audit**: after the canonical handoff exists on `main`, verify Git SHA, handoff content, Production release pointers, known limitation and documentation consistency.
+7. **CUSTOMER_HANDOFF_READY decision**: change to `YES` only if that final audit passes with no unresolved release/documentation blocker.
+8. **New product-development phase selection**: only after handoff closure or explicit Human Owner direction.
+9. **Residual platform security review**: `supabase_admin` default ACL hardening remains an optional, separately governed platform gate.
 
 ---
 ## 6. NGUYÊN TẮC CỐT TỬ: PRODUCTION ĐÃ RELEASE, KHÔNG TỰ Ý THAY ĐỔI
