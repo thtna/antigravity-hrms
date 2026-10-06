@@ -1,10 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { PayrollRuleEngine } from '../payroll-rule-engine';
-import {
-  VIETNAM_STATUTORY_RULE_2026,
-  HOURLY_PARTTIME_RULE,
-  EXPAT_FLAT_TAX_RULE,
-} from '../default-rules';
+import { HOURLY_PARTTIME_RULE, EXPAT_FLAT_TAX_RULE } from '../default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 import { PayrollCalculationInput, PayrollRuleConfig } from '../types';
 
 describe('PHASE 14 — PAYROLL RULE ENGINE TEST SUITE', () => {

@@ -34,7 +34,7 @@ import { PayrollWorkflowService } from '../payroll-workflow.service';
 import { PayslipService } from '../payslip.service';
 import { prisma } from '@/lib/db/prisma';
 import { PayrollCalculationEngine } from '@/lib/payroll/payroll-calculation-engine';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 
 // ─── Stateful In-Memory Mock Store ──────────────────────────────────────────
 

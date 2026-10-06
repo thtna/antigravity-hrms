@@ -3,8 +3,7 @@ import { ApiError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
 import { isSuperAdmin } from '@/lib/auth/roles';
-
-export const MAX_TENANTS = 5;
+import { MAX_REGISTERED_TENANTS } from '@/lib/constants/tenant-quota';
 
 export type TenantAction = 'APPROVE' | 'REJECT' | 'SUSPEND' | 'ACTIVATE' | 'CLOSE';
 
@@ -16,8 +15,8 @@ export interface TenantMetrics {
   rejected: number;
   closed: number;
   maxTenants: number;
-  activeQuotaDisplay: string;
-  canActivateMore: boolean;
+  registeredQuotaDisplay: string;
+  canRegisterMore: boolean;
 }
 
 export interface TenantListItem {
@@ -73,9 +72,9 @@ export class SuperAdminService {
       suspended,
       rejected,
       closed,
-      maxTenants: MAX_TENANTS,
-      activeQuotaDisplay: `${active} / ${MAX_TENANTS}`,
-      canActivateMore: active < MAX_TENANTS,
+      maxTenants: MAX_REGISTERED_TENANTS,
+      registeredQuotaDisplay: `${totalTenants} / ${MAX_REGISTERED_TENANTS}`,
+      canRegisterMore: totalTenants < MAX_REGISTERED_TENANTS,
     };
   }
 
@@ -255,7 +254,7 @@ export class SuperAdminService {
   /**
    * Process lifecycle actions on a tenant:
    * APPROVE, REJECT, SUSPEND, ACTIVATE, CLOSE
-   * Strict quota enforcement: Cannot activate a 6th tenant if activeCount >= MAX_TENANTS (5).
+   * Existing tenants already consume registration slots; status changes do not allocate slots.
    * Every action records an immutable AuditLog.
    */
   static async processTenantAction(
@@ -290,17 +289,6 @@ export class SuperAdminService {
           );
         }
 
-        // Quota check: MAX_TENANTS = 5. Do not activate 6th tenant!
-        const activeCount = await prisma.organization.count({
-          where: { status: 'ACTIVE', deletedAt: null },
-        });
-
-        if (activeCount >= MAX_TENANTS) {
-          throw ApiError.badRequest(
-            `Không thể kích hoạt tenant thứ ${activeCount + 1}. Hệ thống đã đạt giới hạn tối đa ${MAX_TENANTS} tenants hoạt động (MAX_TENANTS = ${MAX_TENANTS}, hiện có ${activeCount}/${MAX_TENANTS}). Vui lòng nâng cấp gói hoặc tạm ngưng tenant khác.`
-          );
-        }
-
         nextStatus = 'ACTIVE';
         approvedAtDate = new Date();
         approvedByUser = session.userId;
@@ -330,17 +318,6 @@ export class SuperAdminService {
       case 'ACTIVATE': {
         if (previousStatus === 'ACTIVE') {
           throw ApiError.badRequest('Tổ chức này đã ở trạng thái ACTIVE.');
-        }
-
-        // Quota check: MAX_TENANTS = 5. Do not activate 6th tenant!
-        const activeCount = await prisma.organization.count({
-          where: { status: 'ACTIVE', deletedAt: null },
-        });
-
-        if (activeCount >= MAX_TENANTS) {
-          throw ApiError.badRequest(
-            `Không thể kích hoạt tenant thứ ${activeCount + 1}. Hệ thống đã đạt giới hạn tối đa ${MAX_TENANTS} tenants hoạt động (MAX_TENANTS = ${MAX_TENANTS}, hiện có ${activeCount}/${MAX_TENANTS}). Vui lòng nâng cấp gói hoặc tạm ngưng tenant khác.`
-          );
         }
 
         nextStatus = 'ACTIVE';

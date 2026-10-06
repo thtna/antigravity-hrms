@@ -248,6 +248,175 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
       expect(result.charts.departmentDistribution[0].totalSalary).toBe(60000000);
       expect(result.charts.rewardComparison.netReward).toBe(7500000); // 8M - 500k
     });
+
+    it.each([
+      { role: 'admin' as const, empty: false },
+      { role: 'hr' as const, empty: false },
+      { role: 'admin' as const, empty: true },
+      { role: 'hr' as const, empty: true },
+    ])('serializes all 11 tenant-scoped reads for $role (empty=$empty)', async ({ role, empty }) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-30T18:00:00.000Z'));
+
+      const organizationId = 'org-admin-dashboard-serialization';
+      const today = new Date('2026-10-01T00:00:00.000Z');
+      const monthEnd = new Date('2026-10-31T00:00:00.000Z');
+      const trendStart = new Date('2026-09-25T00:00:00.000Z');
+      const employeeFilter = { employee: { organizationId } };
+      const leaveFilter = { employee: { is: { organizationId } } };
+      const todayAttendances = empty ? [] : [
+        { id: 'att-present', employeeId: 'emp-present', checkInTime: today, lateMinutes: 0, status: 'PRESENT', actualWorkHours: 8, otHours: 1 },
+        { id: 'att-late', employeeId: 'emp-late', checkInTime: today, lateMinutes: 10, status: 'LATE', actualWorkHours: 8, otHours: 0.5 },
+      ];
+      const queries = [
+        {
+          name: 'employee.count', mock: mockPrisma.employee.count,
+          args: { where: { deletedAt: null, status: 'ACTIVE', organizationId } },
+          value: empty ? 0 : 5,
+        },
+        {
+          name: 'attendance.today', mock: mockPrisma.attendance.findMany,
+          args: {
+            where: { ...employeeFilter, workDate: { gte: today, lte: today } },
+            select: { id: true, employeeId: true, checkInTime: true, lateMinutes: true, status: true, actualWorkHours: true, otHours: true },
+          },
+          value: todayAttendances,
+        },
+        {
+          name: 'leaveRequest.today', mock: mockPrisma.leaveRequest.findMany,
+          args: {
+            where: { ...leaveFilter, status: 'APPROVED', startDate: { lte: today }, endDate: { gte: today } },
+            select: { employeeId: true },
+          },
+          value: empty ? [] : [{ employeeId: 'emp-leave' }],
+        },
+        {
+          name: 'leaveRequest.pending', mock: mockPrisma.leaveRequest.count,
+          args: { where: { ...leaveFilter, status: 'PENDING' } },
+          value: empty ? 0 : 3,
+        },
+        {
+          name: 'attendanceAdjustment.count', mock: mockPrisma.attendanceAdjustment.count,
+          args: { where: { ...employeeFilter, status: 'PENDING' } },
+          value: empty ? 0 : 4,
+        },
+        {
+          name: 'payrollPeriod.findFirst', mock: mockPrisma.payrollPeriod.findFirst,
+          args: {
+            where: { organizationId }, orderBy: { createdAt: 'desc' },
+            include: { payrolls: { select: { id: true, grossIncome: true, netSalary: true } } },
+          },
+          value: empty ? null : {
+            code: 'PAY-2026-10', name: 'October fixture', status: 'SUBMITTED', standardWorkDays: 22,
+            totalGrossPayout: 100, totalNetPayout: 80, payrolls: [{ id: 'payroll-1' }, { id: 'payroll-2' }],
+          },
+        },
+        {
+          name: 'attendance.aggregate', mock: mockPrisma.attendance.aggregate,
+          args: {
+            where: { ...employeeFilter, workDate: { gte: today, lte: monthEnd }, status: { notIn: ['REJECTED', 'ABSENT'] } },
+            _sum: { otHours: true },
+          },
+          value: { _sum: { otHours: empty ? null : 12.5 } },
+        },
+        {
+          name: 'employeeBonusPenalty.bonus', mock: mockPrisma.employeeBonusPenalty.findMany,
+          args: { where: { ...employeeFilter, type: 'BONUS', status: 'APPROVED', period: '2026-10' }, select: { amount: true } },
+          value: empty ? [] : [{ amount: 3 }, { amount: 5 }],
+        },
+        {
+          name: 'employeeBonusPenalty.penalty', mock: mockPrisma.employeeBonusPenalty.findMany,
+          args: { where: { ...employeeFilter, type: 'PENALTY', status: 'APPROVED', period: '2026-10' }, select: { amount: true } },
+          value: empty ? [] : [{ amount: 1 }],
+        },
+        {
+          name: 'attendance.trend', mock: mockPrisma.attendance.findMany,
+          args: {
+            where: { ...employeeFilter, workDate: { gte: trendStart, lte: today } },
+            select: { workDate: true, checkInTime: true, lateMinutes: true, status: true },
+          },
+          value: todayAttendances.map((attendance) => ({ ...attendance, workDate: today })),
+        },
+        {
+          name: 'department.findMany', mock: mockPrisma.department.findMany,
+          args: {
+            where: { organizationId, deletedAt: null, isActive: true },
+            include: { employees: { where: { deletedAt: null, status: 'ACTIVE' }, select: { contractSalary: true } } },
+          },
+          value: empty ? [] : [{ id: 'dept-test', code: 'TEST', name: 'Test department', employees: [{ contractSalary: 30 }, { contractSalary: 20 }] }],
+        },
+      ];
+      const concurrency = { active: 0, maximum: 0 };
+      const operations: string[] = [];
+      const originals = [...new Set(queries.map(({ mock }) => mock))].map((mock) => ({
+        mock, implementation: mock.getMockImplementation(),
+      }));
+
+      try {
+        for (const { mock } of originals) {
+          const mockQueries = queries.filter((query) => query.mock === mock);
+          let nextResult = 0;
+          mock.mockImplementation(async () => {
+            const query = mockQueries[nextResult++];
+            concurrency.active++;
+            concurrency.maximum = Math.max(concurrency.maximum, concurrency.active);
+            operations.push(query.name);
+            try {
+              // A microtask boundary makes accidental Promise.all overlap observable.
+              await Promise.resolve();
+              return query.value;
+            } finally {
+              concurrency.active--;
+            }
+          });
+        }
+
+        const result = await DashboardService.getAdminHrDashboard({ ...adminSession, organizationId, roles: [role] });
+
+        expect(operations).toHaveLength(11);
+        expect(operations).toEqual(queries.map(({ name }) => name));
+        expect(concurrency.maximum).toBe(1);
+        expect(concurrency.active).toBe(0);
+        for (const { mock } of originals) {
+          const mockQueries = queries.filter((query) => query.mock === mock);
+          expect(mock).toHaveBeenCalledTimes(mockQueries.length);
+          mockQueries.forEach((query, index) => {
+            expect(mock).toHaveBeenNthCalledWith(index + 1, query.args);
+          });
+        }
+        expect(result).toEqual({
+          totalEmployees: empty ? 0 : 5,
+          presentToday: empty ? 0 : 2,
+          absentToday: empty ? 0 : 2,
+          lateToday: empty ? 0 : 1,
+          pendingLeave: empty ? 0 : 3,
+          pendingAttendance: empty ? 0 : 4,
+          payrollStatus: {
+            code: empty ? null : 'PAY-2026-10', name: empty ? null : 'October fixture',
+            status: empty ? 'NO_PERIOD' : 'SUBMITTED', standardWorkDays: 22,
+            totalGrossPayout: empty ? 0 : 100, totalNetPayout: empty ? 0 : 80, employeeCount: empty ? 0 : 2,
+          },
+          overtime: { todayHours: empty ? 0 : 1.5, monthHours: empty ? 0 : 12.5 },
+          bonus: { totalAmount: empty ? 0 : 8, count: empty ? 0 : 2 },
+          penalty: { totalAmount: empty ? 0 : 1, count: empty ? 0 : 1 },
+          charts: {
+            attendanceTrend: ['2026-09-25', '2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01'].map((date) => ({
+              date, label: `${Number(date.slice(8))}/${Number(date.slice(5, 7))}`,
+              present: !empty && date === '2026-10-01' ? 2 : 0,
+              late: !empty && date === '2026-10-01' ? 1 : 0,
+              absent: empty ? 0 : date === '2026-10-01' ? 3 : 5,
+            })),
+            departmentDistribution: empty ? [] : [{ departmentId: 'dept-test', name: 'Test department', code: 'TEST', employeeCount: 2, totalSalary: 50 }],
+            rewardComparison: { bonusTotal: empty ? 0 : 8, penaltyTotal: empty ? 0 : 1, netReward: empty ? 0 : 7 },
+          },
+        });
+      } finally {
+        for (const { mock, implementation } of originals) {
+          if (implementation) mock.mockImplementation(implementation);
+          else mock.mockReset();
+        }
+      }
+    });
   });
 
   // ── 2. Manager Dashboard Tests ────────────────────────────────────────────

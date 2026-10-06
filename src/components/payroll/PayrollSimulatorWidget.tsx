@@ -63,8 +63,9 @@ export function PayrollSimulatorWidget({
   }, [selectedRuleId, availableRules, initialRuleConfig]);
 
   // Real-time calculation via Pure Engine
-  const result = useMemo(() => {
-    return PayrollRuleEngine.calculate({
+  const { result, error } = useMemo(() => {
+    try {
+      const result = PayrollRuleEngine.calculate({
       employee: {
         contractSalary: contractSalary || 0,
         dependentsCount: dependentsCount || 0,
@@ -85,7 +86,11 @@ export function PayrollSimulatorWidget({
       },
       period: getBusinessDateString().slice(0, 7),
       ruleConfig: activeRuleConfig,
-    });
+      });
+      return { result, error: null };
+    } catch (error) {
+      return { result: null, error: error instanceof Error ? error.message : 'Payroll calculation unavailable.' };
+    }
   }, [
     contractSalary,
     actualWorkDays,
@@ -292,6 +297,8 @@ export function PayrollSimulatorWidget({
 
         {/* Right Output Breakdown (7 cols) */}
         <div className="lg:col-span-7 space-y-4">
+          {error && <p role="alert" className="text-sm text-amber-400">{error}</p>}
+          {result && <>
           {/* Net Highlight Card */}
           <div className="rounded-xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/40 via-slate-900/60 to-slate-900/80 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
@@ -463,6 +470,7 @@ export function PayrollSimulatorWidget({
               </div>
             )}
           </div>
+          </>}
         </div>
       </div>
     </div>

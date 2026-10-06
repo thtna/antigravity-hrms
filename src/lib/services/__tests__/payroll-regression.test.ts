@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PayrollCalculationEngine, DeterministicPayrollInput } from '@/lib/payroll/payroll-calculation-engine';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 import { PayrollRuleConfig } from '@/lib/payroll/types';
 
 // Hoisted Prisma mock for service-level lifecycle testing

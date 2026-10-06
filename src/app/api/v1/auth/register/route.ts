@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/prisma';
+import { MAX_REGISTERED_TENANTS } from '@/lib/constants/tenant-quota';
 import { hashPassword } from '@/lib/auth/password';
 import { checkRateLimit } from '@/lib/security/rate-limit';
 import { validateRequest } from '@/lib/validations';
@@ -82,6 +84,14 @@ export async function POST(
 
     // 5. Transaction: Create Organization (PENDING), User, OrganizationMember (OWNER), Branch
     const result = await prisma.$transaction(async (tx) => {
+      // Count and allocation share Serializable isolation to protect the last slot.
+      const registeredCount = await tx.organization.count({ where: { deletedAt: null } });
+      if (registeredCount >= MAX_REGISTERED_TENANTS) {
+        throw ApiError.badRequest(
+          `Hệ thống chỉ cho phép tối đa ${MAX_REGISTERED_TENANTS} tenants đăng ký. Hiện đã đạt ${registeredCount}/${MAX_REGISTERED_TENANTS} tenants. Không thể đăng ký thêm tổ chức mới.`
+        );
+      }
+
       // 5.1 Create Organization with PENDING status
       const org = await tx.organization.create({
         data: {
@@ -141,7 +151,7 @@ export async function POST(
       });
 
       return { org, user };
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     logger.info('New business registered (PENDING)', {
       orgId: result.org.id,
@@ -163,6 +173,9 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') {
+      return handleApiError(ApiError.conflict('Có lượt đăng ký đồng thời. Vui lòng thử lại; giới hạn đăng ký tenant vẫn được áp dụng.'));
+    }
     return handleApiError(error);
   }
 }

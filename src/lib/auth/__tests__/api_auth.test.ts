@@ -40,6 +40,7 @@ vi.mock('@/lib/db/prisma', () => {
     },
     $transaction: vi.fn(async (cb: any) => cb({
       organization: {
+        count: vi.fn().mockResolvedValue(4),
         create: vi.fn().mockResolvedValue({ id: 'org-reg-001', name: 'Công ty ABC', slug: 'cong-ty-abc-1234', status: 'PENDING' }),
       },
       user: {

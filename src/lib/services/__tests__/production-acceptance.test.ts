@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SuperAdminService, MAX_TENANTS } from '../super-admin.service';
+import { SuperAdminService } from '../super-admin.service';
+import { MAX_REGISTERED_TENANTS } from '@/lib/constants/tenant-quota';
 import { ExcelExporter } from '@/lib/reports/excel-exporter';
 import { PdfReportGenerator } from '@/lib/reports/pdf-report-generator';
 import { validateUploadedFile } from '@/lib/security/upload-validator';
@@ -8,7 +9,7 @@ import { isSuperAdmin, hasPermission } from '@/lib/auth/roles';
 import { ApiError } from '@/lib/errors';
 import { UserSession } from '@/types';
 import { PayrollCalculationEngine } from '@/lib/payroll/payroll-calculation-engine';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 import { ReportResult } from '../report.service';
 
 // ── Hoisted Mock Prisma ──────────────────────────────────────────────────────
@@ -189,8 +190,8 @@ describe('PHASE 10 — PRODUCTION ACCEPTANCE & FINAL ACCEPTANCE TEST SUITE', () 
       { id: 'org-test-e', name: 'Test E', slug: 'test-e', status: 'PENDING' },
     ];
 
-    it('[TENANT-01] SuperAdmin successfully APPROVES 5 tenants (A, B, C, D, E) up to MAX_TENANTS = 5', async () => {
-      // Simulate approving tenants one by one from active count 0 up to 4
+    it('[TENANT-01] SuperAdmin successfully APPROVES five existing PENDING tenants', async () => {
+      // Registration already allocated these tenants' slots.
       for (let i = 0; i < testTenants.length; i++) {
         const tenant = testTenants[i];
         mockPrisma.organization.findUnique.mockResolvedValueOnce({
@@ -200,7 +201,7 @@ describe('PHASE 10 — PRODUCTION ACCEPTANCE & FINAL ACCEPTANCE TEST SUITE', () 
           approvedAt: null,
           deletedAt: null,
         });
-        mockPrisma.organization.count.mockResolvedValueOnce(i); // activeCount currently i (< 5)
+        mockPrisma.organization.count.mockResolvedValue(MAX_REGISTERED_TENANTS);
         mockPrisma.organization.update.mockResolvedValueOnce({
           ...tenant,
           status: 'ACTIVE',
@@ -228,7 +229,7 @@ describe('PHASE 10 — PRODUCTION ACCEPTANCE & FINAL ACCEPTANCE TEST SUITE', () 
       }
     });
 
-    it('[TENANT-02] Tenant 6 (Test 6) MUST BE BLOCKED upon approval when active quota is 5/5', async () => {
+    it('[TENANT-02] An existing PENDING tenant may be approved despite historical over-limit data', async () => {
       const tenant6 = {
         id: 'org-test-6',
         name: 'Test 6',
@@ -240,20 +241,18 @@ describe('PHASE 10 — PRODUCTION ACCEPTANCE & FINAL ACCEPTANCE TEST SUITE', () 
       };
 
       mockPrisma.organization.findUnique.mockResolvedValue(tenant6);
-      // active count is currently 5 (MAX_TENANTS = 5)
-      mockPrisma.organization.count.mockResolvedValue(MAX_TENANTS);
-
-      await expect(
-        SuperAdminService.processTenantAction('org-test-6', 'APPROVE', superAdminSession)
-      ).rejects.toThrowError(
-        new RegExp(`Không thể kích hoạt tenant thứ 6.*giới hạn tối đa ${MAX_TENANTS} tenants`)
-      );
-
-      // Verify update was never called for tenant 6
-      expect(mockPrisma.organization.update).not.toHaveBeenCalled();
+      mockPrisma.organization.count.mockResolvedValue(MAX_REGISTERED_TENANTS + 1);
+      mockPrisma.organization.update.mockResolvedValue({ ...tenant6, status: 'ACTIVE', approvedAt: new Date() });
+      const result = await SuperAdminService.processTenantAction('org-test-6', 'APPROVE', superAdminSession);
+      expect(result.organization.status).toBe('ACTIVE');
+      expect(result.metrics.canRegisterMore).toBe(false);
+      expect(mockPrisma.organization.update).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'TENANT_APPROVE', entityId: tenant6.id }),
+      }));
     });
 
-    it('[TENANT-03] Tenant 6 (Test 6) MUST BE BLOCKED upon activation when active quota is 5/5', async () => {
+    it('[TENANT-03] An existing SUSPENDED tenant may be activated despite historical over-limit data', async () => {
       const tenant6Suspended = {
         id: 'org-test-6',
         name: 'Test 6',
@@ -265,13 +264,14 @@ describe('PHASE 10 — PRODUCTION ACCEPTANCE & FINAL ACCEPTANCE TEST SUITE', () 
       };
 
       mockPrisma.organization.findUnique.mockResolvedValue(tenant6Suspended);
-      mockPrisma.organization.count.mockResolvedValue(MAX_TENANTS);
-
-      await expect(
-        SuperAdminService.processTenantAction('org-test-6', 'ACTIVATE', superAdminSession)
-      ).rejects.toThrowError(
-        new RegExp(`Không thể kích hoạt tenant thứ 6.*giới hạn tối đa ${MAX_TENANTS} tenants`)
-      );
+      mockPrisma.organization.count.mockResolvedValue(MAX_REGISTERED_TENANTS + 1);
+      mockPrisma.organization.update.mockResolvedValue({ ...tenant6Suspended, status: 'ACTIVE', approvedAt: new Date() });
+      const result = await SuperAdminService.processTenantAction('org-test-6', 'ACTIVATE', superAdminSession);
+      expect(result.organization.status).toBe('ACTIVE');
+      expect(result.metrics.canRegisterMore).toBe(false);
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'TENANT_ACTIVATE', entityId: tenant6Suspended.id }),
+      }));
     });
   });
 
@@ -750,8 +750,9 @@ describe('PHASE 10 — PRODUCTION ACCEPTANCE & FINAL ACCEPTANCE TEST SUITE', () 
       });
 
       const metrics = await SuperAdminService.getTenantMetrics(superAdminSession);
-      expect(metrics.activeQuotaDisplay).toBe('5 / 5');
-      expect(metrics.canActivateMore).toBe(false);
+      expect(metrics.active).toBe(5);
+      expect(metrics.registeredQuotaDisplay).toBe('6 / 5');
+      expect(metrics.canRegisterMore).toBe(false);
     });
 
     it('[RBAC-02] OWNER: Has full administrative rights ONLY inside own tenant', () => {

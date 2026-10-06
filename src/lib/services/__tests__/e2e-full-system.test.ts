@@ -44,7 +44,7 @@ import { PenaltyService } from '../penalty.service';
 import { PayrollService } from '../payroll.service';
 import { PayrollWorkflowService } from '../payroll-workflow.service';
 import { PayslipService } from '../payslip.service';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 import { PayrollRuleEngine } from '@/lib/payroll/payroll-rule-engine';
 import { prisma } from '@/lib/db/prisma';
 
@@ -662,30 +662,25 @@ vi.mock('@/lib/db/prisma', () => {
         if (!p) return null;
         return {
           ...p,
-          payrollRule: {
-            id: 'rule-vietnam-2026',
-            code: VIETNAM_STATUTORY_RULE_2026.ruleCode,
-            name: VIETNAM_STATUTORY_RULE_2026.ruleName,
-            version: '2026.1',
-            salaryBasisConfig: VIETNAM_STATUTORY_RULE_2026.salaryBasis,
-            overtimeConfig: VIETNAM_STATUTORY_RULE_2026.overtime,
-            insuranceConfig: VIETNAM_STATUTORY_RULE_2026.insurance,
-            taxConfig: VIETNAM_STATUTORY_RULE_2026.tax,
-            deductionConfig: VIETNAM_STATUTORY_RULE_2026.deduction,
-            roundingConfig: VIETNAM_STATUTORY_RULE_2026.rounding,
-          },
+          payrollRule: state.payrollRules.get(p.payrollRuleId) || null,
           _count: { payrolls: state.payrolls.size || 1 },
           approvals: Array.from(state.payrollApprovals.values()).filter((a: any) => a.periodId === p.id),
         };
       }),
-      findFirst: vi.fn(async ({ where }: any = {}) => {
+      findFirst: vi.fn(async ({ where, include }: any = {}) => {
         if (!where) return Array.from(state.payrollPeriods.values())[0] || null;
         if (where.code) {
           for (const p of state.payrollPeriods.values()) {
             if (p.code === where.code) return p;
           }
         }
-        if (where.id) return state.payrollPeriods.get(where.id) || null;
+        if (where.id) {
+          const period = state.payrollPeriods.get(where.id);
+          if (!period || (where.organizationId && period.organizationId !== where.organizationId)) return null;
+          return include?.payrollRule
+            ? { ...period, payrollRule: state.payrollRules.get(period.payrollRuleId) || null }
+            : period;
+        }
         return null;
       }),
       findMany: vi.fn(async () => Array.from(state.payrollPeriods.values())),
@@ -1366,6 +1361,22 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
   // ─── STAGE 16: CALCULATE PAYROLL ─────────────────────────────────────────
   describe('Stage 16 — Payroll Calculation Engine', () => {
     it('16.1 should calculate comprehensive payroll with tax, insurance, OT, bonus and penalties', async () => {
+      // Historical arithmetic uses an explicitly associated CUSTOM rule, never a statutory fallback.
+      const payrollRuleId = 'rule-e2e-historical-custom';
+      state.payrollRules.set(payrollRuleId, {
+        id: payrollRuleId,
+        organizationId: testOrgId,
+        code: VIETNAM_STATUTORY_RULE_2026.ruleCode,
+        name: VIETNAM_STATUTORY_RULE_2026.ruleName,
+        version: 'legacy.1',
+        salaryBasisConfig: VIETNAM_STATUTORY_RULE_2026.salaryBasis,
+        overtimeConfig: VIETNAM_STATUTORY_RULE_2026.overtime,
+        insuranceConfig: VIETNAM_STATUTORY_RULE_2026.insurance,
+        taxConfig: VIETNAM_STATUTORY_RULE_2026.tax,
+        deductionConfig: VIETNAM_STATUTORY_RULE_2026.deduction,
+        roundingConfig: VIETNAM_STATUTORY_RULE_2026.rounding,
+      });
+
       // 1. Create payroll period
       const period = await prisma.payrollPeriod.create({
         data: {
@@ -1376,6 +1387,7 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
           standardWorkDays: 22,
           status: 'DRAFT',
           organizationId: testOrgId,
+          payrollRuleId,
         },
       });
       testPayrollPeriodId = period.id;
@@ -1392,6 +1404,11 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
       expect(calcResult).toBeDefined();
       expect(calcResult.status).toBe('CALCULATED');
       expect(calcResult.totalEmployees).toBeGreaterThanOrEqual(1);
+      expect(period.payrollRuleId).toBe(payrollRuleId);
+      expect(prisma.payrollPeriod.findFirst).toHaveBeenCalledWith({
+        where: { id: testPayrollPeriodId, organizationId: testOrgId },
+        include: { payrollRule: true },
+      });
 
       // Verify mathematical precision of insurance & tax formulas with PayrollRuleEngine
       const ruleCalc = PayrollRuleEngine.calculate({

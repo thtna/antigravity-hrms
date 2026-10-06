@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SuperAdminService, MAX_TENANTS } from '../super-admin.service';
+import { SuperAdminService } from '../super-admin.service';
+import { MAX_REGISTERED_TENANTS } from '@/lib/constants/tenant-quota';
 import { EmployeeService } from '../employee.service';
 import { DepartmentService } from '../department.service';
 import { PositionService } from '../position.service';
@@ -31,7 +32,7 @@ import {
 import { isSuperAdmin, hasPermission } from '@/lib/auth/roles';
 import { signSessionToken, verifySessionToken } from '@/lib/auth/session';
 import { PayrollCalculationEngine } from '@/lib/payroll/payroll-calculation-engine';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 import { UserSession } from '@/types';
 import { ApiError } from '@/lib/errors';
 import { Prisma } from '@prisma/client';
@@ -785,7 +786,7 @@ describe('FINAL RED-TEAM PRODUCTION PREFLIGHT VERIFICATION', () => {
   // ════════════════════════════════════════════════════════════════════════════
   // 13. MAX TENANT QUOTA ENFORCEMENT
   // ════════════════════════════════════════════════════════════════════════════
-  describe('Pillar 13: Max Tenant Quota (MAX_TENANTS = 5)', () => {
+  describe('Pillar 13: Registered Tenant Quota', () => {
     const superAdminSession: UserSession = {
       userId: 'super-admin-root',
       email: 'root@antigravity.internal',
@@ -795,7 +796,7 @@ describe('FINAL RED-TEAM PRODUCTION PREFLIGHT VERIFICATION', () => {
       isActive: true,
     };
 
-    it('13.1: Allows activation for tenants 1 through 5 when activeCount < 5', async () => {
+    it('13.1: Approving an existing tenant preserves registration quota metrics', async () => {
       mockPrisma.organization.findUnique.mockResolvedValue({
         id: 'tenant-5-id',
         status: 'PENDING',
@@ -819,28 +820,30 @@ describe('FINAL RED-TEAM PRODUCTION PREFLIGHT VERIFICATION', () => {
       );
 
       expect(res.organization.status).toBe('ACTIVE');
+      expect(res.metrics.registeredQuotaDisplay).toBe(`4 / ${MAX_REGISTERED_TENANTS}`);
+      expect(res.metrics.canRegisterMore).toBe(true);
     });
 
-    it('13.2: Strictly BLOCKS 6th tenant activation with 400 Bad Request when activeCount == 5', async () => {
+    it('13.2: Existing tenant approval is allowed while new registration remains full', async () => {
       mockPrisma.organization.findUnique.mockResolvedValue({
         id: 'tenant-6-id',
         status: 'PENDING',
         deletedAt: null,
       });
 
-      // Already 5 active tenants
+      // Historical over-limit organizations remain eligible for lifecycle transitions.
       mockPrisma.organization.count.mockResolvedValue(5);
-
-      await expect(
-        SuperAdminService.processTenantAction('tenant-6-id', 'APPROVE', superAdminSession)
-      ).rejects.toThrow(ApiError);
-
-      try {
-        await SuperAdminService.processTenantAction('tenant-6-id', 'APPROVE', superAdminSession);
-      } catch (err: any) {
-        expect(err.statusCode).toBe(400);
-        expect(err.message).toContain('giới hạn tối đa 5 tenants');
-      }
+      mockPrisma.organization.update.mockResolvedValue({
+        id: 'tenant-6-id', status: 'ACTIVE',
+        createdAt: new Date(), updatedAt: new Date(), approvedAt: new Date(),
+      });
+      const result = await SuperAdminService.processTenantAction('tenant-6-id', 'APPROVE', superAdminSession);
+      expect(result.organization.status).toBe('ACTIVE');
+      expect(result.metrics.registeredQuotaDisplay).toBe('5 / 5');
+      expect(result.metrics.canRegisterMore).toBe(false);
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ action: 'TENANT_APPROVE', entityId: 'tenant-6-id' }),
+      }));
     });
   });
 

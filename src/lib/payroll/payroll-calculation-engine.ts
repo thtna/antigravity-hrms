@@ -18,8 +18,8 @@ import {
   decMin,
   applyRounding,
 } from './decimal-math';
-import { PayrollRuleConfig, TaxStepDetail } from './types';
-import { VIETNAM_STATUTORY_RULE_2026 } from './default-rules';
+import { PayrollRuleConfig, StatutoryWorkEvidence, TaxStepDetail } from './types';
+import { calculateStatutoryExemptWorkIncome, isVietnamStatutory2026, requireStatutoryWorkEvidence, resolvePayrollRuleForPeriod } from './vietnam-statutory-2026';
 
 export interface DeterministicOvertimeDetails {
   weekdayOtHours?: number;
@@ -66,6 +66,8 @@ export interface DeterministicPayrollInput {
   bonusDetails?: DeterministicBonusDetails;
   penaltyDetails?: DeterministicPenaltyDetails;
   ruleConfig?: PayrollRuleConfig;
+  period?: string;
+  statutoryWorkEvidence?: StatutoryWorkEvidence;
 }
 
 export interface PayrollLineItem {
@@ -105,6 +107,7 @@ export interface DeterministicPayrollOutput {
   employerHealth: number;
   employerUnemployment: number;
   taxableIncome: number;
+  statutoryExemptWorkIncome: number;
   personalRelief: number;
   dependentsRelief: number;
   assessableIncome: number;
@@ -120,7 +123,9 @@ export class PayrollCalculationEngine {
    * Pure function: Pure Input -> Pure Output.
    */
   static calculate(input: DeterministicPayrollInput): DeterministicPayrollOutput {
-    const rule = input.ruleConfig || VIETNAM_STATUTORY_RULE_2026;
+    const rule = resolvePayrollRuleForPeriod(input.ruleConfig, input.period);
+    const statutory = isVietnamStatutory2026(rule);
+    if (statutory && (input.tax != null || input.insurance != null || input.overtimePay != null)) requireStatutoryWorkEvidence();
     const lineItems: PayrollLineItem[] = [];
 
     // 1. Normalized numeric Decimal inputs
@@ -166,6 +171,15 @@ export class PayrollCalculationEngine {
         amount: paidLeavePay.toNumber(),
       });
     }
+
+    if (statutory) {
+      const categorizedHours = (input.overtimeDetails?.weekdayOtHours ?? 0) +
+        (input.overtimeDetails?.weekendOtHours ?? 0) + (input.overtimeDetails?.holidayOtHours ?? 0);
+      if (!Number.isFinite(input.overtimeHours) || input.overtimeHours < 0 || categorizedHours !== input.overtimeHours) requireStatutoryWorkEvidence();
+    }
+    const statutoryExemptWorkIncome = calculateStatutoryExemptWorkIncome(
+      rule, hourlyRate, input.overtimeDetails ?? {}, input.statutoryWorkEvidence,
+    );
 
     // 4. Overtime Pay Calculation
     let overtimePay: Decimal;
@@ -239,9 +253,14 @@ export class PayrollCalculationEngine {
       employerInsurance = new Decimal(0);
     } else {
       // Base salary for statutory insurance
-      let insuranceBase = input.insuranceSalary !== undefined
-        ? toDecimal(input.insuranceSalary)
-        : baseSalary;
+      const suppliedInsuranceSalary = input.insuranceSalary !== undefined
+        ? toDecimal(input.insuranceSalary) : undefined;
+      const rawInsuranceBase = !statutory
+        ? suppliedInsuranceSalary ?? baseSalary
+        : rule.insurance.method === 'ACTUAL_GROSS' ? grossSalaryRaw
+          : rule.insurance.method === 'FIXED_INSURANCE_SALARY'
+            ? suppliedInsuranceSalary ?? new Decimal(0) : suppliedInsuranceSalary ?? baseSalary;
+      let insuranceBase = rawInsuranceBase;
 
       if (rule.insurance.statutoryCap) {
         insuranceBase = decMin(insuranceBase, rule.insurance.statutoryCap);
@@ -249,15 +268,18 @@ export class PayrollCalculationEngine {
       if (rule.insurance.statutoryFloor) {
         insuranceBase = decMax(insuranceBase, rule.insurance.statutoryFloor);
       }
+      const unemploymentBase = rule.insurance.unemploymentCap
+        ? decMin(statutory ? rawInsuranceBase : decMax(rawInsuranceBase, rule.insurance.statutoryFloor || 0), rule.insurance.unemploymentCap)
+        : statutory ? rawInsuranceBase : insuranceBase;
 
       employeeSocial = decMul(insuranceBase, rule.insurance.employeeSocialRate);
       employeeHealth = decMul(insuranceBase, rule.insurance.employeeHealthRate);
-      employeeUnemployment = decMul(insuranceBase, rule.insurance.employeeUnemploymentRate);
+      employeeUnemployment = decMul(unemploymentBase, rule.insurance.employeeUnemploymentRate);
       insuranceEmployee = decAdd(decAdd(employeeSocial, employeeHealth), employeeUnemployment);
 
       employerSocial = decMul(insuranceBase, rule.insurance.employerSocialRate);
       employerHealth = decMul(insuranceBase, rule.insurance.employerHealthRate);
-      employerUnemployment = decMul(insuranceBase, rule.insurance.employerUnemploymentRate);
+      employerUnemployment = decMul(unemploymentBase, rule.insurance.employerUnemploymentRate);
       employerInsurance = decAdd(decAdd(employerSocial, employerHealth), employerUnemployment);
     }
 
@@ -284,7 +306,7 @@ export class PayrollCalculationEngine {
       assessableIncome = decMax(new Decimal(0), decSub(taxableIncome, insuranceEmployee));
     } else {
       // Taxable income = Gross - Non-taxable allowances
-      taxableIncome = decMax(new Decimal(0), decSub(grossSalaryRaw, taxExemptAllowances));
+      taxableIncome = decMax(new Decimal(0), decSub(decSub(grossSalaryRaw, taxExemptAllowances), statutoryExemptWorkIncome));
 
       if (rule.tax.model === 'FLAT') {
         assessableIncome = taxableIncome;
@@ -416,6 +438,7 @@ export class PayrollCalculationEngine {
       employerHealth: employerHealth.toNumber(),
       employerUnemployment: employerUnemployment.toNumber(),
       taxableIncome: taxableIncome.toNumber(),
+      statutoryExemptWorkIncome: statutoryExemptWorkIncome.toNumber(),
       personalRelief: personalRelief.toNumber(),
       dependentsRelief: dependentsRelief.toNumber(),
       assessableIncome: assessableIncome.toNumber(),

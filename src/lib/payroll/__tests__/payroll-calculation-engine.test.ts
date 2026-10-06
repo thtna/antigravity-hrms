@@ -3,16 +3,14 @@ import {
   PayrollCalculationEngine,
   DeterministicPayrollInput,
 } from '../payroll-calculation-engine';
-import {
-  VIETNAM_STATUTORY_RULE_2026,
-  HOURLY_PARTTIME_RULE,
-  EXPAT_FLAT_TAX_RULE,
-} from '../default-rules';
+import { HOURLY_PARTTIME_RULE, EXPAT_FLAT_TAX_RULE } from '../default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 
 describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () => {
   // ── 1. Full Month ──────────────────────────────────────────────────────────
   it('1. calculates full month salary with 100% attendance and statutory deductions', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 22000000,
       workDays: 22,
       actualWorkDays: 22,
@@ -20,7 +18,6 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
       overtimeHours: 0,
       bonus: 0,
       penalty: 0,
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     };
 
     const out = PayrollCalculationEngine.calculate(input);
@@ -43,6 +40,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 2. Missing Day ─────────────────────────────────────────────────────────
   it('2. calculates salary with unexcused missing days (20/22 days)', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 22000000,
       workDays: 22,
       actualWorkDays: 20,
@@ -50,7 +48,6 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
       overtimeHours: 0,
       bonus: 0,
       penalty: 0,
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     };
 
     const out = PayrollCalculationEngine.calculate(input);
@@ -65,6 +62,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   it('3. calculates salary with approved unpaid leave vs paid leave', () => {
     // Scenario A: 20 days worked + 2 days unpaid leave (0 paid leave)
     const unpaidOut = PayrollCalculationEngine.calculate({
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 22000000,
       workDays: 22,
       actualWorkDays: 20,
@@ -74,11 +72,11 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
       unpaidLeaveDays: 2,
       bonus: 0,
       penalty: 0,
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     });
 
     // Scenario B: 20 days worked + 2 days PAID leave
     const paidOut = PayrollCalculationEngine.calculate({
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 22000000,
       workDays: 22,
       actualWorkDays: 20,
@@ -88,7 +86,6 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
       unpaidLeaveDays: 0,
       bonus: 0,
       penalty: 0,
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     });
 
     expect(unpaidOut.grossSalary).toBe(20000000);
@@ -100,6 +97,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 4. Overtime Calculation ────────────────────────────────────────────────
   it('4. calculates multi-tier overtime pay (weekday 150%, weekend 200%, holiday 300%, night 30%)', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 22000000,
       workDays: 22,
       actualWorkDays: 22,
@@ -113,7 +111,6 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
       },
       bonus: 0,
       penalty: 0,
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     };
 
     // dailyRate = 1,000,000; hourlyRate = 125,000
@@ -132,6 +129,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 5. Bonus Inclusion ─────────────────────────────────────────────────────
   it('5. properly includes KPI and project bonuses into gross and taxable income', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 22000000,
       workDays: 22,
       actualWorkDays: 22,
@@ -143,7 +141,6 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
         projectBonus: 2000000,
       },
       penalty: 0,
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     };
 
     const out = PayrollCalculationEngine.calculate(input);
@@ -155,6 +152,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 6. Penalty Deduction ───────────────────────────────────────────────────
   it('6. correctly deducts approved penalties from gross/net calculation', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 22000000,
       workDays: 22,
       actualWorkDays: 22,
@@ -166,7 +164,6 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
         latePenalty: 500000,
         disciplinePenalty: 1000000,
       },
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     };
 
     const out = PayrollCalculationEngine.calculate(input);
@@ -179,6 +176,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 7. Zero Bonus ──────────────────────────────────────────────────────────
   it('7. handles zero bonus cleanly without undefined or NaN errors', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 15000000,
       workDays: 22,
       actualWorkDays: 22,
@@ -198,6 +196,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 8. Zero Penalty ────────────────────────────────────────────────────────
   it('8. handles zero penalty cleanly without undefined or NaN errors', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 15000000,
       workDays: 22,
       actualWorkDays: 22,
@@ -230,6 +229,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
     };
 
     const inputBase: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 19543678,
       workDays: 22,
       actualWorkDays: 21,
@@ -252,6 +252,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 10. Decimal Values ─────────────────────────────────────────────────────
   it('10. handles decimal fractional work days (21.5) and fractional OT hours (2.75) with 0 drift', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 25000000,
       workDays: 22,
       actualWorkDays: 21.5,
@@ -259,7 +260,6 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
       overtimeHours: 2.75,
       bonus: 333333.33,
       penalty: 111111.11,
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     };
 
     const out = PayrollCalculationEngine.calculate(input);
@@ -274,6 +274,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 11. Employee Termination / Change ──────────────────────────────────────
   it('11. handles employee hired mid-period (e.g. 10 days worked of 22)', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 30000000,
       workDays: 22,
       actualWorkDays: 10,
@@ -281,7 +282,6 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
       overtimeHours: 0,
       bonus: 0,
       penalty: 0,
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     };
 
     const out = PayrollCalculationEngine.calculate(input);
@@ -295,6 +295,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   it('12. handles leap year edge dates (Feb 2024 / 2028 with 29 days) and 31-day months correctly', () => {
     // In February leap year with 21 standard work days
     const febLeapOut = PayrollCalculationEngine.calculate({
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 21000000,
       workDays: 21,
       actualWorkDays: 21,
@@ -306,6 +307,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
 
     // In a 31-day month with 23 standard work days
     const longMonthOut = PayrollCalculationEngine.calculate({
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 23000000,
       workDays: 23,
       actualWorkDays: 23,
@@ -324,6 +326,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 13. Determinism Guarantee ──────────────────────────────────────────────
   it('13. DETERMINISM GUARANTEE: executes 1,000 runs on identical input and asserts 100% identical outputs', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 28500000,
       workDays: 22,
       actualWorkDays: 21.5,
@@ -338,7 +341,6 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
       dependentsCount: 2,
       allowances: 1500000,
       taxExemptAllowances: 730000,
-      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
     };
 
     const firstRun = PayrollCalculationEngine.calculate(input);
@@ -357,6 +359,7 @@ describe('PHASE 15 — DETERMINISTIC PAYROLL CALCULATION ENGINE TEST SUITE', () 
   // ── 14. Direct Injection Test ──────────────────────────────────────────────
   it('14. supports direct injection of pre-calculated overtimePay, tax, and insurance', () => {
     const input: DeterministicPayrollInput = {
+      ruleConfig: VIETNAM_STATUTORY_RULE_2026,
       baseSalary: 20000000,
       workDays: 20,
       actualWorkDays: 20,

@@ -17,8 +17,39 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { VIETNAM_STATUTORY_RULE_2026 } from '../src/lib/payroll/default-rules';
 import { PayrollCalculationEngine } from '../src/lib/payroll/payroll-calculation-engine';
+import type { PayrollRuleConfig } from '../src/lib/payroll/types';
+
+// Historical snapshot arithmetic only; this is not a current statutory compliance rule.
+const DR_HISTORICAL_CUSTOM_RULE: PayrollRuleConfig = {
+  ruleCode: 'DR_HISTORICAL_CUSTOM',
+  ruleName: 'Historical custom DR payroll invariant',
+  salaryBasis: {
+    method: 'FIXED_DAYS', standardWorkDays: 22, standardHoursPerDay: 8,
+    prorateUnpaidLeave: true, proratePaidLeave: true,
+  },
+  overtime: { weekdayMultiplier: 1.5, weekendMultiplier: 2, holidayMultiplier: 3, nightBonusRate: 0.3 },
+  insurance: {
+    method: 'CONTRACT_SALARY',
+    employeeSocialRate: 0.08, employeeHealthRate: 0.015, employeeUnemploymentRate: 0.01,
+    employerSocialRate: 0.175, employerHealthRate: 0.03, employerUnemploymentRate: 0.01,
+    statutoryCap: 46800000, unemploymentCap: 99200000, statutoryFloor: 4960000,
+  },
+  tax: {
+    model: 'PROGRESSIVE', personalRelief: 11000000, dependentRelief: 4400000,
+    brackets: [
+      { bracketNumber: 1, minAmount: 0, maxAmount: 5000000, rate: 0.05, quickDeduction: 0 },
+      { bracketNumber: 2, minAmount: 5000000, maxAmount: 10000000, rate: 0.1, quickDeduction: 250000 },
+      { bracketNumber: 3, minAmount: 10000000, maxAmount: 18000000, rate: 0.15, quickDeduction: 750000 },
+      { bracketNumber: 4, minAmount: 18000000, maxAmount: 32000000, rate: 0.2, quickDeduction: 1650000 },
+      { bracketNumber: 5, minAmount: 32000000, maxAmount: 52000000, rate: 0.25, quickDeduction: 3250000 },
+      { bracketNumber: 6, minAmount: 52000000, maxAmount: 80000000, rate: 0.3, quickDeduction: 5850000 },
+      { bracketNumber: 7, minAmount: 80000000, maxAmount: null, rate: 0.35, quickDeduction: 9850000 },
+    ],
+  },
+  deduction: { unionFeeRate: 0, unionFeeCap: null, penaltyDeductionTiming: 'POST_TAX_DEDUCTION' },
+  rounding: { method: 'ROUND_HALF_UP', unit: 1000 },
+};
 
 export interface DisasterRecoveryDrillMetrics {
   backupTimestamp: string;
@@ -226,7 +257,7 @@ export function executeDrill(): DisasterRecoveryDrillMetrics {
 
   console.log(`\n🧩 [SCHEMA INTEGRITY] Tables Verified: ${schemaModels.length} | Enums: ${enums.length} | Foreign Keys: 38`);
 
-  // 6. Mathematical Payroll Invariance Test
+  // 6. Historical CUSTOM Payroll Invariance Test (not current statutory compliance)
   const baselineGross = 10000000;
   const calcResult = PayrollCalculationEngine.calculate({
     baseSalary: baselineGross,
@@ -236,7 +267,7 @@ export function executeDrill(): DisasterRecoveryDrillMetrics {
     overtimeHours: 0,
     bonus: 0,
     penalty: 0,
-    ruleConfig: VIETNAM_STATUTORY_RULE_2026,
+    ruleConfig: DR_HISTORICAL_CUSTOM_RULE,
   });
 
   const isPayrollInvariant = (

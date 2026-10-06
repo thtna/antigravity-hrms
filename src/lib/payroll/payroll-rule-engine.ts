@@ -13,6 +13,7 @@ import {
   PayrollCalculationResult,
   TaxStepDetail,
 } from './types';
+import { calculateStatutoryExemptWorkIncome, isVietnamStatutory2026, resolvePayrollRuleForPeriod } from './vietnam-statutory-2026';
 
 export class PayrollRuleEngine {
   /**
@@ -20,7 +21,8 @@ export class PayrollRuleEngine {
    * Completely decoupled and deterministic: no hardcoded rates or side effects.
    */
   static calculate(input: PayrollCalculationInput): PayrollCalculationResult {
-    const { employee, attendance, adjustments, ruleConfig } = input;
+    const { employee, attendance, adjustments } = input;
+    const ruleConfig = resolvePayrollRuleForPeriod(input.ruleConfig, input.period);
     const { salaryBasis, overtime, insurance, tax, deduction, rounding } = ruleConfig;
 
     // ── 1. Salary Basis & Standard Metrics ───────────────────────────────────
@@ -35,6 +37,7 @@ export class PayrollRuleEngine {
     // Daily & Hourly rate
     const dailyRate = decDiv(contractSalary, standardWorkDays);
     const hourlyRate = decDiv(dailyRate, standardHoursPerDay);
+    const statutoryExemptWorkIncome = calculateStatutoryExemptWorkIncome(ruleConfig, hourlyRate, attendance, input.statutoryWorkEvidence);
 
     // ── 2. Base Salary Proration ─────────────────────────────────────────────
     let proratedBaseSalary = toDecimal(0);
@@ -101,13 +104,16 @@ export class PayrollRuleEngine {
     // ── 6. Insurance Calculations ────────────────────────────────────────────
     let insuranceBase = toDecimal(0);
     if (insurance.method === 'CONTRACT_SALARY') {
-      insuranceBase = toDecimal(employee.insuranceSalary || employee.contractSalary);
+      insuranceBase = toDecimal(isVietnamStatutory2026(ruleConfig)
+        ? employee.insuranceSalary ?? employee.contractSalary
+        : employee.insuranceSalary || employee.contractSalary);
     } else if (insurance.method === 'ACTUAL_GROSS') {
       insuranceBase = grossIncome;
     } else if (insurance.method === 'FIXED_INSURANCE_SALARY') {
       insuranceBase = toDecimal(employee.insuranceSalary || 0);
     }
 
+    const rawInsuranceBase = insuranceBase;
     // Apply statutory floor if specified
     if (insurance.statutoryFloor) {
       insuranceBase = decMax(insuranceBase, insurance.statutoryFloor);
@@ -121,7 +127,7 @@ export class PayrollRuleEngine {
       ? decMin(insuranceBase, insurance.statutoryCap)
       : insuranceBase;
     const unemploymentBase = insurance.unemploymentCap
-      ? decMin(insuranceBase, insurance.unemploymentCap)
+      ? decMin(isVietnamStatutory2026(ruleConfig) ? rawInsuranceBase : insuranceBase, insurance.unemploymentCap)
       : insuranceBase;
 
     // Employee contributions
@@ -138,7 +144,7 @@ export class PayrollRuleEngine {
 
     // ── 7. Personal Income Tax (PIT) ─────────────────────────────────────────
     // Thu nhập chịu thuế = Tổng thu nhập - Các khoản phụ cấp miễn thuế
-    const taxableIncome = decMax(0, decSub(grossIncome, nonTaxableAllowances));
+    const taxableIncome = decMax(0, decSub(decSub(grossIncome, nonTaxableAllowances), statutoryExemptWorkIncome));
 
     // Giảm trừ gia cảnh
     const personalRelief = toDecimal(tax.personalRelief || 0);
@@ -262,6 +268,7 @@ export class PayrollRuleEngine {
       },
 
       tax: {
+        statutoryExemptWorkIncome: statutoryExemptWorkIncome.toNumber(),
         taxableIncome: taxableIncome.toNumber(),
         personalRelief: personalRelief.toNumber(),
         dependentsRelief: dependentsRelief.toNumber(),
