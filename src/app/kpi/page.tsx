@@ -56,10 +56,22 @@ export default function KpiPage() {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetch Scorecard
-  const fetchScorecard = useCallback(async () => {
+  // Resolve the session's employee profile before requesting a personal scorecard.
+  const fetchSessionEmployeeId = useCallback(async (): Promise<string | null> => {
     try {
-      const res = await fetch(`/api/v1/kpi/scorecard?period=${period}`);
+      const res = await fetch('/api/v1/auth/me');
+      const json = await res.json();
+      return json.success ? json.data?.employeeId || null : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Fetch Scorecard only for accounts linked to an employee profile.
+  const fetchScorecard = useCallback(async (employeeId: string) => {
+    try {
+      const params = new URLSearchParams({ period, employeeId });
+      const res = await fetch(`/api/v1/kpi/scorecard?${params.toString()}`);
       const json = await res.json();
       if (json.success) {
         setScorecardData(json.data);
@@ -95,13 +107,26 @@ export default function KpiPage() {
     }
   }, []);
 
-  // Refresh active tab data
-  const refreshData = useCallback(() => {
+  // Refresh shared KPI data in parallel, then load the personal scorecard only
+  // when the authenticated account has an employee profile.
+  const refreshData = useCallback(async () => {
     setLoading(true);
-    Promise.all([fetchScorecard(), fetchDefinitions(), fetchSummary()]).finally(() => {
+    try {
+      const [employeeId] = await Promise.all([
+        fetchSessionEmployeeId(),
+        fetchDefinitions(),
+        fetchSummary(),
+      ]);
+
+      if (employeeId) {
+        await fetchScorecard(employeeId);
+      } else {
+        setScorecardData(null);
+      }
+    } finally {
       setLoading(false);
-    });
-  }, [fetchScorecard, fetchDefinitions, fetchSummary]);
+    }
+  }, [fetchSessionEmployeeId, fetchScorecard, fetchDefinitions, fetchSummary]);
 
   useEffect(() => {
     refreshData();
