@@ -6,6 +6,7 @@ import { PayrollService } from '@/lib/services/payroll.service';
 import { DashboardService } from '@/lib/services/dashboard.service';
 import { prisma } from '@/lib/db/prisma';
 import { UserSession } from '@/types';
+import { LEGACY_CUSTOM_PAYROLL_RULE } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 
 // Mock prisma for isolated high-speed verification
 vi.mock('@/lib/db/prisma', () => {
@@ -124,19 +125,19 @@ describe('PHASE 25 — PERFORMANCE & PRODUCTION AUDIT TEST SUITE', () => {
         endDate: new Date('2026-09-30'),
         standardWorkDays: 22,
         status: 'DRAFT',
-      });
-
-      (prisma.payrollRule.findFirst as any).mockResolvedValue({
-        id: 'rule-01',
-        organizationId: 'org-test-audit',
-        isDefault: true,
-        isActive: true,
-        salaryBasisConfig: { formula: 'STANDARD', standardHoursPerDay: 8 },
-        overtimeConfig: { weekdayMultiplier: 1.5, weekendMultiplier: 2.0, holidayMultiplier: 3.0 },
-        insuranceConfig: { socialRate: 0.08, healthRate: 0.015, unemploymentRate: 0.01 },
-        taxConfig: { personalRelief: 11000000, dependentRelief: 4400000 },
-        deductionConfig: {},
-        roundingConfig: {},
+        payrollRuleId: 'rule-custom-batch',
+        payrollRule: {
+          id: 'rule-custom-batch',
+          organizationId: 'org-test-audit',
+          code: LEGACY_CUSTOM_PAYROLL_RULE.ruleCode,
+          name: LEGACY_CUSTOM_PAYROLL_RULE.ruleName,
+          salaryBasisConfig: LEGACY_CUSTOM_PAYROLL_RULE.salaryBasis,
+          overtimeConfig: LEGACY_CUSTOM_PAYROLL_RULE.overtime,
+          insuranceConfig: LEGACY_CUSTOM_PAYROLL_RULE.insurance,
+          taxConfig: LEGACY_CUSTOM_PAYROLL_RULE.tax,
+          deductionConfig: LEGACY_CUSTOM_PAYROLL_RULE.deduction,
+          roundingConfig: LEGACY_CUSTOM_PAYROLL_RULE.rounding,
+        },
       });
 
       // 3 employees to calculate
@@ -207,6 +208,11 @@ describe('PHASE 25 — PERFORMANCE & PRODUCTION AUDIT TEST SUITE', () => {
 
       // Processed all 3 employees
       expect(result.totalEmployees).toBe(3);
+      expect(prisma.payrollPeriod.findFirst).toHaveBeenCalledWith({
+        where: { id: 'prd-01', organizationId: 'org-test-audit' },
+        include: { payrollRule: true },
+      });
+      expect(prisma.payrollRule.findFirst).not.toHaveBeenCalled();
     });
   });
 

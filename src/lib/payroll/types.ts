@@ -15,7 +15,20 @@ export interface OvertimeConfig {
   weekendMultiplier: number; // e.g. 2.0 (200%)
   holidayMultiplier: number; // e.g. 3.0 (300%)
   nightBonusRate: number; // e.g. 0.3 (+30%)
-  nightOtMultiplier: number; // e.g. 2.0
+  nightOtMultiplier?: number; // Legacy custom rules only; not a statutory night-OT contract.
+}
+
+export type MinimumWageRegion = 'I' | 'II' | 'III' | 'IV';
+
+export interface Vietnam2026Metadata {
+  version: 1;
+  region?: MinimumWageRegion; // An unresolved template must never be calculated.
+}
+
+// Trusted caller evidence, not a client-submitted assertion or an attendance-hours inference.
+export interface StatutoryWorkEvidence {
+  daytimeOnly: true;
+  qualifiedDaytimeOvertime?: true;
 }
 
 export type InsuranceSalaryMethod = 'CONTRACT_SALARY' | 'ACTUAL_GROSS' | 'FIXED_INSURANCE_SALARY';
@@ -31,6 +44,8 @@ export interface InsuranceConfig {
   statutoryCap?: number | null; // e.g. 46,800,000 VND
   unemploymentCap?: number | null; // statutory cap for BHTN
   statutoryFloor?: number | null;
+  referenceAmount?: number;
+  vietnam2026?: Vietnam2026Metadata;
 }
 
 export type TaxModel = 'PROGRESSIVE' | 'FLAT' | 'EXEMPT';
@@ -106,6 +121,7 @@ export interface PayrollCalculationInput {
   adjustments: BonusPenaltySummary;
   period?: string; // YYYY-MM
   ruleConfig: PayrollRuleConfig;
+  statutoryWorkEvidence?: StatutoryWorkEvidence;
 }
 
 export interface TaxStepDetail {
@@ -138,6 +154,7 @@ export interface OvertimeBreakdown {
 }
 
 export interface TaxBreakdown {
+  statutoryExemptWorkIncome: number;
   taxableIncome: number;
   personalRelief: number;
   dependentsRelief: number;

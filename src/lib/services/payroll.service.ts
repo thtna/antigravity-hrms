@@ -8,13 +8,12 @@ import {
   PayrollPeriodQueryParams,
 } from '@/lib/validations/payroll';
 import { PayrollCalculationEngine } from '@/lib/payroll/payroll-calculation-engine';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { classifyDaytimeOvertime, isVietnamStatutory2026, resolvePayrollRuleForPeriod, verifyDaytimeAttendance } from '@/lib/payroll/vietnam-statutory-2026';
 import { PayrollRuleConfig } from '@/lib/payroll/types';
 import { PayrollWorkflowService } from './payroll-workflow.service';
 import { Decimal } from 'decimal.js';
 import {
   formatBusinessDate,
-  getBusinessWeekday,
   parseBusinessDate,
 } from '@/lib/time/business-time';
 
@@ -246,8 +245,11 @@ export class PayrollService {
         rounding: period.payrollRule.roundingConfig as any,
       };
     } else {
-      ruleConfig = VIETNAM_STATUTORY_RULE_2026;
+      throw ApiError.badRequest('An explicit payroll rule is required for the payroll period.');
     }
+    const statutoryPeriod = formatBusinessDate(period.startDate).slice(0, 7);
+    ruleConfig = resolvePayrollRuleForPeriod(ruleConfig, statutoryPeriod);
+    const statutory = isVietnamStatutory2026(ruleConfig);
 
     // Date range boundaries
     const startRange = period.startDate;
@@ -304,16 +306,18 @@ export class PayrollService {
     }> = [];
 
     const employeeIds = employees.map((emp) => emp.id);
-    const periodCode = period.code.slice(0, 7); // e.g. "2026-09"
+    const periodCode = statutoryPeriod;
 
     // [PHASE 25 OPTIMIZATION] Batch fetch all records concurrently before loop to eliminate 4x N+1 queries
     const [allAttendances, allApprovedLeaves, allApprovedBonusPenalties, allApprovedKpi] = await Promise.all([
       prisma.attendance.findMany({
         where: {
+          organizationId: targetOrgId,
           employeeId: { in: employeeIds },
           workDate: { gte: startRange, lte: endRange },
           status: { notIn: ['REJECTED', 'ABSENT'] },
         },
+        include: { schedule: { include: { shift: true } } },
       }),
       prisma.leaveRequest.findMany({
         where: {
@@ -343,6 +347,10 @@ export class PayrollService {
         },
       }),
     ]);
+    const holidays = statutory ? await prisma.holiday.findMany({
+      where: { organizationId: targetOrgId, OR: [{ date: { gte: startRange, lte: endRange } }, { isRecurring: true }] },
+      select: { date: true, isRecurring: true },
+    }) : [];
 
     // In-memory indexing by employeeId for microsecond lookups
     const attendanceMap = new Map<string, typeof allAttendances>();
@@ -397,7 +405,7 @@ export class PayrollService {
       let totalOtHours = 0;
       let weekdayOtHours = 0;
       let weekendOtHours = 0;
-      const holidayOtHours = 0;
+      let holidayOtHours = 0;
       let actualDays = 0;
 
       for (const att of attendances) {
@@ -415,9 +423,11 @@ export class PayrollService {
           actualDays += hours / 8;
         }
 
-        // Categorize overtime by day of week
-        const dayOfWeek = getBusinessWeekday(formatBusinessDate(att.workDate)); // 0 = Sunday, 6 = Saturday
-        if (dayOfWeek === 0 || dayOfWeek === 6) {
+        // Holiday evidence takes precedence; no hour belongs to two day categories.
+        const category = classifyDaytimeOvertime(att.workDate, holidays);
+        if (category === 'HOLIDAY') {
+          holidayOtHours += ot;
+        } else if (category === 'WEEKLY_REST') {
           weekendOtHours += ot;
         } else {
           weekdayOtHours += ot;
@@ -471,7 +481,10 @@ export class PayrollService {
       }
 
       // e. Run Deterministic Engine
+      const statutoryWorkEvidence = statutory ? verifyDaytimeAttendance(attendances) : undefined;
       const engineOutput = PayrollCalculationEngine.calculate({
+        period: statutoryPeriod,
+        statutoryWorkEvidence,
         baseSalary: Number(emp.contractSalary),
         workDays: standardWorkDays,
         actualWorkDays: actualDays,
@@ -481,7 +494,6 @@ export class PayrollService {
           weekdayOtHours,
           weekendOtHours,
           holidayOtHours,
-          nightHours: 0,
         },
         paidLeaveDays,
         unpaidLeaveDays,
@@ -492,7 +504,9 @@ export class PayrollService {
         },
         penalty: totalPenaltyAmount,
         dependentsCount: emp.dependentsCount,
-        insuranceSalary: Number(emp.insuranceSalary) || undefined,
+        insuranceSalary: statutory
+          ? emp.insuranceSalary == null ? undefined : Number(emp.insuranceSalary)
+          : Number(emp.insuranceSalary) || undefined,
         ruleConfig,
       });
 

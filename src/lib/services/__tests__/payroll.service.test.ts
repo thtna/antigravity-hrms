@@ -20,6 +20,7 @@ const mockPrisma = vi.hoisted(() => ({
   attendance: {
     findMany: vi.fn(),
   },
+  holiday: { findMany: vi.fn() },
   leaveRequest: {
     findMany: vi.fn(),
   },
@@ -53,8 +54,10 @@ vi.mock('@/lib/logger', () => ({
 
 import { PayrollService } from '../payroll.service';
 import { UserSession } from '@/types';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 import { PayrollCalculationEngine } from '@/lib/payroll/payroll-calculation-engine';
+import { createVietnamStatutoryRule2026 } from '@/lib/payroll/vietnam-statutory-2026';
+import { parseBusinessLocalDateTime } from '@/lib/time/business-time';
 
 const hrSession: UserSession = {
   userId: 'usr-hr',
@@ -177,7 +180,7 @@ describe('PHASE 15 — PAYROLL SERVICE TEST SUITE', () => {
         payrollRule: {
           id: 'rule-01',
           organizationId: 'org-test-payroll',
-          code: 'VN_STATUTORY_2026',
+          code: VIETNAM_STATUTORY_RULE_2026.ruleCode,
           name: 'Quy Chế Tiền Lương 2026',
           salaryBasisConfig: VIETNAM_STATUTORY_RULE_2026.salaryBasis,
           overtimeConfig: VIETNAM_STATUTORY_RULE_2026.overtime,
@@ -474,5 +477,74 @@ describe('G06 payroll write tenant authorization', () => {
       await expect(run(employeeSession)).rejects.toMatchObject({ statusCode: 403 });
       expectNoEffects();
     });
+  });
+});
+
+describe('C4R1A statutory payroll evidence before persistence', () => {
+  const rule = createVietnamStatutoryRule2026({ period: '2026-01', region: 'IV' });
+  const employee = {
+    id: 'emp-safe', organizationId: hrSession.organizationId, employeeCode: 'SAFE',
+    contractSalary: 22000000, insuranceSalary: 22000000, dependentsCount: 0,
+  };
+  const period = {
+    id: 'statutory-period', organizationId: hrSession.organizationId, code: 'PR-2026-09', status: 'DRAFT',
+    startDate: new Date('2026-09-01T00:00:00Z'), endDate: new Date('2026-09-30T00:00:00Z'), standardWorkDays: 22,
+    payrollRule: {
+      code: rule.ruleCode, name: rule.ruleName, salaryBasisConfig: rule.salaryBasis,
+      overtimeConfig: rule.overtime, insuranceConfig: rule.insurance, taxConfig: rule.tax,
+      deductionConfig: rule.deduction, roundingConfig: rule.rounding,
+    },
+  };
+  const daytime = {
+    employeeId: employee.id, organizationId: hrSession.organizationId, workDate: new Date('2026-09-02T00:00:00Z'),
+    checkInTime: parseBusinessLocalDateTime('2026-09-02', '08:00'),
+    checkOutTime: parseBusinessLocalDateTime('2026-09-02', '17:00'),
+    actualWorkHours: 8, otHours: 0,
+    schedule: { shift: { isOvernight: false, startTime: '08:00', endTime: '17:00' } },
+  };
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockPrisma.payrollPeriod.findFirst.mockResolvedValue(period);
+    mockPrisma.employee.findMany.mockResolvedValue([employee]);
+    mockPrisma.attendance.findMany.mockResolvedValue([daytime]);
+    mockPrisma.holiday.findMany.mockResolvedValue([{ date: daytime.workDate, isRecurring: false }]);
+    mockPrisma.leaveRequest.findMany.mockResolvedValue([]);
+    mockPrisma.employeeBonusPenalty.findMany.mockResolvedValue([]);
+    mockPrisma.employeeKpiResult.findMany.mockResolvedValue([]);
+    mockPrisma.payroll.findMany.mockResolvedValue([]);
+    mockPrisma.payroll.create.mockResolvedValue({ id: 'new-payroll' });
+    mockPrisma.payrollPeriod.update.mockImplementation(async ({ data }) => ({ ...period, ...data }));
+    mockPrisma.$transaction.mockImplementation(async cb => cb(mockPrisma));
+  });
+  it('calculates verified daytime/no-OT payroll and queries tenant-scoped holiday evidence', async () => {
+    const result = await PayrollService.calculatePeriodPayroll({ periodId: period.id, recalculate: true }, hrSession);
+    expect(result.status).toBe('CALCULATED');
+    expect(mockPrisma.payroll.create).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.holiday.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ organizationId: hrSession.organizationId }),
+    }));
+    expect(mockPrisma.attendance.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ organizationId: hrSession.organizationId }),
+      include: { schedule: { include: { shift: true } } },
+    }));
+  });
+  it.each([
+    { otHours: 1 },
+    { checkInTime: null },
+    { checkOutTime: parseBusinessLocalDateTime('2026-09-02', '22:30') },
+    { schedule: { shift: { isOvernight: true, startTime: '22:00', endTime: '06:00' } } },
+  ])('rejects insufficient evidence %j before deleting or replacing ANY payroll rows', async override => {
+    mockPrisma.employee.findMany.mockResolvedValue([employee, { ...employee, id: 'emp-ambiguous' }]);
+    mockPrisma.attendance.findMany.mockResolvedValue([daytime, { ...daytime, ...override, employeeId: 'emp-ambiguous' }]);
+    await expect(PayrollService.calculatePeriodPayroll({ periodId: period.id, recalculate: true }, hrSession))
+      .rejects.toMatchObject({ statusCode: 400, errorCode: 'BAD_REQUEST' });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.payroll.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.payroll.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.payrollDetail.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.payroll.create).not.toHaveBeenCalled();
+    expect(mockPrisma.payrollDetail.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.payrollPeriod.update).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
   });
 });

@@ -83,7 +83,8 @@ export const Step7AttendanceSchema = z.object({
 
 export const Step8PayrollSchema = z.object({
   ruleCode: z.string().min(2, 'Mã quy chế lương ít nhất 2 ký tự').default('VN_STATUTORY_2026'),
-  ruleName: z.string().min(2, 'Tên quy chế lương ít nhất 2 ký tự').default('Quy chế tiền lương Việt Nam 2026'),
+  ruleName: z.string().min(2, 'Tên quy chế lương ít nhất 2 ký tự').default('Vietnam Statutory 2026 - Core Payroll Configuration'),
+  minimumWageRegion: z.enum(['I', 'II', 'III', 'IV']),
   standardWorkDays: z.coerce.number().min(15).max(31).default(22),
   useStatutoryVietnam: z.boolean().default(true),
 });

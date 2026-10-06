@@ -10,7 +10,9 @@ import { ShiftService } from './shift.service';
 import { EmployeeService } from './employee.service';
 import { WorksiteService } from './worksite.service';
 import { PayrollRuleService } from './payroll-rule.service';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { createVietnamStatutoryRule2026 } from '@/lib/payroll/vietnam-statutory-2026';
+import { MinimumWageRegion } from '@/lib/payroll/types';
+import { isDeepStrictEqual } from 'node:util';
 import {
   Step1BusinessSchema,
   Step2BranchSchema,
@@ -79,6 +81,7 @@ function isPayrollRuleMatching(
     ruleName: string;
     standardWorkDays: number;
     useStatutoryVietnam: boolean;
+    minimumWageRegion: MinimumWageRegion;
   }
 ): boolean {
   // 1. Normalized Code Match
@@ -91,41 +94,11 @@ function isPayrollRuleMatching(
     return false;
   }
 
-  // 3. Material Submitted Configuration: standardWorkDays
-  const existingWorkDays = (existingRule.salaryBasisConfig as any)?.standardWorkDays;
-  if (existingWorkDays !== undefined && Number(existingWorkDays) !== Number(validated.standardWorkDays)) {
-    return false;
-  }
-
-  // 4. Material Generated Configuration: Statutory Vietnam Labor Code Config
-  if (validated.useStatutoryVietnam) {
-    const sb = existingRule.salaryBasisConfig as any;
-    if (sb && sb.method !== VIETNAM_STATUTORY_RULE_2026.salaryBasis.method) return false;
-    if (
-      sb &&
-      sb.standardHoursPerDay !== undefined &&
-      Number(sb.standardHoursPerDay) !== Number(VIETNAM_STATUTORY_RULE_2026.salaryBasis.standardHoursPerDay)
-    ) {
-      return false;
-    }
-
-    const ot = existingRule.overtimeConfig as any;
-    if (ot && Number(ot.weekdayMultiplier) !== Number(VIETNAM_STATUTORY_RULE_2026.overtime.weekdayMultiplier)) return false;
-    if (ot && Number(ot.weekendMultiplier) !== Number(VIETNAM_STATUTORY_RULE_2026.overtime.weekendMultiplier)) return false;
-    if (ot && Number(ot.holidayMultiplier) !== Number(VIETNAM_STATUTORY_RULE_2026.overtime.holidayMultiplier)) return false;
-
-    const ins = existingRule.insuranceConfig as any;
-    if (ins && ins.method !== VIETNAM_STATUTORY_RULE_2026.insurance.method) return false;
-    if (ins && Number(ins.employeeSocialRate) !== Number(VIETNAM_STATUTORY_RULE_2026.insurance.employeeSocialRate)) return false;
-    if (ins && Number(ins.employeeHealthRate) !== Number(VIETNAM_STATUTORY_RULE_2026.insurance.employeeHealthRate)) return false;
-    if (ins && Number(ins.employeeUnemploymentRate) !== Number(VIETNAM_STATUTORY_RULE_2026.insurance.employeeUnemploymentRate)) return false;
-
-    const tax = existingRule.taxConfig as any;
-    if (tax && tax.model !== VIETNAM_STATUTORY_RULE_2026.tax.model) return false;
-    if (tax && Number(tax.personalRelief) !== Number(VIETNAM_STATUTORY_RULE_2026.tax.personalRelief)) return false;
-    if (tax && Number(tax.dependentRelief) !== Number(VIETNAM_STATUTORY_RULE_2026.tax.dependentRelief)) return false;
-  }
-
+  const expected = createVietnamStatutoryRule2026({
+    period: '2026-01', region: validated.minimumWageRegion, standardWorkDays: validated.standardWorkDays,
+  });
+  const sections = ['salaryBasis', 'overtime', 'insurance', 'tax', 'deduction', 'rounding'] as const;
+  if (sections.some(section => !isDeepStrictEqual(existingRule[`${section}Config`], expected[section]))) return false;
   return true;
 }
 
@@ -645,20 +618,23 @@ export class OnboardingService {
         }
 
         // 2. Atomic transaction: create rule + complete organization in ONE transaction
+        const statutoryRule = createVietnamStatutoryRule2026({
+          period: '2026-01', region: validated.minimumWageRegion, standardWorkDays: validated.standardWorkDays,
+        });
         const payrollPayload = {
           code: normalizedRuleCode,
           name: validated.ruleName.trim(),
           description: 'Quy chế lương thiết lập trong quá trình khởi tạo tổ chức.',
           isDefault: true,
           salaryBasisConfig: {
-            ...VIETNAM_STATUTORY_RULE_2026.salaryBasis,
+            ...statutoryRule.salaryBasis,
             standardWorkDays: validated.standardWorkDays,
           } as any,
-          overtimeConfig: VIETNAM_STATUTORY_RULE_2026.overtime as any,
-          insuranceConfig: VIETNAM_STATUTORY_RULE_2026.insurance as any,
-          taxConfig: VIETNAM_STATUTORY_RULE_2026.tax as any,
-          deductionConfig: VIETNAM_STATUTORY_RULE_2026.deduction as any,
-          roundingConfig: VIETNAM_STATUTORY_RULE_2026.rounding as any,
+          overtimeConfig: statutoryRule.overtime as any,
+          insuranceConfig: statutoryRule.insurance as any,
+          taxConfig: statutoryRule.tax as any,
+          deductionConfig: statutoryRule.deduction as any,
+          roundingConfig: statutoryRule.rounding as any,
           effectiveFrom: '2026-01-01',
         };
 

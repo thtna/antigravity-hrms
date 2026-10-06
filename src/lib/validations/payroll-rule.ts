@@ -29,7 +29,7 @@ export const OvertimeConfigSchema = z.object({
   weekendMultiplier: z.coerce.number().positive().max(10).default(2.0),
   holidayMultiplier: z.coerce.number().positive().max(10).default(3.0),
   nightBonusRate: z.coerce.number().nonnegative().max(5).default(0.3),
-  nightOtMultiplier: z.coerce.number().positive().max(10).default(2.1),
+  nightOtMultiplier: z.coerce.number().positive().max(10).optional(),
 });
 
 export const InsuranceConfigSchema = z.object({
@@ -43,6 +43,11 @@ export const InsuranceConfigSchema = z.object({
   statutoryCap: z.coerce.number().nonnegative().optional().nullable(),
   unemploymentCap: z.coerce.number().nonnegative().optional().nullable(),
   statutoryFloor: z.coerce.number().nonnegative().optional().nullable(),
+  referenceAmount: z.coerce.number().nonnegative().optional(),
+  vietnam2026: z.object({
+    version: z.literal(1),
+    region: z.enum(['I', 'II', 'III', 'IV']),
+  }).strict().optional(),
 });
 
 export const TaxBracketSchema = z.object({

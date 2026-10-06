@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { UserSession } from '@/types';
 import { ApiError } from '@/lib/errors';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { createVietnamStatutoryRule2026 } from '@/lib/payroll/vietnam-statutory-2026';
+const VIETNAM_STATUTORY_RULE_2026 = createVietnamStatutoryRule2026({ period: '2026-01', region: 'II' });
 
 const { dbState, mockPrisma, resetDbState } = vi.hoisted(() => {
   interface DbState {
@@ -275,6 +276,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     };
 
     const res = await OnboardingService.saveStep(tenantAOwner, 8, step8Payload);
@@ -304,6 +306,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     };
 
     // First attempt
@@ -360,6 +363,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     });
 
     expect(res.success).toBe(true);
@@ -382,6 +386,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     });
 
     // Tenant B submits the exact same standard statutory code
@@ -390,6 +395,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     });
 
     expect(resB.success).toBe(true);
@@ -411,6 +417,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     });
 
     // Attempt retry with different standardWorkDays (26 days)
@@ -420,6 +427,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
         ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
         standardWorkDays: 26,
         useStatutoryVietnam: true,
+        minimumWageRegion: 'II',
       })
     ).rejects.toThrow(ApiError);
 
@@ -430,6 +438,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
         ruleName: 'Quy chế thưởng doanh số đặc biệt',
         standardWorkDays: 22,
         useStatutoryVietnam: true,
+        minimumWageRegion: 'II',
       })
     ).rejects.toThrow(ApiError);
   });
@@ -446,6 +455,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
         ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
         standardWorkDays: 22,
         useStatutoryVietnam: true,
+        minimumWageRegion: 'II',
       })
     ).rejects.toThrow('DB Connection Dropped Mid-Flight');
 
@@ -465,6 +475,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     };
 
     await OnboardingService.saveStep(tenantAOwner, 8, payload);
@@ -511,6 +522,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     });
 
     expect(res.success).toBe(true);
@@ -528,6 +540,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     });
 
     expect(res.status).toBeDefined();
@@ -564,6 +577,7 @@ describe('PHASE 11A.0D — ONBOARDING STEP 8 REGRESSION SUITE', () => {
       ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
       standardWorkDays: 22,
       useStatutoryVietnam: true,
+      minimumWageRegion: 'II',
     });
 
     expect(res.success).toBe(true);

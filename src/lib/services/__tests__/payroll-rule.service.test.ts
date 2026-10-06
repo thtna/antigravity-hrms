@@ -23,7 +23,7 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { PayrollRuleService } from '../payroll-rule.service';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 import { PayrollRuleEngine } from '@/lib/payroll/payroll-rule-engine';
 import { UserSession } from '@/types';
 import {

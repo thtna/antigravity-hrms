@@ -3,6 +3,7 @@ import { OnboardingService } from '../onboarding.service';
 import { ShiftService } from '../shift.service';
 import { UserSession } from '@/types';
 import { ApiError } from '@/lib/errors';
+import { PayrollRuleService } from '../payroll-rule.service';
 
 const mockPrisma = vi.hoisted(() => ({
   organization: {
@@ -586,11 +587,16 @@ describe('PHASE 7 — EMPTY TENANT & ONBOARDING SERVICE TEST SUITE', () => {
         ruleName: 'Quy chế tiền lương Việt Nam 2026',
         standardWorkDays: 22,
         useStatutoryVietnam: true,
+        minimumWageRegion: 'II',
       });
 
       expect(result.success).toBe(true);
       expect(result.completedStep).toBe(8);
       expect(result.nextStep).toBe(9);
+      expect(PayrollRuleService.createRule).toHaveBeenCalledWith(expect.objectContaining({
+        insuranceConfig: expect.objectContaining({ vietnam2026: { version: 1, region: 'II' } }),
+        taxConfig: expect.objectContaining({ personalRelief: 15500000, dependentRelief: 6200000 }),
+      }), ownerSession, expect.objectContaining({ tx: mockPrisma, allowOwnerOnboarding: true }));
       expect(mockPrisma.organization.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'org-fresh-01' },

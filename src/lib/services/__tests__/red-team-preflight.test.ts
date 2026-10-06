@@ -32,7 +32,7 @@ import {
 import { isSuperAdmin, hasPermission } from '@/lib/auth/roles';
 import { signSessionToken, verifySessionToken } from '@/lib/auth/session';
 import { PayrollCalculationEngine } from '@/lib/payroll/payroll-calculation-engine';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 import { UserSession } from '@/types';
 import { ApiError } from '@/lib/errors';
 import { Prisma } from '@prisma/client';

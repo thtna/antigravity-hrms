@@ -1,4 +1,5 @@
 'use client';
+import { VIETNAM_2026_TAX } from '@/lib/payroll/vietnam-statutory-2026';
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -191,7 +192,8 @@ export default function OnboardingPage() {
 
   const [step8Data, setStep8Data] = useState({
     ruleCode: 'VN_STATUTORY_2026',
-    ruleName: 'Quy chế tiền lương Luật Lao Động 2026',
+    ruleName: 'Vietnam Statutory 2026 - Core Payroll Configuration',
+    minimumWageRegion: '',
     standardWorkDays: 22,
     useStatutoryVietnam: true,
   });
@@ -989,6 +991,20 @@ export default function OnboardingPage() {
                 </div>
 
                 <div className="space-y-1.5">
+                  <label htmlFor="minimum-wage-region" className="text-xs font-medium text-slate-300">Vùng Lương Tối Thiểu *</label>
+                  <select
+                    id="minimum-wage-region"
+                    required
+                    value={step8Data.minimumWageRegion}
+                    onChange={(e) => setStep8Data({ ...step8Data, minimumWageRegion: e.target.value })}
+                    className="w-full rounded-lg border border-slate-800 bg-slate-950/60 px-3.5 py-2.5 text-sm text-white"
+                  >
+                    <option value="" disabled>Chọn vùng lương tối thiểu</option>
+                    {['I', 'II', 'III', 'IV'].map(region => <option key={region} value={region}>Vùng {region}</option>)}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
                   <label className="text-xs font-medium text-slate-300">Số Ngày Công Chuẩn Hàng Tháng</label>
                   <input
                     type="number"
@@ -999,9 +1015,9 @@ export default function OnboardingPage() {
                 </div>
 
                 <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4 text-xs text-slate-300 space-y-1.5">
-                  <p className="font-semibold text-blue-400">✨ Tiêu chuẩn tuân thủ luật định tự động:</p>
+                  <p className="font-semibold text-blue-400">Cấu hình lương cơ bản 2026:</p>
                   <p>• Bảo hiểm xã hội: 8% BHXH, 1.5% BHYT, 1% BHTN</p>
-                  <p>• Thuế TNCN: Lũy tiến từng phần 7 bậc (Giảm trừ bản thân 11.000.000đ, người phụ thuộc 4.400.000đ)</p>
+                  <p>• Thuế TNCN: {VIETNAM_2026_TAX.brackets.length} bậc (Giảm trừ bản thân {VIETNAM_2026_TAX.personalRelief.toLocaleString('vi-VN')}đ, người phụ thuộc {VIETNAM_2026_TAX.dependentRelief.toLocaleString('vi-VN')}đ)</p>
                 </div>
               </div>
             )}

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { executeDrill, DisasterRecoveryDrillMetrics } from '../../../../scripts/dr-restore-drill';
-import { VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/default-rules';
+import { LEGACY_CUSTOM_PAYROLL_RULE as VIETNAM_STATUTORY_RULE_2026 } from '@/lib/payroll/__tests__/fixtures/legacy-custom-rule';
 import { PayrollCalculationEngine } from '@/lib/payroll/payroll-calculation-engine';
 
 describe('FINAL PHASE 10.6 — DISASTER RECOVERY RESTORE DRILL TEST SUITE', () => {
