@@ -343,108 +343,94 @@ export class DashboardService {
     const attendanceFilter = { employee: { organizationId: orgId } };
     const leaveFilter = { employee: { is: { organizationId: orgId } } };
 
-    // [PHASE 25 OPTIMIZATION] Parallelize all independent DB queries and batch 7-day attendance
-    const [
-      totalEmployees,
-      todayAttendances,
-      leavesToday,
-      pendingLeave,
-      pendingAttendance,
-      latestPayrollPeriod,
-      monthAttendanceSummary,
-      approvedBonuses,
-      approvedPenalties,
-      past7Records,
-      departments,
-    ] = await Promise.all([
-      // 1. Total Active Employees
-      prisma.employee.count({
-        where: { deletedAt: null, status: 'ACTIVE', ...empFilter },
-      }),
-      // 2. Today's Attendance records
-      prisma.attendance.findMany({
-        where: { ...attendanceFilter, workDate: { gte: startOfToday, lte: endOfToday } },
-        select: {
-          id: true,
-          employeeId: true,
-          checkInTime: true,
-          lateMinutes: true,
-          status: true,
-          actualWorkHours: true,
-          otHours: true,
+    // Serialize reads so this invocation does not compete for a single-connection pool.
+    // 1. Total Active Employees
+    const totalEmployees = await prisma.employee.count({
+      where: { deletedAt: null, status: 'ACTIVE', ...empFilter },
+    });
+    // 2. Today's Attendance records
+    const todayAttendances = await prisma.attendance.findMany({
+      where: { ...attendanceFilter, workDate: { gte: startOfToday, lte: endOfToday } },
+      select: {
+        id: true,
+        employeeId: true,
+        checkInTime: true,
+        lateMinutes: true,
+        status: true,
+        actualWorkHours: true,
+        otHours: true,
+      },
+    });
+    // Active approved leaves today
+    const leavesToday = await prisma.leaveRequest.findMany({
+      where: {
+        ...leaveFilter,
+        status: 'APPROVED',
+        startDate: { lte: endOfToday },
+        endDate: { gte: startOfToday },
+      },
+      select: { employeeId: true },
+    });
+    // 3. Pending Queue items
+    const pendingLeave = await prisma.leaveRequest.count({
+      where: { ...leaveFilter, status: 'PENDING' },
+    });
+    const pendingAttendance = await prisma.attendanceAdjustment.count({
+      where: { employee: { organizationId: orgId }, status: 'PENDING' },
+    });
+    // 4. Latest Payroll Status
+    const latestPayrollPeriod = await prisma.payrollPeriod.findFirst({
+      where: periodFilter,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        payrolls: {
+          select: { id: true, grossIncome: true, netSalary: true },
         },
-      }),
-      // Active approved leaves today
-      prisma.leaveRequest.findMany({
-        where: {
-          ...leaveFilter,
-          status: 'APPROVED',
-          startDate: { lte: endOfToday },
-          endDate: { gte: startOfToday },
+      },
+    });
+    // 5. Overtime Hours (current month)
+    const monthAttendanceSummary = await prisma.attendance.aggregate({
+      where: {
+        ...attendanceFilter,
+        workDate: { gte: startOfMonth, lte: endOfMonth },
+        status: { notIn: ['REJECTED', 'ABSENT'] },
+      },
+      _sum: { otHours: true },
+    });
+    // 6. Bonus & Penalty for current month
+    const approvedBonuses = await prisma.employeeBonusPenalty.findMany({
+      where: {
+        ...bonusFilter,
+        type: 'BONUS',
+        status: 'APPROVED',
+        period: periodStr,
+      },
+      select: { amount: true },
+    });
+    const approvedPenalties = await prisma.employeeBonusPenalty.findMany({
+      where: {
+        ...bonusFilter,
+        type: 'PENALTY',
+        status: 'APPROVED',
+        period: periodStr,
+      },
+      select: { amount: true },
+    });
+    // 7. Charts: Batched 7-Day Attendance Trend
+    const past7Records = await prisma.attendance.findMany({
+      where: { ...attendanceFilter, workDate: { gte: rangeStart7, lte: rangeEnd7 } },
+      select: { workDate: true, checkInTime: true, lateMinutes: true, status: true },
+    });
+    // 8. Charts: Department Distribution
+    const departments = await prisma.department.findMany({
+      where: { ...deptFilter, deletedAt: null, isActive: true },
+      include: {
+        employees: {
+          where: { deletedAt: null, status: 'ACTIVE' },
+          select: { contractSalary: true },
         },
-        select: { employeeId: true },
-      }),
-      // 3. Pending Queue items
-      prisma.leaveRequest.count({
-        where: { ...leaveFilter, status: 'PENDING' },
-      }),
-      prisma.attendanceAdjustment.count({
-        where: { employee: { organizationId: orgId }, status: 'PENDING' },
-      }),
-      // 4. Latest Payroll Status
-      prisma.payrollPeriod.findFirst({
-        where: periodFilter,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          payrolls: {
-            select: { id: true, grossIncome: true, netSalary: true },
-          },
-        },
-      }),
-      // 5. Overtime Hours (current month)
-      prisma.attendance.aggregate({
-        where: {
-          ...attendanceFilter,
-          workDate: { gte: startOfMonth, lte: endOfMonth },
-          status: { notIn: ['REJECTED', 'ABSENT'] },
-        },
-        _sum: { otHours: true },
-      }),
-      // 6. Bonus & Penalty for current month
-      prisma.employeeBonusPenalty.findMany({
-        where: {
-          ...bonusFilter,
-          type: 'BONUS',
-          status: 'APPROVED',
-          period: periodStr,
-        },
-        select: { amount: true },
-      }),
-      prisma.employeeBonusPenalty.findMany({
-        where: {
-          ...bonusFilter,
-          type: 'PENALTY',
-          status: 'APPROVED',
-          period: periodStr,
-        },
-        select: { amount: true },
-      }),
-      // 7. Charts: Batched 7-Day Attendance Trend
-      prisma.attendance.findMany({
-        where: { ...attendanceFilter, workDate: { gte: rangeStart7, lte: rangeEnd7 } },
-        select: { workDate: true, checkInTime: true, lateMinutes: true, status: true },
-      }),
-      // 8. Charts: Department Distribution
-      prisma.department.findMany({
-        where: { ...deptFilter, deletedAt: null, isActive: true },
-        include: {
-          employees: {
-            where: { deletedAt: null, status: 'ACTIVE' },
-            select: { contractSalary: true },
-          },
-        },
-      }),
-    ]);
+      },
+    });
 
     const presentToday = todayAttendances.filter(
       (a) => a.checkInTime !== null || ['PRESENT', 'LATE', 'HALF_DAY', 'COMPLETED', 'ON_TIME', 'OVERTIME'].includes(a.status)
