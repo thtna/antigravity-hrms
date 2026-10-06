@@ -839,9 +839,10 @@ export class AttendanceService {
 
     const skip = (params.page - 1) * params.limit;
 
-    const [total, records] = await Promise.all([
-      prisma.attendance.count({ where }),
-      prisma.attendance.findMany({
+    const [total, records] = await prisma.$transaction(async (tx) => {
+      const total = await tx.attendance.count({ where });
+
+      const records = await tx.attendance.findMany({
         where,
         include: {
           employee: {
@@ -862,8 +863,10 @@ export class AttendanceService {
         orderBy: [{ workDate: 'desc' }, { checkInTime: 'desc' }],
         skip,
         take: params.limit,
-      }),
-    ]);
+      });
+
+      return [total, records] as const;
+    });
 
     return {
       records: records.map((r) => ({

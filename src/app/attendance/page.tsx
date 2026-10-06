@@ -72,10 +72,10 @@ export default function AttendancePage() {
   const [correctionRecords, setCorrectionRecords] = useState<any[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [loadingCorrections, setLoadingCorrections] = useState(false);
-  const [departments, setDepartments] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [shifts, setShifts] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState<any | null>(null);
+  const [currentUserResolved, setCurrentUserResolved] = useState(false);
 
   // Modals
   const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
@@ -106,23 +106,25 @@ export default function AttendancePage() {
       const res = await fetch('/api/v1/auth/me');
       const data = await res.json();
       if (data.success) setCurrentUser(data.data);
-    } catch {}
+    } catch {
+      // optional
+    } finally {
+      setCurrentUserResolved(true);
+    }
   }, []);
 
-  // Fetch meta (departments, employees, shifts)
-  const fetchMeta = useCallback(async () => {
+  // Manual attendance metadata is only needed when the HR manual-entry modal is opened.
+  // Deferring these DB-backed requests keeps the initial attendance route lightweight.
+  const fetchManualMeta = useCallback(async () => {
     try {
-      const [deptRes, empRes, shiftRes] = await Promise.all([
-        fetch('/api/v1/departments'),
-        fetch('/api/v1/employees?limit=200'),
+      const [empRes, shiftRes] = await Promise.all([
+        fetch('/api/v1/employees?limit=100'),
         fetch('/api/v1/shifts'),
       ]);
-      const [deptData, empData, shiftData] = await Promise.all([
-        deptRes.json(),
+      const [empData, shiftData] = await Promise.all([
         empRes.json(),
         shiftRes.json(),
       ]);
-      if (deptData.success) setDepartments(deptData.data || []);
       if (empData.success) setEmployees(empData.data || []);
       if (shiftData.success) setShifts(shiftData.data || []);
     } catch {
@@ -186,9 +188,14 @@ export default function AttendancePage() {
 
   useEffect(() => {
     fetchCurrentUser();
-    fetchMeta();
     fetchAttendanceRecords();
-  }, [fetchCurrentUser, fetchMeta, fetchAttendanceRecords]);
+  }, [fetchCurrentUser, fetchAttendanceRecords]);
+
+  useEffect(() => {
+    if (isManualModalOpen) {
+      fetchManualMeta();
+    }
+  }, [isManualModalOpen, fetchManualMeta]);
 
   useEffect(() => {
     if (activeTab === 'CORRECTIONS') {
@@ -449,11 +456,27 @@ export default function AttendancePage() {
         {/* ── TAB 1: MY ATTENDANCE ── */}
         {activeTab === 'MY_ATTENDANCE' && (
           <div className="space-y-6">
-            <AttendanceWidget
-              onAttendanceChanged={() => {
-                fetchAttendanceRecords();
-              }}
-            />
+            {!currentUserResolved ? (
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-400">
+                Đang xác minh hồ sơ chấm công...
+              </div>
+            ) : currentUser?.employeeId ? (
+              <AttendanceWidget
+                onAttendanceChanged={() => {
+                  fetchAttendanceRecords();
+                }}
+              />
+            ) : (
+              <div className="flex items-start gap-3 rounded-2xl border border-blue-500/20 bg-blue-950/20 p-5 text-sm text-slate-300">
+                <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-blue-400" />
+                <div>
+                  <div className="font-semibold text-white">Chấm công cá nhân không áp dụng cho tài khoản quản trị này</div>
+                  <div className="mt-1 text-xs text-slate-400">
+                    Tài khoản hiện tại chưa liên kết với hồ sơ nhân viên. Bạn vẫn có thể giám sát chấm công và dùng các chức năng HR được cấp quyền.
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Attendance Table */}
             <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60 shadow-xl backdrop-blur-md">
