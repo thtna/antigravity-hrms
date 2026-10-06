@@ -43,6 +43,12 @@ export interface AttendanceMetrics {
 
 export type TrustedAttendanceMethod = 'WEB' | 'QR' | 'GPS' | 'BIOMETRIC';
 
+export interface AttendanceQueryTiming {
+  countMs?: number;
+  findManyMs?: number;
+  dbParallelMs?: number;
+}
+
 export class AttendanceService {
   /**
    * Pure calculation function for working hours, late minutes, early minutes and overtime.
@@ -780,7 +786,11 @@ export class AttendanceService {
   /**
    * Query attendance history with filters and RBAC.
    */
-  static async queryAttendance(params: AttendanceQueryParams, session: UserSession) {
+  static async queryAttendance(
+    params: AttendanceQueryParams,
+    session: UserSession,
+    timing?: AttendanceQueryTiming
+  ) {
     const isPrivileged = session.roles.includes('admin') || session.roles.includes('hr');
     const isManager = session.roles.includes('manager');
 
@@ -839,31 +849,49 @@ export class AttendanceService {
 
     const skip = (params.page - 1) * params.limit;
 
-    const [total, records] = await Promise.all([
-      prisma.attendance.count({ where }),
-      prisma.attendance.findMany({
-        where,
-        include: {
-          employee: {
-            select: {
-              id: true,
-              employeeCode: true,
-              firstName: true,
-              lastName: true,
-              avatarUrl: true,
-              department: { select: { id: true, name: true, code: true } },
-              position: { select: { id: true, title: true, code: true } },
+    const dbParallelStart = performance.now();
+
+    const countPromise = (async () => {
+      const start = performance.now();
+      try {
+        return await prisma.attendance.count({ where });
+      } finally {
+        if (timing) timing.countMs = performance.now() - start;
+      }
+    })();
+
+    const recordsPromise = (async () => {
+      const start = performance.now();
+      try {
+        return await prisma.attendance.findMany({
+          where,
+          include: {
+            employee: {
+              select: {
+                id: true,
+                employeeCode: true,
+                firstName: true,
+                lastName: true,
+                avatarUrl: true,
+                department: { select: { id: true, name: true, code: true } },
+                position: { select: { id: true, title: true, code: true } },
+              },
+            },
+            schedule: {
+              include: { shift: true },
             },
           },
-          schedule: {
-            include: { shift: true },
-          },
-        },
-        orderBy: [{ workDate: 'desc' }, { checkInTime: 'desc' }],
-        skip,
-        take: params.limit,
-      }),
-    ]);
+          orderBy: [{ workDate: 'desc' }, { checkInTime: 'desc' }],
+          skip,
+          take: params.limit,
+        });
+      } finally {
+        if (timing) timing.findManyMs = performance.now() - start;
+      }
+    })();
+
+    const [total, records] = await Promise.all([countPromise, recordsPromise]);
+    if (timing) timing.dbParallelMs = performance.now() - dbParallelStart;
 
     return {
       records: records.map((r) => ({

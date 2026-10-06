@@ -4,27 +4,59 @@ import { prisma } from '@/lib/db/prisma';
 import { handleApiError } from '@/lib/errors';
 import { ApiResponse, SanitizedUser } from '@/types';
 
-export async function GET(): Promise<NextResponse<ApiResponse<SanitizedUser>>> {
-  try {
-    const session = await requireAuth();
+function attachServerTiming(
+  response: NextResponse,
+  timings: { authMs: number; userQueryMs: number; totalMs: number }
+): NextResponse {
+  if (process.env.VERCEL_ENV !== 'production') {
+    response.headers.set(
+      'Server-Timing',
+      [
+        `auth;dur=${timings.authMs.toFixed(1)}`,
+        `user_query;dur=${timings.userQueryMs.toFixed(1)}`,
+        `total;dur=${timings.totalMs.toFixed(1)}`,
+      ].join(', ')
+    );
+  }
+  return response;
+}
 
+export async function GET(): Promise<NextResponse<ApiResponse<SanitizedUser>>> {
+  const routeStart = performance.now();
+  let authMs = 0;
+  let userQueryMs = 0;
+
+  try {
+    const authStart = performance.now();
+    const session = await requireAuth();
+    authMs = performance.now() - authStart;
+
+    const userQueryStart = performance.now();
     const user = await prisma.user.findUnique({
       where: { id: session.userId },
       include: {
         employee: true,
       },
     });
+    userQueryMs = performance.now() - userQueryStart;
 
     if (!user || !user.isActive) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: {
-            code: 'UNAUTHORIZED',
-            message: 'Tài khoản không tồn tại hoặc đã bị vô hiệu hóa.',
+      return attachServerTiming(
+        NextResponse.json(
+          {
+            success: false,
+            error: {
+              code: 'UNAUTHORIZED',
+              message: 'Tài khoản không tồn tại hoặc đã bị vô hiệu hóa.',
+            },
           },
-        },
-        { status: 401 }
+          { status: 401 }
+        ),
+        {
+          authMs,
+          userQueryMs,
+          totalMs: performance.now() - routeStart,
+        }
       );
     }
 
@@ -40,13 +72,20 @@ export async function GET(): Promise<NextResponse<ApiResponse<SanitizedUser>>> {
       lastLoginAt: user.lastLoginAt,
     };
 
-    return NextResponse.json({
-      success: true,
-      data: sanitized,
-      meta: {
-        timestamp: new Date().toISOString(),
-      },
-    });
+    return attachServerTiming(
+      NextResponse.json({
+        success: true,
+        data: sanitized,
+        meta: {
+          timestamp: new Date().toISOString(),
+        },
+      }),
+      {
+        authMs,
+        userQueryMs,
+        totalMs: performance.now() - routeStart,
+      }
+    );
   } catch (error) {
     return handleApiError(error);
   }
