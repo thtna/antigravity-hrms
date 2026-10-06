@@ -9,8 +9,8 @@ import { validateRequest } from '@/lib/validations';
 import { handleApiError } from '@/lib/errors';
 import { ApiResponse } from '@/types';
 
-function attachAttendanceServerTiming(
-  response: NextResponse,
+function attachAttendanceServerTiming<T>(
+  response: NextResponse<T>,
   timings: {
     authMs: number;
     validationMs: number;
@@ -18,7 +18,7 @@ function attachAttendanceServerTiming(
     totalMs: number;
     query: AttendanceQueryTiming;
   }
-): NextResponse {
+): NextResponse<T> {
   if (process.env.VERCEL_ENV !== 'production') {
     response.headers.set(
       'Server-Timing',
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<an
     serviceMs = performance.now() - serviceStart;
 
     return attachAttendanceServerTiming(
-      NextResponse.json({
+      NextResponse.json<ApiResponse<any>>({
         success: true,
         data: result.records,
         meta: {

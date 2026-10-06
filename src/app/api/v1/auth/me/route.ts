@@ -4,10 +4,10 @@ import { prisma } from '@/lib/db/prisma';
 import { handleApiError } from '@/lib/errors';
 import { ApiResponse, SanitizedUser } from '@/types';
 
-function attachServerTiming(
-  response: NextResponse,
+function attachServerTiming<T>(
+  response: NextResponse<T>,
   timings: { authMs: number; userQueryMs: number; totalMs: number }
-): NextResponse {
+): NextResponse<T> {
   if (process.env.VERCEL_ENV !== 'production') {
     response.headers.set(
       'Server-Timing',
@@ -42,7 +42,7 @@ export async function GET(): Promise<NextResponse<ApiResponse<SanitizedUser>>> {
 
     if (!user || !user.isActive) {
       return attachServerTiming(
-        NextResponse.json(
+        NextResponse.json<ApiResponse<SanitizedUser>>(
           {
             success: false,
             error: {
@@ -73,7 +73,7 @@ export async function GET(): Promise<NextResponse<ApiResponse<SanitizedUser>>> {
     };
 
     return attachServerTiming(
-      NextResponse.json({
+      NextResponse.json<ApiResponse<SanitizedUser>>({
         success: true,
         data: sanitized,
         meta: {
