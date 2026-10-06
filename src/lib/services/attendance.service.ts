@@ -43,13 +43,6 @@ export interface AttendanceMetrics {
 
 export type TrustedAttendanceMethod = 'WEB' | 'QR' | 'GPS' | 'BIOMETRIC';
 
-export interface AttendanceQueryTiming {
-  countMs?: number;
-  findManyMs?: number;
-  dbParallelMs?: number;
-  dbTransactionMs?: number;
-}
-
 export class AttendanceService {
   /**
    * Pure calculation function for working hours, late minutes, early minutes and overtime.
@@ -787,11 +780,7 @@ export class AttendanceService {
   /**
    * Query attendance history with filters and RBAC.
    */
-  static async queryAttendance(
-    params: AttendanceQueryParams,
-    session: UserSession,
-    timing?: AttendanceQueryTiming
-  ) {
+  static async queryAttendance(params: AttendanceQueryParams, session: UserSession) {
     const isPrivileged = session.roles.includes('admin') || session.roles.includes('hr');
     const isManager = session.roles.includes('manager');
 
@@ -850,14 +839,9 @@ export class AttendanceService {
 
     const skip = (params.page - 1) * params.limit;
 
-    const dbTransactionStart = performance.now();
-
     const [total, records] = await prisma.$transaction(async (tx) => {
-      const countStart = performance.now();
       const total = await tx.attendance.count({ where });
-      if (timing) timing.countMs = performance.now() - countStart;
 
-      const findManyStart = performance.now();
       const records = await tx.attendance.findMany({
         where,
         include: {
@@ -880,15 +864,9 @@ export class AttendanceService {
         skip,
         take: params.limit,
       });
-      if (timing) timing.findManyMs = performance.now() - findManyStart;
 
       return [total, records] as const;
     });
-
-    if (timing) {
-      timing.dbTransactionMs = performance.now() - dbTransactionStart;
-      timing.dbParallelMs = timing.dbTransactionMs;
-    }
 
     return {
       records: records.map((r) => ({
