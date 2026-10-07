@@ -2,6 +2,23 @@
 **Lộ Trình Triển Khai Thực Chiến Toàn Diện (Phase 0 đến Phase 10)**  
 *Document Version: 1.0.0 | Status: APPROVED | Target: Zero-Mocks, Production-Ready Modular Monolith*
 
+## CURRENT OPERATIONAL STATUS OVERRIDE — VERIFIED 07/10/2026
+
+> The Phase 0→10 roadmap below is the original implementation plan and is retained as historical planning context. It is **not** the current execution phase.
+>
+> Current operational state is governed by `docs/PROJECT_STATE_HANDOFF.md`.
+
+- **Original Phase 0→10 implementation roadmap**: completed as historical product-development work.
+- **Current Production/main SHA**: `cfde65e34a1ff57d0ad1bb53cb80dc226ad21c51`.
+- **Production release / post-deploy verification**: `PASS / VERIFIED`.
+- **Current lifecycle stage**: `FINAL CUSTOMER HANDOVER CLOSURE`.
+- **Current gate**: `R5D1F-F3A — FINAL HANDOVER DOCUMENTATION CLOSURE`.
+- **CUSTOMER_HANDOVER_READY**: `NO / PENDING FINAL PUBLICATION + FINAL READ-ONLY AUDIT`. Branch protection and legacy Vercel fanout dispositions are resolved; dedicated Staging branch filtering is config-applied/verified, with `main → SKIP` runtime evidence deferred to the next natural `main` push.
+- **Git governance**: `main` and `staging` are protected; `main` requires `Quality Gate`.
+- **Vercel governance**: only `antigravity-hrms` and `antigravity-hrms-staging` remain Git-linked; `ri4s` and `q64j` are disconnected.
+- **New product-development phase**: none selected or approved.
+- Historical acceptance criteria and phase descriptions below must not be reinterpreted as fresh 07/10/2026 verification evidence.
+
 ---
 
 ## 1. NGUYÊN TẮC THI HÀNH LỘ TRÌNH (EXECUTION PRINCIPLES)
@@ -51,7 +68,7 @@
 
 ---
 
-### Phase 0: Phân Tích & Thiết Kế Kiến Trúc Hệ Thống (HIỆN TẠI)
+### Phase 0: Phân Tích & Thiết Kế Kiến Trúc Hệ Thống (LỊCH SỬ — ĐÃ HOÀN THÀNH)
 - **Mục tiêu**: Làm rõ toàn bộ yêu cầu chức năng, phi chức năng, ranh giới module, rủi ro cơ sở dữ liệu, bài toán tính lương, bảo mật và cơ chế phân quyền.
 - **Sản phẩm bàn giao**:
   - `ARCHITECTURE.md`
