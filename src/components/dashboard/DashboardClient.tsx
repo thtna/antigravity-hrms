@@ -26,7 +26,7 @@ export function DashboardClient() {
   const [error, setError] = useState<string | null>(null);
 
   const [currentRole, setCurrentRole] = useState<'admin' | 'manager' | 'employee'>('admin');
-  const [availableRoles, setAvailableRoles] = useState<RoleCode[]>(['employee']);
+  const [availableRoles, setAvailableRoles] = useState<RoleCode[]>([]);
   const [sessionUser, setSessionUser] = useState<any>(null);
   const [dashboardData, setDashboardData] = useState<any>(null);
 
@@ -45,7 +45,7 @@ export function DashboardClient() {
       }
 
       setCurrentRole(json.data.currentRole);
-      setAvailableRoles(json.data.availableRoles || ['employee']);
+      setAvailableRoles(json.data.availableRoles || []);
       setSessionUser(json.data.sessionUser);
       setDashboardData(json.data.payload);
     } catch (err: any) {
@@ -197,17 +197,19 @@ export function DashboardClient() {
             </button>
           )}
 
-          <button
-            onClick={() => handleSwitchRole('employee')}
-            className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-all ${
-              currentRole === 'employee'
-                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20 ring-1 ring-emerald-400'
-                : 'border border-slate-800 bg-slate-900/60 text-slate-300 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            <User className="h-3.5 w-3.5" />
-            Cá Nhân (Employee)
-          </button>
+          {availableRoles.includes('employee') && (
+            <button
+              onClick={() => handleSwitchRole('employee')}
+              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-all ${
+                currentRole === 'employee'
+                  ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20 ring-1 ring-emerald-400'
+                  : 'border border-slate-800 bg-slate-900/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <User className="h-3.5 w-3.5" />
+              Cá Nhân (Employee)
+            </button>
+          )}
         </div>
 
         {/* User Info & Refresh Button */}

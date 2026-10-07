@@ -49,7 +49,23 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<an
     const isAdminOrHr = session.roles.includes('admin') || session.roles.includes('hr');
     const isManager = session.roles.includes('manager');
 
-    const availableRoles: RoleCode[] = ['employee'];
+    // Employee view is available only when the authenticated tenant user has
+    // a real employee linkage. OWNER/Admin accounts are not employees by default.
+    let hasEmployeeView = Boolean(session.employeeId);
+    if (!hasEmployeeView && session.userId) {
+      const linkedEmployee = await prisma.employee.findFirst({
+        where: {
+          userId: session.userId,
+          organizationId: session.organizationId ?? '__no_org__',
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      hasEmployeeView = Boolean(linkedEmployee);
+    }
+
+    const availableRoles: RoleCode[] = [];
+    if (hasEmployeeView) availableRoles.push('employee');
     if (isManager || isAdminOrHr) availableRoles.push('manager');
     if (isAdminOrHr) availableRoles.push('admin');
 
@@ -66,6 +82,11 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<an
       }
       effectiveRole = 'manager';
     } else if (requestedRole === 'employee') {
+      if (!hasEmployeeView && (isAdminOrHr || isManager)) {
+        throw ApiError.forbidden(
+          'Tài khoản này không có hồ sơ nhân viên liên kết để truy cập Dashboard Cá Nhân.'
+        );
+      }
       effectiveRole = 'employee';
     } else {
       // Auto-detect highest priority role
