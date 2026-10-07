@@ -891,17 +891,6 @@ export class DashboardService {
       });
     }
 
-    // Fallback for testing: first employee
-    if (!employee) {
-      employee = await prisma.employee.findFirst({
-        where: { deletedAt: null, organizationId: session.organizationId ?? '__no_org__' },
-        include: {
-          department: { select: { name: true } },
-          position: { select: { title: true } },
-        },
-      });
-    }
-
     if (!employee || employee.organizationId !== session.organizationId) {
       throw ApiError.notFound('Không tìm thấy thông tin nhân viên liên kết với tài khoản này.');
     }

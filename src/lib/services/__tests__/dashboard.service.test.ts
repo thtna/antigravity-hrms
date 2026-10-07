@@ -762,6 +762,131 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
       // Check Chart data
       expect(result.charts.workHours14Days).toHaveLength(14);
       expect(result.charts.salaryComposition.netSalary).toBe(21190000);
+      expect(mockPrisma.employee.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.employee.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: 'emp-dev-1',
+          organizationId: 'org-test-dashboard',
+        },
+        include: {
+          department: { select: { name: true } },
+          position: { select: { title: true } },
+        },
+      });
+    });
+
+    it('rejects an unlinked user instead of falling back to another employee in the same organization', async () => {
+      const unlinkedSession: UserSession = {
+        ...employeeSession,
+        userId: 'usr-unlinked',
+        employeeId: undefined,
+      };
+
+      mockPrisma.employee.findFirst.mockImplementation(async ({ where }: any) => {
+        if (
+          where?.userId === 'usr-unlinked' &&
+          where?.organizationId === 'org-test-dashboard'
+        ) {
+          return null;
+        }
+
+        if (
+          where?.deletedAt === null &&
+          where?.organizationId === 'org-test-dashboard'
+        ) {
+          return {
+            id: 'emp-other',
+            organizationId: 'org-test-dashboard',
+            employeeCode: 'EMP-OTHER',
+            firstName: 'Other',
+            lastName: 'Employee',
+            contractSalary: 99999999,
+            hourlyRate: 999999,
+            department: { name: 'Sensitive Department' },
+            position: { title: 'Sensitive Position' },
+          };
+        }
+
+        return null;
+      });
+
+      await expect(
+        DashboardService.getEmployeeDashboard(unlinkedSession)
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        errorCode: 'NOT_FOUND',
+      });
+
+      expect(mockPrisma.employee.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.employee.findFirst).toHaveBeenCalledWith({
+        where: {
+          userId: 'usr-unlinked',
+          organizationId: 'org-test-dashboard',
+        },
+        include: {
+          department: { select: { name: true } },
+          position: { select: { title: true } },
+        },
+      });
+    });
+
+    it('never resolves a cross-tenant employee for the employee dashboard', async () => {
+      const crossTenantSession: UserSession = {
+        ...employeeSession,
+        userId: 'usr-cross-tenant',
+        employeeId: 'emp-cross-tenant',
+      };
+
+      mockPrisma.employee.findFirst.mockImplementation(
+        async ({ where }: any) => {
+          if (where?.organizationId === 'org-other') {
+            return {
+              id: 'emp-cross-tenant',
+              userId: 'usr-cross-tenant',
+              organizationId: 'org-other',
+            };
+          }
+
+          return null;
+        }
+      );
+
+      await expect(
+        DashboardService.getEmployeeDashboard(crossTenantSession)
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        errorCode: 'NOT_FOUND',
+      });
+
+      expect(mockPrisma.employee.findFirst).toHaveBeenCalledTimes(2);
+
+      expect(mockPrisma.employee.findFirst).toHaveBeenNthCalledWith(
+        1,
+        {
+          where: {
+            id: 'emp-cross-tenant',
+            organizationId: 'org-test-dashboard',
+          },
+          include: {
+            department: { select: { name: true } },
+            position: { select: { title: true } },
+          },
+        }
+      );
+
+      expect(mockPrisma.employee.findFirst).toHaveBeenNthCalledWith(
+        2,
+        {
+          where: {
+            userId: 'usr-cross-tenant',
+            organizationId: 'org-test-dashboard',
+          },
+          include: {
+            department: { select: { name: true } },
+            position: { select: { title: true } },
+          },
+        }
+      );
     });
   });
 
