@@ -2,61 +2,72 @@
 ## ANTIGRAVITY HRMS — MULTI-TENANT ENTERPRISE PLATFORM
 
 - **Tài liệu**: Disaster Recovery Operating Runbook & Restoration Protocol
-- **Phiên bản**: 1.0 (Production Preflight Verified)
-- **Hệ cơ sở dữ liệu**: Supabase PostgreSQL 16.4 (Managed Tier with High Availability)
-- **Kiến trúc ứng dụng**: Next.js 16 (App Router) on Vercel Edge/Serverless Infrastructure
+- **Phiên bản**: 1.1 (Reconciled 07/10/2026)
+- **Hệ cơ sở dữ liệu hiện hành**: Supabase PostgreSQL 17.6 (Production engine verified read-only 07/10/2026)
+- **Kiến trúc ứng dụng**: Next.js 16 (App Router) on Vercel serverless infrastructure; canonical Production project = `antigravity-hrms`
 - **Phạm vi bảo vệ**: Tối đa 5 Doanh nghiệp Độc lập (Multi-Tenant SaaS Isolation)
+
+> **CURRENT PRODUCTION BASELINE — 07/10/2026**
+>
+> - Production database status: `ACTIVE_HEALTHY`.
+> - Applied Prisma migrations: `5`; latest = `20261005000000_phase_11a_0f_public_data_api_hardening`.
+> - Public database topology: `34` base tables, `73` foreign keys, `2` public enums.
+> - RLS: `34/34` public ordinary tables enabled; zero public RLS policies intentionally under the deny-by-default Phase 11A.0F model.
+> - Managed backup/PITR availability, retention and restore SLA for the current Supabase plan were **not proven by the 07/10/2026 F1 audit**. They must be verified from current account/plan evidence before an incident procedure relies on them.
+> - Historical DR drill results remain historical evidence; they are not proof that a current managed Production backup exists at this moment.
 
 ---
 
 ## 1. NGUỒN SAO LƯU (BACKUP SOURCE)
 
-1. **Supabase Automated Daily Snapshots**:
-   - Sao lưu vật lý tự động mức block-level do Supabase quản lý tại hạ tầng AWS/GCP data center.
-   - Lưu trữ tại Amazon S3 / Google Cloud Storage độc lập với cluster cơ sở dữ liệu chính.
-2. **Point-in-Time Recovery (PITR) WAL Archives**:
-   - Ghi nhận nhật ký Write-Ahead Log (WAL) liên tục mỗi 2 phút.
-   - Cho phép khôi phục cơ sở dữ liệu về bất kỳ giây (second-level) nào trong vòng 7 đến 30 ngày qua.
-3. **Application Logical Snapshots (`scripts/safe-data-migration.ts` / `scripts/dr-restore-drill.ts`)**:
-   - Xuất dữ liệu logic định dạng JSON/SQL dump cho toàn bộ 23 bảng nghiệp vụ trước mỗi đợt nâng cấp schema hoặc di trú dữ liệu.
-   - Lưu trữ tại thư mục an toàn `backups/` và kho lưu trữ mã hóa ngoài trang (Off-site Encrypted Cold Storage).
+1. **Supabase managed backups / PITR — PLAN-DEPENDENT / CURRENT CAPABILITY UNVERIFIED**:
+   - Before declaring an incident recovery point, verify the current Production project plan, enabled backup features, available restore points and retention in the Supabase account.
+   - Do **not** assume a fixed snapshot schedule, WAL interval, retention window, storage backend or second-level restore capability from this repository alone.
+2. **Application logical recovery tooling — SOURCE VERIFIED, BACKUP ARTIFACT NOT IMPLIED**:
+   - Repository tools `scripts/safe-data-migration.ts` and `scripts/dr-restore-drill.ts` exist for controlled logical snapshot/drill workflows.
+   - Tool existence does not prove that a current Production logical snapshot or off-site encrypted copy exists. Verify the exact artifact, timestamp, checksum, scope and storage location before relying on it.
+3. **Pre-migration backup requirement**:
+   - Any future Production migration gate must explicitly identify the authorized backup/restore path before mutation.
+   - Never represent an unverified or historical backup as a current recovery point.
 
 ---
 
 ## 2. TẦN SUẤT SAO LƯU (BACKUP FREQUENCY) & RPO / RTO
 
-| Loại Sao Lưu | Tần Suất Thực Hiện | Thời Gian Lưu Trữ | RPO (Mức Mất Mát Dữ Liệu Tối Đa) | RTO (Thời Gian Phục Hồi Mục Tiêu) |
-| :--- | :--- | :--- | :--- | :--- |
-| **WAL Continuous Archiving (PITR)** | Liên tục (mỗi 2 phút) | 7 ngày | **$\le 2$ phút** | **$< 15$ phút** |
-| **Daily Full Snapshot** | 02:00 UTC hàng ngày | 30 ngày | **$\le 24$ giờ** | **$< 20$ phút** |
-| **Logical Schema Pre-Deploy Snapshot** | Trước mỗi lần migrate | Vĩnh viễn | **0 phút** (Zero loss) | **$< 10$ phút** |
+The repository does not establish the current Supabase plan's managed-backup frequency, retention, RPO or RTO. Treat these values as **UNVERIFIED / PLAN-DEPENDENT** until account-level evidence is collected.
+
+| Recovery mechanism | Current evidence | Frequency / retention | RPO / RTO commitment |
+| :--- | :--- | :--- | :--- |
+| **Supabase managed snapshots** | Capability not proven by F1 toolset | **UNVERIFIED** | **NO CURRENT COMMITMENT** |
+| **Supabase PITR / WAL restore** | Capability not proven by F1 toolset | **UNVERIFIED** | **NO CURRENT COMMITMENT** |
+| **Logical snapshot / DR drill tooling** | Repository scripts verified to exist | Operator-triggered; no automatic schedule proven | Historical drill evidence only; no current Production SLA |
+
+Before customer handoff, operational ownership must know where current backup capability is verified and who is authorized to initiate a restore.
 
 ---
 
 ## 3. QUY TRÌNH PHỤC HỒI (RESTORE PROCEDURE)
 
-### Bước 1: Kích hoạt Tình huống Thảm họa & Thiết lập Chế độ Bảo trì (Maintenance Mode)
-1. Chuyển đổi trạng thái ứng dụng trên Vercel sang trang bảo trì:
-   ```bash
-   vercel env add NEXT_PUBLIC_MAINTENANCE_MODE true production
-   ```
-2. Ngắt các kết nối đang hoạt động tới cơ sở dữ liệu để ngăn ngừa ghi dữ liệu không nhất quán.
+> [!CAUTION]
+> Every action in this section is a Production mutation or recovery action and requires explicit Human Owner / incident-authority approval. Verify the current Supabase plan and Vercel topology before execution.
 
-### Bước 2: Khôi phục Cơ sở Dữ liệu từ Supabase Dashboard / CLI
-1. Đăng nhập Supabase Console $\to$ Chọn Dự án $\to$ **Database** $\to$ **Backups**.
-2. Chọn mốc thời gian PITR gần nhất trước thời điểm xảy ra sự cố (ví dụ: `2026-09-06 15:45:00 UTC`).
-3. Nhấp chọn **Restore to a New Project** hoặc tạo một bản sao khôi phục cô lập.
-4. *Lệnh CLI tương đương*:
-   ```bash
-   supabase db restore --timestamp "2026-09-06T15:45:00Z" --target-db-url "$STAGING_RESTORE_DB_URL"
-   ```
+### Bước 1: Declare incident and freeze writes
+1. Identify the canonical Production Vercel project and the exact Production database project.
+2. Choose an approved maintenance/write-freeze mechanism. The repository does not by itself prove that a specific `NEXT_PUBLIC_MAINTENANCE_MODE` flag is currently implemented end-to-end.
+3. Record the incident time, current `main` SHA, deployment ID, DB project ref and last known-good business checkpoint.
 
-### Bước 3: Hoặc Khôi phục từ Logical JSON Snapshot (Đối với Sandbox / DR Drill)
-1. Sử dụng công cụ phục hồi:
-   ```bash
-   npx tsx scripts/dr-restore-drill.ts
-   ```
-2. Kịch bản sẽ rehydrate toàn bộ 17 thực thể cốt lõi vào database đích cô lập và tiến hành kiểm tra tính toàn vẹn.
+### Bước 2: Verify an actual recovery point
+1. In the current Supabase account, verify whether managed snapshots and/or PITR are enabled for the Production project and enumerate the actual available restore points.
+2. If a logical snapshot is proposed instead, verify its file identity, timestamp, checksum, schema compatibility and storage location.
+3. If no verified recovery point exists, **STOP**. Do not invent one from historical documentation.
+
+### Bước 3: Restore only to an isolated target
+1. Prefer a new restored project/database or another isolated recovery target supported by the current platform.
+2. Do not overwrite the running Production database.
+3. Apply only the migration/rehydration steps required for the chosen recovery point and verify each mutation.
+
+### Bước 4: Validate before any traffic switch
+Run the checklist in Section 8 against the isolated restored target. Only after all required checks pass may a separately approved gate rebind Production application configuration to the restored target.
 
 ---
 
@@ -75,136 +86,101 @@
 
 ## 5. BIẾN MÔI TRƯỜNG BẮT BUỘC (REQUIRED ENVIRONMENT VARIABLES)
 
-Khi trỏ ứng dụng sang cơ sở dữ liệu được phục hồi, các biến môi trường sau phải được cung cấp chính xác:
+For the current Vercel Production contract, the verified canonical variable names are:
 
-```env
-# 1. Database Connectivity (Restored Instance)
-DATABASE_URL="postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=15"
-DIRECT_URL="postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres"
+**Required (14):**
+`APP_ENV`, `DEMO_MODE`, `DATABASE_URL`, `AUTH_SECRET`, `AUTH_COOKIE_NAME`, `NEXT_PUBLIC_APP_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `STORAGE_PROVIDER`, `EMAIL_PROVIDER`, `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL`, `CRON_SECRET`, `QR_SECRET`.
 
-# 2. Application & Security Secrets
-NODE_ENV="production"
-DEMO_MODE="false"
-AUTH_SECRET="[MINIMUM_32_CHARACTERS_CRYPTOGRAPHIC_KEY]"
-AUTH_COOKIE_NAME="antigravity_session"
-AUTH_TOKEN_EXPIRATION="7d"
+**Optional but currently present (2):**
+`AUTH_TOKEN_EXPIRATION`, `LOG_LEVEL`.
 
-# 3. Storage & Infrastructure
-NEXT_PUBLIC_APP_URL="https://hrms.yourdomain.vn"
-DEFAULT_GEOFENCE_RADIUS_METERS=100
-LOG_LEVEL="info"
-```
+Rules:
+- Never print or copy secret values into this runbook.
+- `SUPABASE_URL` and `DATABASE_URL` must point to the same explicitly approved restored Production target after a recovery switch.
+- `EMAIL_PROVIDER` currently resolves to SendGrid in Production; the Resend implementation does not make `RESEND_*` variables mandatory when SendGrid remains selected.
+- `DIRECT_URL` is not part of the verified current canonical Production contract and must not be assumed required without fresh source/env evidence.
+- Any Production env rebind requires a separately approved mutation gate and post-change verification.
 
 ---
 
 ## 6. QUY TRÌNH DI TRÚ DATABASE SAU KHÔI PHỤC (MIGRATION PROCEDURE)
 
-Nếu bản backup được tạo trước một bản cập nhật schema gần đây:
+Current Production baseline at 07/10/2026:
+- applied Prisma migrations = `5`;
+- latest = `20261005000000_phase_11a_0f_public_data_api_hardening`.
 
-1. Kiểm tra trạng thái migration của database vừa restore:
-   ```bash
-   npx prisma migrate status
-   ```
-2. Thực thi áp dụng các migration an toàn đang chờ (Forward-only, Non-destructive):
-   ```bash
-   npx prisma migrate deploy
-   ```
-3. Sinh lại Prisma Client tương thích:
-   ```bash
-   npx prisma generate
-   ```
+For an isolated restored target:
+1. Run a read-only migration status check against the exact restored database.
+2. Compare the restored migration history with the release revision intended for recovery.
+3. If migrations are pending, obtain explicit approval before `prisma migrate deploy`; migration SQL can mutate schema and data.
+4. Re-run schema/RLS/index and application runtime verification after migration.
+5. Never delete or rewrite `_prisma_migrations` records merely to make status appear clean.
 
 ---
 
 ## 7. PHỤC HỒI ỨNG DỤNG (APPLICATION RECOVERY)
 
-1. **Cập nhật Vercel Environment Variables**:
-   ```bash
-   vercel env add DATABASE_URL "$RESTORED_DATABASE_URL" production
-   vercel env add DIRECT_URL "$RESTORED_DIRECT_URL" production
-   ```
-2. **Kích hoạt Re-deploy Không Downtime**:
-   ```bash
-   vercel --prod
-   ```
-3. **Tắt Chế độ Bảo trì (Disable Maintenance Mode)**:
-   ```bash
-   vercel env rm NEXT_PUBLIC_MAINTENANCE_MODE production
-   vercel --prod
-   ```
+1. Confirm the canonical Production Vercel project before changing any environment or deployment pointer. The repository currently fans out `main` to four Vercel projects; do not assume a one-project topology.
+2. Rebind only the approved canonical Production project to the verified restored database/storage target.
+3. Trigger deployment only under a separately approved recovery gate.
+4. Verify the exact release SHA, deployment state, public smoke, authentication boundary, DB connectivity/migration state and runtime error window.
+5. Do not use a generic `vercel --prod` or environment command from this document without explicit project/team scoping and approval.
 
 ---
 
 ## 8. BẢNG KIỂM TRA TOÀN VẸN SAU KHÔI PHỤC (VERIFICATION CHECKLIST)
 
-Trước khi mở lại quyền truy cập cho người dùng cuối, kỹ sư trực ca phải thực hiện và tick chọn toàn bộ danh mục sau:
+This is a per-incident checklist. Items are intentionally unchecked until verified on the actual restored target.
 
-- [x] **Schema Integrity**: Toàn bộ 23 bảng, 8 enums, 38 foreign keys tồn tại, không có bảng bị thiếu hoặc lỗi kiểu dữ liệu.
-- [x] **Data Counts Matching**: Số lượng bản ghi khớp 100% với bản backup (Organizations, Users, Employees, Attendance, Leave, Payroll, Payslips, Documents, AuditLogs).
-- [x] **Tenant Isolation Test ($A \leftrightarrow B$)**:
-  - Đăng nhập quyền Owner Tenant A: Truy cập nhân viên Tenant B $\to$ **404 Not Found (DENIED)**.
-  - Tải phiếu lương Tenant B $\to$ **DENIED**.
-- [x] **Authentication Flow**:
-  - Đăng nhập Super Admin $\to$ Thành công.
-  - Đăng nhập Tenant Owner (trạng thái `ACTIVE`) $\to$ Thành công.
-  - Đăng nhập tài khoản thuộc Tenant `SUSPENDED` hoặc `PENDING` $\to$ **403 Forbidden**.
-- [x] **Payroll Mathematical Invariance**:
-  - Chạy thử nghiệm bảng lương baseline 10,000,000 VND gross.
-  - Kết quả: Bảo hiểm 1,050,000 VND, Thuế TNCN 0 VND, Thực lĩnh 8,950,000 VND (Khớp từng bit với kết quả trước backup).
-- [x] **Audit Log Appendability**:
-  - Bản ghi nhật ký lịch sử còn nguyên vẹn.
-  - Thao tác thử nghiệm tạo mới một bản ghi audit log ghi thành công.
-- [x] **File & Asset Storage**:
-  - Metadata tài liệu trong DB hợp lệ.
-  - Đường dẫn tệp đính kèm trỏ chính xác vào S3/Supabase Storage bucket, phân quyền xem tệp kiểm tra đúng sở hữu tenant.
+- [ ] **Release identity**: expected Git SHA, application image/deployment and environment target are exact.
+- [ ] **Schema integrity**: compare against the intended release migration history. For the 07/10/2026 baseline: 5 applied migrations, 34 public base tables, 73 foreign keys, 2 public enums.
+- [ ] **RLS/security baseline**: for the 07/10/2026 baseline, 34/34 public ordinary tables have RLS enabled; zero public policies is intentional under the deny-by-default model.
+- [ ] **Data counts / invariants**: compare organization, membership, employee, attendance, leave, payroll, audit and other required business counts against the chosen verified recovery point.
+- [ ] **Tenant isolation**: cross-tenant employee/attendance/leave/payroll/document access is denied as expected.
+- [ ] **Authentication / authorization**: verify representative active/inactive tenant and role boundaries without exposing credentials.
+- [ ] **Payroll invariance**: run the approved statutory regression appropriate to the release and tenant configuration.
+- [ ] **Audit logging**: confirm historical audit data is intact and new authorized activity can append.
+- [ ] **Storage**: verify metadata/object consistency, ownership and signed/private access for required buckets.
+- [ ] **Public/runtime smoke**: `/`, `/login`, `/api/health` and protected unauthenticated API behavior are correct.
+- [ ] **Runtime observability**: no unexpected error cluster in the post-recovery verification window.
+
+Do not switch customer traffic until every required item for the incident is evidenced and approved.
 
 ---
 
 ## 9. QUY TRÌNH QUAY LUI DỰ PHÒNG (ROLLBACK PROCEDURE)
 
-Nếu trong quá trình nghiệm thu database được phục hồi xuất hiện lỗi không thể khắc phục:
-
-1. **Giữ nguyên Chế độ Bảo trì** trên Vercel để tránh ghi nhận giao dịch hỏng.
-2. **Hủy bỏ kết nối** tới database phục hồi lỗi:
-   ```bash
-   # Ngắt kết nối database lỗi
-   vercel env add DATABASE_URL "$PREVIOUS_STABLE_DATABASE_URL" production
-   ```
-3. **Chọn điểm phục hồi thay thế (Alternative PITR Target)**:
-   - Lùi thời điểm phục hồi về thêm 1 giờ hoặc 1 ngày trước sự cố.
-   - Hoặc sử dụng bản Snapshot Full hàng ngày gần nhất.
-4. Lặp lại Quy trình từ Bước 2 (Mục 3).
+If the isolated restored target fails verification:
+1. Keep customer traffic on the last known-good Production target if it is still safe; otherwise keep the approved write-freeze/maintenance state.
+2. Do not rebind Production to a failed recovery target.
+3. Select another **verified** recovery point or correct the isolated restore under a separately approved mutation gate.
+4. Application rollback and database rollback are separate decisions; never assume one reverses the other.
+5. Record the failed recovery evidence and exact state before another attempt.
 
 ---
 
 ## 10. THỜI GIAN PHỤC HỒI ƯỚC TÍNH (ESTIMATED RECOVERY TIME)
 
-- **Phát hiện sự cố & Bật trang bảo trì**: $2 - 3\text{ phút}$.
-- **Khởi tạo instance Supabase mới từ PITR / Snapshot**: $8 - 12\text{ phút}$.
-- **Chạy kịch bản kiểm tra toàn vẹn tự động (`scripts/dr-restore-drill.ts`)**: $1\text{ phút}$.
-- **Cập nhật biến môi trường Vercel & Deploy ứng dụng**: $3\text{ phút}$.
-- **Tổng thời gian ngưng trệ ước tính (Total RTO)**: **Khoảng $15 - 20\text{ phút}$**.
+- **Current managed-backup/PITR RPO/RTO commitment**: `UNVERIFIED / PLAN-DEPENDENT`.
+- Historical sandbox/logical DR drill timings may be useful engineering evidence, but they are **not** a contractual Production RTO.
+- Do not promise a 15–20 minute Production recovery window until the current Supabase backup plan, restore workflow, data volume, storage recovery and traffic-switch procedure have been measured end-to-end.
 
 ---
 
 ## 11. CÁC GIỚI HẠN PHỤC HỒI DỮ LIỆU (DATA RECOVERY LIMITATIONS)
 
-1. **Độ trễ ghi WAL (WAL Lag Window)**:
-   - Dữ liệu phát sinh trong vòng 1-2 phút trước thời điểm thảm họa vật lý cấp trung tâm dữ liệu có thể cần đối soát thủ công với hóa đơn/chứng từ ngoài đời thực.
-2. **Object Storage Synchronization (Tệp tải lên)**:
-   - Tệp hồ sơ đính kèm tải lên trong thời điểm sự cố có thể cần kiểm tra chéo giữa bảng `EmployeeDocument` và Supabase Storage Bucket. Nếu metadata tồn tại mà tệp vật lý bị gián đoạn truyền tải, hệ thống sẽ đánh dấu `UPLOAD_INCOMPLETE` để người dùng tải lại tệp.
-3. **Third-Party Email / Notification Delivery**:
-   - Các email thông báo đã gửi qua SMTP/SendGrid trong khoảng thời gian sự cố sẽ không được gửi lại tự động để tránh spam người nhận.
+1. **Managed backup/PITR boundaries**: data-loss window and restore granularity depend on the current Supabase project plan and actual available restore point; verify them during incident response.
+2. **Logical snapshots**: recovery completeness depends on the exact snapshot scope, timestamp, checksum and compatibility with the target release.
+3. **Object storage**: database restore and object-storage recovery are separate concerns; verify object existence, metadata linkage and tenant ownership independently.
+4. **Third-party email/notification delivery**: database restoration does not automatically replay external deliveries; avoid duplicate sends unless a separately approved reconciliation procedure requires them.
+5. **Secrets and credentials**: restored data does not replace the need to validate current application secrets, provider credentials and rotation state.
 
 ---
 
 ## 12. PHÊ DUYỆT & KẾT LUẬN DIỄN TẬP (DRILL VERDICT)
 
-- **Kết quả diễn tập thực tế**:
-  - **BACKUP VERIFICATION**: **PASS**
-  - **RESTORE EXECUTION**: **PASS**
-  - **DATABASE INTEGRITY**: **PASS**
-  - **DATA LOSS RATE**: **0% (ZERO RECORD LOSS)**
-  - **TENANT ISOLATION**: **PASS**
-  - **PAYROLL INVARIANCE**: **PASS**
-- **Trạng thái**: **APPROVED FOR PRODUCTION RUNBOOK**.
+- Historical DR drill evidence in this repository remains useful evidence that the logical recovery tooling and verification approach have been exercised.
+- That historical verdict **does not prove** that a current managed Supabase backup/PITR restore point exists, nor does it establish the current plan's retention or Production RPO/RTO.
+- **Current runbook status (07/10/2026)**: `RECONCILED / OPERATIONALLY CONDITIONAL`.
+- Before relying on managed backup/PITR during customer operations, obtain fresh account-level evidence for capability, retention, available restore points and ownership.
+- Any real Production restore, env rebind, deploy or traffic switch remains subject to explicit Human Owner / incident-authority approval.
