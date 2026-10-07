@@ -12,8 +12,10 @@
 - **Current Production/main SHA**: `cfde65e34a1ff57d0ad1bb53cb80dc226ad21c51`.
 - **Production release / post-deploy verification**: `PASS / VERIFIED`.
 - **Current lifecycle stage**: `FINAL CUSTOMER HANDOVER CLOSURE`.
-- **Current gate**: `R5D1F-F2A — FINAL HANDOVER DOCUMENTATION RECONCILIATION`.
-- **CUSTOMER_HANDOVER_READY**: `NO / PENDING` until branch-protection disposition, Vercel four-project fanout disposition, final documentation publication and a final read-only handoff audit pass.
+- **Current gate**: `R5D1F-F3A — FINAL HANDOVER DOCUMENTATION CLOSURE`.
+- **CUSTOMER_HANDOVER_READY**: `NO / PENDING FINAL PUBLICATION + FINAL READ-ONLY AUDIT`. Branch protection and legacy Vercel fanout dispositions are resolved; dedicated Staging branch filtering is config-applied/verified, with `main → SKIP` runtime evidence deferred to the next natural `main` push.
+- **Git governance**: `main` and `staging` are protected; `main` requires `Quality Gate`.
+- **Vercel governance**: only `antigravity-hrms` and `antigravity-hrms-staging` remain Git-linked; `ri4s` and `q64j` are disconnected.
 - **New product-development phase**: none selected or approved.
 - Historical acceptance criteria and phase descriptions below must not be reinterpreted as fresh 07/10/2026 verification evidence.
 

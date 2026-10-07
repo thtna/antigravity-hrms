@@ -40,14 +40,17 @@ This is the authoritative current-state snapshot for operational decisions after
 - **Production public DB topology**: `34` base tables, `73` foreign keys, `2` public enums.
 - **Production RLS**: `34 / 34` public ordinary tables enabled; public RLS policy count = `0` intentionally under the deny-by-default Phase 11A.0F design.
 - **Open GitHub PRs/issues at F1 audit**: `0 / 0`.
-- **Branch protection / repository rulesets**: none observed for `main` or `staging`; this remains a handoff governance item.
-- **Vercel topology**: the same GitHub repository is linked to four projects that receive Production deployments from `main`; canonical ownership and disposition remain a handoff governance item.
+- **Branch protection**: `main` and `staging` are both protected by classic branch protection rules. `main` requires PR flow plus the `Quality Gate` status check and up-to-date branch semantics; required approvals remain `0`. `staging` remains direct-push capable with no required status checks, while force-push and branch deletion are not allowed. Repository rulesets remain `0` because protection is implemented with classic rules.
+- **Vercel topology after F2C**: exactly `2` projects remain Git-linked to `thtna/antigravity-hrms`: canonical Production `antigravity-hrms` and dedicated Staging `antigravity-hrms-staging`. Legacy projects `antigravity-hrms-ri4s` and `antigravity-hrms-q64j` remain preserved for history/config but are Git-disconnected and no longer auto-deploy from `main` or `staging`.
 - **Known accepted product limitation**: `NIGHT_OT_END_TO_END = BLOCKED_BY_DATA_MODEL / ACCEPTED LIMITATION`.
 - **PROJECT_SPEC.md authority status**: `MISSING / UNPROVEN`; do not auto-create a substitute.
 - **R5D1F-F1 final handoff readiness audit**: `BLOCKED / ACTION REQUIRED` because handoff/roadmap/DR documentation was stale and branch/Vercel governance remained unresolved.
-- **R5D1F-F2A**: documentation-only reconciliation on `staging`; no application code, DB, env, branch-protection or Vercel-configuration mutation is authorized by this gate.
+- **R5D1F-F2A**: `PASS / VERIFIED`; documentation-only reconciliation commit `46fbea62e6d1d21d1ffb6c252ea3e048bc98aaf9`, CI #81 = `SUCCESS`, staging Preview `dpl_3ZugwJnX3QdLvqtVgL7CSxLJQeqV` = `READY`.
+- **R5D1F-F2B / F2B-M**: `PASS / VERIFIED`; minimal branch protection is applied to `main` and `staging`.
+- **R5D1F-F2C-M1**: `PASS / VERIFIED`; `ri4s` and `q64j` are Git-disconnected without deleting projects or changing their historical deployments.
+- **R5D1F-F2C-M2**: `CONFIG APPLIED / VERIFIED` on dedicated staging project. Project-level Ignored Build Step allows branch `staging` to build and ignores other Git branches. Runtime evidence that a future natural `main` push is skipped is intentionally deferred; no synthetic `main` mutation is created solely for testing.
 - **CUSTOMER_HANDOFF_READY**: `NO / PENDING`.
-- **Handoff closure conditions**: documentation reconciliation must be published through an approved path, branch-protection disposition and four-project Vercel fanout disposition must be explicitly resolved or accepted, and a final read-only audit must pass.
+- **Handoff closure conditions**: publish this final documentation closure to `main` through an approved PR/CI path, then run one final read-only handoff audit. Branch-protection disposition and legacy Vercel fanout disposition are resolved. F2C-M2 `main → SKIP` runtime proof remains deferred to the next natural `main` push and must not be manufactured with a synthetic release mutation.
 - **Production safety invariant**: any future Production DB write, migration, seed, env/WAF change, deploy, rollback, account/password mutation or promotion requires separate explicit Human Owner approval.
 
 ### Historical Production Release Closure Snapshot (06/10/2026) — Phase 12F-R1
@@ -557,55 +560,53 @@ Toàn bộ các phase dưới đây đã được kiểm chứng bằng thực n
 
 ## 3. TRẠNG THÁI RELEASE HIỆN HÀNH (CURRENT RELEASE STATE)
 
-- **Current Production release**: `PASS / VERIFIED`.
+- **Production release**: `PASS / VERIFIED`.
 - **Current application/product release PR**: PR #11 = `MERGED / CLOSED`.
 - **Current Production/main SHA**: `cfde65e34a1ff57d0ad1bb53cb80dc226ad21c51`.
 - **Current Production/main tree**: `92587c732cac544027cd992f82dc8cdec397e1db`.
-- **Pre-F2A staging SHA/tree**: `65ee6a366230d8a878f73f541d0e9a3430e3a09f` / `92587c732cac544027cd992f82dc8cdec397e1db`.
-- **Pre-F2A application/source drift**: `NO`.
-- **Current Production CI**: CI #80 = `SUCCESS`, run `37630006306`.
-- **Current Docker publish**: Docker #17 attempt 2 = `SUCCESS`, run `37630034078`.
-- **Canonical Vercel Production deployment**: `dpl_EVp5PtSphUJ5GQvZLwPnhh8tqSXi` = `READY`.
-- **Canonical Production domain**: `antigravity-hrms-six.vercel.app`.
-- **Four-project Vercel Production fanout**: `4 / 4 READY` at the exact Production SHA; topology disposition remains pending for handoff governance.
-- **Current Production smoke**: `/`, `/login`, `/api/health` = HTTP 200; unauthenticated dashboard API = HTTP 401.
+- **Current staging documentation SHA before F3A**: `46fbea62e6d1d21d1ffb6c252ea3e048bc98aaf9`.
+- **Current Production CI**: CI #80 = `SUCCESS`.
+- **Current Docker publish**: Docker #17 attempt 2 = `SUCCESS`.
+- **Canonical Production Vercel project/domain**: `antigravity-hrms` / `antigravity-hrms-six.vercel.app`.
+- **Dedicated Staging Vercel project/domain**: `antigravity-hrms-staging` / `antigravity-hrms-jped.vercel.app`.
+- **Current Git-linked Vercel project count**: `2`.
+- **Legacy Vercel projects**: `antigravity-hrms-ri4s` and `antigravity-hrms-q64j` remain preserved but Git-disconnected.
+- **Dedicated staging branch policy**: project-level Ignored Build Step continues only when `VERCEL_GIT_COMMIT_REF=staging`; other Git branches are ignored. Runtime proof for the next natural `main` push remains pending by design.
+- **Branch protection**:
+  - `main` = protected; PR flow required; `Quality Gate` required; up-to-date branch semantics enabled; approvals = 0.
+  - `staging` = protected; direct normal pushes allowed; no required checks; force-push/deletion not allowed.
 - **Production DB**: `ACTIVE_HEALTHY`, PostgreSQL `17.6`, 5 applied migrations, 34 public base tables, 73 foreign keys, 2 public enums, 34/34 public ordinary tables with RLS enabled.
-- **Phase 11A.0F deny-by-default model**: 0 public RLS policies is intentional; direct anon/authenticated table privileges were revoked by the hardening migration.
 - **Known accepted limitation**: `NIGHT_OT_END_TO_END = BLOCKED_BY_DATA_MODEL / ACCEPTED LIMITATION`.
 - **PROJECT_SPEC.md authority status**: `MISSING / UNPROVEN`; do not auto-create a substitute.
-- **Residual local untracked operator/evidence artifacts**: last verified count `56`; preserve untouched unless separately approved.
-- **R5D1F-F1**: `BLOCKED / ACTION REQUIRED` for stale closure documentation plus unresolved branch-protection and Vercel-topology governance.
-- **R5D1F-F2A**: approved documentation-only reconciliation on `staging`.
-- **CUSTOMER_HANDOFF_READY**: `NO / PENDING`.
-- **Next product/application mutation approved**: `NONE`.
+- **CUSTOMER_HANDOFF_READY**: `NO / PENDING FINAL PUBLICATION + FINAL READ-ONLY AUDIT`.
+- **New product/application mutation approved**: `NONE`.
 
 ---
 
 ## 4. RÀO CẢN VÀ ĐIỀU KIỆN TIẾP TỤC (CURRENT BLOCKERS)
 
-- **Production release blocker**: `NONE`; release and post-deploy smoke are `PASS / VERIFIED`.
-- **Customer handoff blocker — documentation**: this F2A reconciliation must be committed/verified on `staging` and later published to `main` through an explicitly approved path.
-- **Customer handoff governance item — GitHub**: `main` and `staging` currently have no branch protection/ruleset. Resolve or explicitly accept this risk before handoff.
-- **Customer handoff governance item — Vercel**: four projects linked to the same repository receive Production deployments from `main`. Define the canonical project and disposition of the three non-canonical Production fanout projects, or explicitly accept the topology.
-- **DR evidence boundary**: current Supabase managed backup/PITR plan, retention and restore SLA were not proven by the F1 toolset. Do not represent historical backup/PITR values as current guarantees until account-level evidence is obtained.
-- **Known accepted product limitation**: `NIGHT_OT_END_TO_END = BLOCKED_BY_DATA_MODEL / ACCEPTED LIMITATION`; do not represent it as end-to-end implemented.
-- **Supabase security advisor**: `RLS enabled/no policy` is INFO-level and expected under the Phase 11A.0F deny-by-default architecture.
-- **Supabase performance advisor**: unindexed foreign keys and currently unused indexes are INFO-level technical debt, not a release blocker; any index mutation requires a separate gate.
-- **PROJECT_SPEC.md**: `MISSING / UNPROVEN`; do not create or promote a substitute without a separate governance decision.
-- **Operator/helper files**: residual local untracked files remain outside approved scope and must not be staged or deleted automatically.
-- **Production guard**: no further Production DB write, migration, seed, env/WAF change, deploy, rollback, account/password mutation or promotion is authorized by F2A.
+- **Production release blocker**: `NONE`.
+- **Branch-protection governance blocker**: `RESOLVED` by F2B/F2B-M.
+- **Legacy four-project Vercel fanout blocker**: `RESOLVED` by F2C-M1; only canonical Production and dedicated Staging remain Git-linked.
+- **Dedicated Staging normalization**: `CONFIG APPLIED / VERIFIED`; branch filter is configured so only `staging` proceeds to build. Behavioral evidence for a future natural `main` push is deferred and is not a reason to create an artificial Production mutation.
+- **Customer handoff blocker — documentation publication**: this F3A closure must be committed/verified on `staging` and then published to `main` through a separately approved PR/CI path.
+- **Customer handoff blocker — final audit**: after publication, run a fresh read-only audit before changing readiness to `YES`.
+- **DR evidence boundary**: current managed Supabase backup/PITR capability, retention and restore SLA remain `UNVERIFIED / PLAN-DEPENDENT`.
+- **Known accepted product limitation**: `NIGHT_OT_END_TO_END = BLOCKED_BY_DATA_MODEL / ACCEPTED LIMITATION`.
+- **Supabase INFO findings**: deny-by-default RLS no-policy advisories and performance-index advisories remain non-release-blocking technical debt.
+- **PROJECT_SPEC.md**: `MISSING / UNPROVEN`; do not create a substitute without separate governance approval.
+- **Production guard**: no further Production DB write, migration, seed, env/WAF change, deploy, rollback, account/password mutation or promotion is authorized by F3A.
 
 ---
 
 ## 5. CÁC GIAI ĐOẠN TIẾP THEO (NEXT PHASES ROADMAP)
 
-1. **R5D1F-F2A — Final Handover Documentation Reconciliation**: update exactly `docs/PROJECT_STATE_HANDOFF.md`, `docs/IMPLEMENTATION_ROADMAP.md`, and `docs/DISASTER_RECOVERY_RUNBOOK.md` on `staging`; verify the resulting commit and CI/Preview side effects.
-2. **R5D1F-F2B — Branch Protection Disposition**: separately decide whether to configure protection/rulesets for `main`/`staging` or explicitly accept the governance risk. Any mutation requires a new Human Owner approval.
-3. **R5D1F-F2C — Vercel Four-Project Fanout Disposition**: separately define the canonical project and whether the three non-canonical Production fanout projects remain, are reconfigured, or are retired. Any Vercel mutation requires a new Human Owner approval.
-4. **Final handoff publication**: after F2B/F2C decisions are known, reconcile any decision-dependent documentation and publish the final handoff to `main` through an approved PR/CI path; no direct `main` push and no force-push.
-5. **Final read-only handoff audit**: verify Git, CI, Vercel, Production DB baseline, documentation consistency, accepted limitation disclosures and governance disposition.
-6. **CUSTOMER_HANDOFF_READY decision**: set readiness to `YES` only if the final read-only audit passes with no unresolved handoff blocker.
-7. **New product-development phase**: none is selected or approved; choose one only after handoff closure or explicit Human Owner direction.
+1. **R5D1F-F3A — Final Handover Documentation Closure**: commit exactly the approved documentation closure on `staging`; verify CI and staging Preview side effects.
+2. **Final documentation publication**: create an approved documentation-only PR from `staging` to `main`, verify exact changed files and PR Quality Gate, then merge only under a separate Human Owner approval.
+3. **Final read-only customer handoff audit**: verify Git/branch protection, CI, two-project Vercel topology, canonical Production runtime/DB baseline, documentation consistency, accepted limitations and unresolved operational evidence boundaries.
+4. **CUSTOMER_HANDOFF_READY decision**: set readiness to `YES` only if final publication is on `main` and the final read-only audit passes.
+5. **Deferred natural verification**: on the next legitimate `main` push, verify the dedicated staging project's Ignored Build Step records the `main` deployment as skipped/ignored; do not create a synthetic Production change solely to generate this evidence.
+6. **New product-development phase**: none selected or approved.
 
 ---
 

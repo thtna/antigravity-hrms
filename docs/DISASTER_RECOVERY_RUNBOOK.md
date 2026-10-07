@@ -2,7 +2,7 @@
 ## ANTIGRAVITY HRMS — MULTI-TENANT ENTERPRISE PLATFORM
 
 - **Tài liệu**: Disaster Recovery Operating Runbook & Restoration Protocol
-- **Phiên bản**: 1.1 (Reconciled 07/10/2026)
+- **Phiên bản**: 1.2 (Handover Topology Closure 07/10/2026)
 - **Hệ cơ sở dữ liệu hiện hành**: Supabase PostgreSQL 17.6 (Production engine verified read-only 07/10/2026)
 - **Kiến trúc ứng dụng**: Next.js 16 (App Router) on Vercel serverless infrastructure; canonical Production project = `antigravity-hrms`
 - **Phạm vi bảo vệ**: Tối đa 5 Doanh nghiệp Độc lập (Multi-Tenant SaaS Isolation)
@@ -120,11 +120,12 @@ For an isolated restored target:
 
 ## 7. PHỤC HỒI ỨNG DỤNG (APPLICATION RECOVERY)
 
-1. Confirm the canonical Production Vercel project before changing any environment or deployment pointer. The repository currently fans out `main` to four Vercel projects; do not assume a one-project topology.
-2. Rebind only the approved canonical Production project to the verified restored database/storage target.
-3. Trigger deployment only under a separately approved recovery gate.
-4. Verify the exact release SHA, deployment state, public smoke, authentication boundary, DB connectivity/migration state and runtime error window.
-5. Do not use a generic `vercel --prod` or environment command from this document without explicit project/team scoping and approval.
+1. Confirm the canonical Production Vercel project before changing any environment or deployment pointer. Current Git-linked topology is exactly two projects: canonical Production `antigravity-hrms` and dedicated Staging `antigravity-hrms-staging`. Legacy `ri4s` and `q64j` projects are retained but Git-disconnected.
+2. Rebind only the approved canonical Production project to the verified restored database/storage target. Do not use the dedicated Staging project as a Production recovery target unless a separate incident gate explicitly changes topology.
+3. Dedicated Staging currently uses a project-level Ignored Build Step that proceeds only for Git branch `staging`; other Git branches are configured to be ignored. Runtime evidence for `main → SKIP` is deferred to the next natural `main` push.
+4. Trigger deployment only under a separately approved recovery gate.
+5. Verify the exact release SHA, deployment state, public smoke, authentication boundary, DB connectivity/migration state and runtime error window.
+6. Do not use a generic `vercel --prod` or environment command from this document without explicit project/team scoping and approval.
 
 ---
 
