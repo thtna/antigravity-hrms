@@ -46,19 +46,32 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
         resetUrl,
       });
 
-      await EmailService.sendEmail({
+      const delivery = await EmailService.sendEmail({
         to: user.email,
         subject: 'Khôi Phục Mật Khẩu — Antigravity HRMS',
         html,
         text: `Vui lòng truy cập liên kết sau để đặt lại mật khẩu của bạn (có hiệu lực trong 15 phút): ${resetUrl}`,
       });
 
-      logger.info('Password reset email dispatched for user', { userId: user.id });
+      if (delivery.success) {
+        logger.info('Password reset email dispatched for user', {
+          userId: user.id,
+          provider: delivery.provider,
+          messageId: delivery.messageId,
+        });
+      } else {
+        logger.error('Password reset email delivery failed', {
+          userId: user.id,
+          provider: delivery.provider,
+          error: delivery.error,
+        });
+      }
     } else {
       logger.info('Password reset requested for non-existent or inactive user', { email });
     }
 
-    // Always return success to prevent user enumeration attacks
+    // Always return success to prevent user enumeration attacks.
+    // Delivery failures are recorded server-side and must not alter the public response.
     return NextResponse.json({
       success: true,
       data: { sent: true },
