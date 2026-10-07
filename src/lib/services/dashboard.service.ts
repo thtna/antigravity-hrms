@@ -555,12 +555,6 @@ export class DashboardService {
       });
     }
 
-    // If still no department found, get the first department
-    if (!department) {
-      department = await prisma.department.findFirst({
-        where: { deletedAt: null, isActive: true, organizationId: orgId },
-      });
-    }
 
     const deptId = department?.id;
 

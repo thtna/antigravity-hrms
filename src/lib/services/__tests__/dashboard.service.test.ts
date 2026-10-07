@@ -66,6 +66,7 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
 
   const managerSession: UserSession = {
     userId: 'usr-mgr',
+    organizationId: 'org-test-dashboard',
     employeeId: 'emp-mgr',
     departmentId: 'dept-tech',
     fullName: 'Lê Hoàng Nam',
@@ -559,6 +560,15 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
 
       const result = await DashboardService.getManagerDashboard(managerSession);
 
+      expect(mockPrisma.department.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.department.findFirst).toHaveBeenCalledWith({
+        where: {
+          managerId: 'emp-mgr',
+          deletedAt: null,
+          organizationId: 'org-test-dashboard',
+        },
+      });
+
       // Verify Team Attendance
       expect(result.teamAttendance.totalMembers).toBe(3);
       expect(result.teamAttendance.presentToday).toBe(2);
@@ -593,6 +603,146 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
       expect(result.charts.kpiDistribution.exceeding).toBe(1); // 105%
       expect(result.charts.kpiDistribution.meeting).toBe(2); // 95%, 88%
       expect(result.charts.kpiDistribution.needsImprovement).toBe(0);
+    });
+
+    it('returns an empty manager dashboard when the manager has no bound department, even if the tenant has another active department', async () => {
+      const unassignedManagerSession: UserSession = {
+        userId: 'usr-unassigned-manager',
+        organizationId: 'org-test-dashboard',
+        employeeId: 'emp-unassigned-manager',
+        fullName: 'Unassigned Manager',
+        email: 'unassigned.manager@antigravity.internal',
+        roles: ['manager'],
+        permissions: [],
+        isActive: true,
+      };
+
+      mockPrisma.department.findFirst.mockImplementation(
+        async ({ where }: any) => {
+          if (
+            where?.managerId === 'emp-unassigned-manager' &&
+            where?.organizationId === 'org-test-dashboard'
+          ) {
+            return null;
+          }
+
+          // This is the department the removed broad fallback would leak.
+          if (
+            where?.deletedAt === null &&
+            where?.isActive === true &&
+            where?.organizationId === 'org-test-dashboard'
+          ) {
+            return {
+              id: 'dept-other',
+              name: 'Other Department',
+              code: 'OTHER',
+            };
+          }
+
+          return null;
+        }
+      );
+
+      const result = await DashboardService.getManagerDashboard(
+        unassignedManagerSession
+      );
+
+      expect(result.department).toBeNull();
+      expect(result.teamAttendance.totalMembers).toBe(0);
+      expect(result.approvalQueue.totalQueueCount).toBe(0);
+      expect(result.teamMembers).toHaveLength(0);
+
+      expect(mockPrisma.department.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.department.findFirst).toHaveBeenCalledWith({
+        where: {
+          managerId: 'emp-unassigned-manager',
+          deletedAt: null,
+          organizationId: 'org-test-dashboard',
+        },
+      });
+
+      expect(mockPrisma.employee.findMany).not.toHaveBeenCalled();
+    });
+
+    it('never substitutes another tenant department when the session department is not valid for the current organization', async () => {
+      const crossTenantDepartmentSession: UserSession = {
+        userId: 'usr-cross-dept-manager',
+        organizationId: 'org-test-dashboard',
+        employeeId: 'emp-cross-dept-manager',
+        departmentId: 'dept-cross-tenant',
+        fullName: 'Cross Tenant Manager',
+        email: 'cross.manager@antigravity.internal',
+        roles: ['manager'],
+        permissions: [],
+        isActive: true,
+      };
+
+      mockPrisma.department.findFirst.mockImplementation(
+        async ({ where }: any) => {
+          if (
+            where?.managerId === 'emp-cross-dept-manager' &&
+            where?.organizationId === 'org-test-dashboard'
+          ) {
+            return null;
+          }
+
+          if (
+            where?.id === 'dept-cross-tenant' &&
+            where?.organizationId === 'org-test-dashboard'
+          ) {
+            return null;
+          }
+
+          // Old broad fallback would reach this and expose another department.
+          if (
+            where?.deletedAt === null &&
+            where?.isActive === true &&
+            where?.organizationId === 'org-test-dashboard'
+          ) {
+            return {
+              id: 'dept-local-other',
+              name: 'Local Other Department',
+              code: 'LOCAL-OTHER',
+            };
+          }
+
+          return null;
+        }
+      );
+
+      const result = await DashboardService.getManagerDashboard(
+        crossTenantDepartmentSession
+      );
+
+      expect(result.department).toBeNull();
+      expect(result.teamAttendance.totalMembers).toBe(0);
+      expect(result.approvalQueue.totalQueueCount).toBe(0);
+      expect(result.teamMembers).toHaveLength(0);
+
+      expect(mockPrisma.department.findFirst).toHaveBeenCalledTimes(2);
+
+      expect(mockPrisma.department.findFirst).toHaveBeenNthCalledWith(
+        1,
+        {
+          where: {
+            managerId: 'emp-cross-dept-manager',
+            deletedAt: null,
+            organizationId: 'org-test-dashboard',
+          },
+        }
+      );
+
+      expect(mockPrisma.department.findFirst).toHaveBeenNthCalledWith(
+        2,
+        {
+          where: {
+            id: 'dept-cross-tenant',
+            organizationId: 'org-test-dashboard',
+          },
+        }
+      );
+
+      expect(mockPrisma.employee.findMany).not.toHaveBeenCalled();
     });
   });
 
