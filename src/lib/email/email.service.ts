@@ -2,6 +2,7 @@ import { EmailMessage, EmailProvider, EmailSendResult } from './types';
 import { MockEmailProvider } from './providers/mock.provider';
 import { ConsoleEmailProvider } from './providers/console.provider';
 import { SendGridEmailProvider } from './providers/sendgrid.provider';
+import { ResendEmailProvider } from './providers/resend.provider';
 import { SmtpEmailProvider } from './providers/smtp.provider';
 import { logger } from '@/lib/logger';
 
@@ -20,6 +21,7 @@ export class EmailService {
     this.registerProvider('mock', new MockEmailProvider());
     this.registerProvider('console', new ConsoleEmailProvider());
     this.registerProvider('sendgrid', new SendGridEmailProvider());
+    this.registerProvider('resend', new ResendEmailProvider());
     this.registerProvider('smtp', new SmtpEmailProvider());
 
     // Resolve active provider from environment variable
@@ -62,7 +64,7 @@ export class EmailService {
     this.init();
     const provider = this.providers.get(this.activeProviderName);
     if (!provider) {
-      // Fallback to mock
+      // Fallback to mock only for an impossible/unregistered internal state.
       return this.providers.get('mock')!;
     }
     return provider;
@@ -85,12 +87,15 @@ export class EmailService {
   }
 
   /**
-   * Resilient email delivery with automatic fallback
-   * Never throws or crashes the host transaction if an email fails
+   * Deliver email using the configured provider.
+   * Console/mock fallback is restricted to local development and tests so
+   * staging/production cannot report a fake delivery or leak reset URLs to logs.
    */
   static async sendEmail(message: EmailMessage): Promise<EmailSendResult> {
     this.init();
     const primaryProvider = this.getActiveProvider();
+    const allowNonDeliveryFallback =
+      process.env.APP_ENV === 'development' || process.env.NODE_ENV === 'test';
 
     try {
       if (primaryProvider.isConfigured()) {
@@ -98,12 +103,26 @@ export class EmailService {
         if (result.success) {
           return result;
         }
-        logger.warn(`[EmailService] Primary provider '${primaryProvider.name}' failed: ${result.error}. Trying fallback.`);
+
+        logger.warn(`[EmailService] Primary provider '${primaryProvider.name}' failed: ${result.error}`);
+
+        if (!allowNonDeliveryFallback) {
+          return result;
+        }
       } else {
-        logger.warn(`[EmailService] Primary provider '${primaryProvider.name}' is not configured. Falling back to console/mock.`);
+        const error = `Email provider '${primaryProvider.name}' is not configured`;
+        logger.warn(`[EmailService] ${error}`);
+
+        if (!allowNonDeliveryFallback) {
+          return {
+            success: false,
+            provider: primaryProvider.name,
+            error,
+            timestamp: new Date(),
+          };
+        }
       }
 
-      // Fallback to console or mock
       const fallbackProvider = this.providers.get('console') || this.providers.get('mock')!;
       return await fallbackProvider.sendEmail(message);
     } catch (err: any) {

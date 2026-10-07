@@ -555,12 +555,6 @@ export class DashboardService {
       });
     }
 
-    // If still no department found, get the first department
-    if (!department) {
-      department = await prisma.department.findFirst({
-        where: { deletedAt: null, isActive: true, organizationId: orgId },
-      });
-    }
 
     const deptId = department?.id;
 
@@ -884,17 +878,6 @@ export class DashboardService {
     if (!employee && session.userId) {
       employee = await prisma.employee.findFirst({
         where: { userId: session.userId, organizationId: session.organizationId ?? '__no_org__' },
-        include: {
-          department: { select: { name: true } },
-          position: { select: { title: true } },
-        },
-      });
-    }
-
-    // Fallback for testing: first employee
-    if (!employee) {
-      employee = await prisma.employee.findFirst({
-        where: { deletedAt: null, organizationId: session.organizationId ?? '__no_org__' },
         include: {
           department: { select: { name: true } },
           position: { select: { title: true } },
