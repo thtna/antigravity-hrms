@@ -9,15 +9,18 @@
 > Current operational state is governed by `docs/PROJECT_STATE_HANDOFF.md`.
 
 - **Original Phase 0→10 implementation roadmap**: completed as historical product-development work.
-- **Current Production/main SHA**: `c2b921d1bf68b55cc0907643db381bc61e6255b8`.
-- **Production release / post-deploy verification**: `PASS / VERIFIED`.
-- **Current lifecycle stage**: `FINAL CUSTOMER HANDOVER CLOSURE`.
-- **Current gate**: `R5D1F-F4A — FINAL READINESS STATE RECONCILIATION`.
-- **CUSTOMER_HANDOFF_READY**: `CONDITIONAL YES / PENDING F4A PUBLICATION + POST-PUBLICATION VERIFY`. Once this exact F4A revision is on `main` and the post-publication final read-only verification passes, readiness becomes `YES` without another commit solely to flip the label.
+- **Current Production/main SHA**: `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
+- **Production F5 release / post-merge verification**: `PASS / VERIFIED`.
+- **Current lifecycle stage**: `POST-F5 PRODUCTION CLOSURE / HANDOFF DOCUMENTATION RECONCILIATION`.
+- **Current gate**: `R5D1F-F5F — CLOSURE / HANDOFF DOCUMENTATION UPDATE`.
+- **F5 publication**: PR #14 = `MERGED / CLOSED`; PR CI #89 = `SUCCESS`; merge SHA = `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
+- **Post-merge verification**: CI #90 = `SUCCESS`; Docker Build & Publish #20 = `SUCCESS`; canonical Vercel Production deployment `dpl_HHZBNC6896Wgt5Q3agUCMGDN1heg` = `READY`.
+- **F5 OWNER/Admin live regression**: `PASS / VERIFIED`; Employee dashboard view is hidden for privileged accounts without Employee linkage and direct Employee-role access is blocked.
+- **Real Employee live-login regression**: `NOT VERIFIED / BLOCKED BY RESEND TEST-MODE`; staging Forgot Password delivery to the dedicated Employee test recipient was rejected by Resend with HTTP `403` until a custom sending domain is verified.
+- **CUSTOMER_HANDOFF_READY**: `CONDITIONAL YES / LIVE EMPLOYEE LOGIN UAT BLOCKED BY RESEND TEST-MODE`.
 - **Git governance**: `main` and `staging` are protected; `main` requires `Quality Gate`.
-- **Vercel governance**: only `antigravity-hrms` and `antigravity-hrms-staging` remain Git-linked; `ri4s` and `q64j` are disconnected; F2C-M2 `main → staging` filtering is runtime-verified by the PR #12 natural `main` push.
-- **F3 closure**: F3A/F3B/F3C = `PASS / VERIFIED`; PR #12 merged, CI #84 and Docker #18 succeeded, canonical Production deployment is `READY`.
-- **Final technical handoff audit**: `PASS`; remaining work is F4A exact-state publication and post-publication read-only verification only.
+- **Vercel Production**: canonical project `antigravity-hrms`; canonical domain `antigravity-hrms-six.vercel.app`; current exact merge deployment is `READY`.
+- **Known accepted limitation**: `NIGHT_OT_END_TO_END = BLOCKED_BY_DATA_MODEL / ACCEPTED LIMITATION`.
 - **New product-development phase**: none selected or approved.
 - Historical acceptance criteria and phase descriptions below must not be reinterpreted as fresh 08/10/2026 verification evidence.
 

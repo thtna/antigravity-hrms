@@ -8,46 +8,58 @@
 
 ## 0. CURRENT RELEASE BASELINE & VERIFIED DEPLOYMENT SNAPSHOTS
 
-### Current Production Release & Handoff Readiness Snapshot (08/10/2026) — R5D1F FINAL HANDOVER CLOSURE
+### Current Production Release & Handoff Readiness Snapshot (08/10/2026) — R5D1F-F5 PRODUCTION CLOSURE
 
-This is the authoritative current-state snapshot for final handoff decisions after PR #12. Older dated snapshots below are historical evidence only.
+This is the authoritative current-state snapshot after F5 dashboard hardening, PR #14 publication, merge to `main`, and post-merge Production verification. Older dated snapshots below are historical evidence only.
 
-- **R5D1F Production release**: `PASS / VERIFIED`.
-- **Application/product release PR**: PR #11 — `MERGED / CLOSED`.
-- **Final documentation publication PR**: PR #12 — `MERGED / CLOSED`.
-- **Current Production/main SHA**: `c2b921d1bf68b55cc0907643db381bc61e6255b8`.
-- **Current Production/main tree**: `dd390f5257a4db01a255af06923cf676da07c4e5`.
-- **GitHub CI #84 / run 37655943415**: `SUCCESS` on exact current `main` SHA; `Quality Gate` = `SUCCESS`.
-- **Docker Build & Publish #18 / run 37655944202**: `SUCCESS` on exact current `main` SHA.
-  - GHCR digest = `sha256:d0e9641e82f6d449cd1e3888b0637c693fb03c6cd0b630c992351bf11b44a5b3`.
-  - Published tags include `latest` and `sha-c2b921d`.
+- **R5D1F-F5 Production closure**: `PASS / VERIFIED` for code, CI, Docker publication and Vercel Production deployment.
+- **F5B staging implementation commit**: `bdd15a4b27eaf5a0aa434b9e5200062192da5680`.
+- **F5B scope**: exactly three source/test files:
+  - `src/app/api/v1/dashboard/route.ts`
+  - `src/components/dashboard/DashboardClient.tsx`
+  - `src/app/api/v1/dashboard/__tests__/route.test.ts`
+- **F5B behavior**:
+  - privileged OWNER/Admin accounts without an Employee linkage no longer receive the Employee dashboard view;
+  - direct `?role=employee` access for a privileged account without Employee linkage returns `FORBIDDEN`;
+  - linked Employee behavior remains covered by regression tests;
+  - existing normal missing-Employee `404` behavior remains preserved.
+- **F5B staging CI #88 / run 37666659584**: `SUCCESS`; `Quality Gate` = `SUCCESS`.
+- **F5B staging Preview**: `dpl_7rnUwGwkhwbsYSfroEQ2zsXy44rM` = `READY` on exact F5B SHA.
+- **F5B OWNER/Admin live UAT**: `PASS / VERIFIED`.
+  - Admin dashboard loaded.
+  - Employee tab was hidden for the OWNER/Admin account without Employee linkage.
+  - Direct Employee dashboard request was blocked with `FORBIDDEN`.
+- **Real Employee live-login UAT**: `NOT VERIFIED / BLOCKED BY EMAIL DELIVERY CONFIGURATION`.
+  - A dedicated staging Employee test account was created and its User/Employee/OrganizationMember/employee-role/audit linkage was verified.
+  - Forgot Password request reached staging, but Resend rejected delivery with HTTP `403` because the Resend account is in test mode and can only send test messages to the Resend account owner's email until a custom sending domain is verified.
+  - Do **not** represent this blocked live Employee login as PASS.
+  - This block is an email-provider/test-mode constraint; it does not invalidate the automated Employee regression coverage or the verified OWNER/Admin live UAT.
+- **PR #14**: `Fix employee dashboard view guard` — `MERGED / CLOSED`.
+- **PR #14 head SHA**: `bdd15a4b27eaf5a0aa434b9e5200062192da5680`.
+- **PR CI #89 / run 37725953745**: `SUCCESS`; `Quality Gate` = `SUCCESS`; exact PR scope = one commit / three files.
+- **Current Production/main SHA**: `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
+- **Current Production/main tree**: `ca1c5ba7f1b7dcf9318fd826d913a16f3434f07a`.
+- **Post-merge GitHub CI #90 / run 37727065265**: `SUCCESS` on exact current `main` SHA.
+  - `Quality Gate` job `113147553249` = `SUCCESS`.
+  - TypeScript, lint, tests, Production build and docker-compose validation all completed successfully.
+- **Docker Build & Publish #20 / run 37727065202**: `SUCCESS` on exact current `main` SHA.
+  - Build & Push Docker Image job `113147552732` = `SUCCESS`.
 - **Canonical Vercel Production project**: `antigravity-hrms` (`prj_mXoCaJWR4TfXApRxDSwxuPmHz0dk`).
-- **Canonical Production deployment**: `dpl_B3x6qMN1yDuuoFrxKAad2bBezTK6` = `READY` on exact current `main` SHA.
-- **Canonical Production domain**: `antigravity-hrms-six.vercel.app` = verified.
-- **Current Git-linked Vercel topology**: exactly `2` projects remain linked to `thtna/antigravity-hrms`: canonical Production `antigravity-hrms` and dedicated Staging `antigravity-hrms-staging`.
-- **Legacy Vercel projects**: `antigravity-hrms-ri4s` and `antigravity-hrms-q64j` remain preserved but Git-disconnected.
-- **R5D1F-F2C-M2**: `PASS / VERIFIED`. Natural `main` push from PR #12 produced staging deployment `dpl_44FcSwnLn5j72B8hqXfExxB74CDK` = `CANCELED`; Vercel build log states cancellation because the Ignored Build Step returned exit code `0`.
-- **R5D1F-F2A**: `PASS / VERIFIED`.
-- **R5D1F-F2B / F2B-M**: `PASS / VERIFIED`.
-- **R5D1F-F2C-M1**: `PASS / VERIFIED`.
-- **R5D1F-F3A**: `PASS / VERIFIED`; CI #82 = `SUCCESS`, staging Preview = `READY`.
-- **R5D1F-F3B**: `PASS / VERIFIED`; PR #12 contained exactly three documentation files and PR CI #83 / `Quality Gate` = `SUCCESS`.
-- **R5D1F-F3C**: `PASS / VERIFIED`; PR #12 = `MERGED / CLOSED`, merge SHA = `c2b921d1bf68b55cc0907643db381bc61e6255b8`, CI #84 = `SUCCESS`, Docker #18 = `SUCCESS`, canonical Production deployment = `READY`.
+- **Canonical Production deployment**: `dpl_HHZBNC6896Wgt5Q3agUCMGDN1heg` = `READY`.
+- **Canonical Production deployment branch/SHA**: `main` / `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
+- **Canonical Production domain**: `antigravity-hrms-six.vercel.app` = verified and attached to the exact READY deployment above.
+- **Production runtime errors in the fresh one-hour F5E audit window**: none observed.
+- **Independent HTTP probe qualification**: the external web-probe tool returned an access/cache-layer error for `/`, `/login` and `/api/health`; no HTTP status was inferred from that tool failure. Vercel deployment/alias/runtime evidence remained healthy. As always, `/api/health` would prove process responsiveness only, not DB health.
 - **Branch protection**:
-  - `main` = protected; PR flow required; `Quality Gate` required; up-to-date branch semantics enabled; approvals = 0.
-  - `staging` = protected; direct normal pushes allowed; no required checks; force-push/deletion not allowed.
-- **Production Supabase project**: `ombnluobsjzdzmjenqdt` = `ACTIVE_HEALTHY`, PostgreSQL `17.6`.
-- **Production Prisma migrations**: `5` applied; latest = `20261005000000_phase_11a_0f_public_data_api_hardening`.
-- **Production public DB topology**: `34` base tables, `73` foreign keys, `2` public enums.
-- **Production RLS**: `34 / 34` public ordinary tables enabled; public RLS policy count = `0` intentionally under the deny-by-default Phase 11A.0F design.
-- **Production runtime errors in final audit window**: no runtime error clusters observed in the fresh one-hour read-only check.
-- **Open GitHub PRs/issues at final technical audit**: `0 / 0`.
-- **Final technical handoff audit (08/10/2026)**: `PASS`; Git/branch protection, CI/Docker, two-project Vercel topology, F2C-M2 runtime filtering, Production DB topology and publication state were read-only verified.
+  - `main` = protected; `Quality Gate` required.
+  - `staging` = protected; force-push/deletion not allowed.
 - **Known accepted product limitation**: `NIGHT_OT_END_TO_END = BLOCKED_BY_DATA_MODEL / ACCEPTED LIMITATION`.
 - **DR evidence boundary**: managed Supabase backup/PITR capability, retention and restore SLA remain `UNVERIFIED / PLAN-DEPENDENT`; do not represent them as guaranteed.
 - **PROJECT_SPEC.md authority status**: `MISSING / UNPROVEN`; do not auto-create a substitute.
-- **CUSTOMER_HANDOFF_READY**: `CONDITIONAL YES / PENDING F4A PUBLICATION + POST-PUBLICATION VERIFY`. This exact F4A document revision must be published to `main` and then pass one final read-only verification; once both are true, readiness becomes `YES` without another commit solely to flip the label.
-- **Handoff closure conditions**: publish this exact F4A readiness-reconciliation revision to `main` through the approved PR/CI path, then run one post-publication read-only verification. All prior branch-protection, legacy Vercel fanout and F2C-M2 runtime-proof conditions are resolved.
+- **CUSTOMER_HANDOFF_READY**: `CONDITIONAL YES / LIVE EMPLOYEE LOGIN UAT BLOCKED BY RESEND TEST-MODE`.
+  - F5 code, PR CI, merge-SHA CI, Docker and Production publication are verified.
+  - OWNER/Admin live regression is verified.
+  - Customer handoff must continue to disclose that real Employee live login remains unverified until a usable email-delivery path exists (for example, a verified Resend sending domain) and the Employee login UAT is executed under a separately approved gate.
 - **Production safety invariant**: any future Production DB write, migration, seed, env/WAF change, deploy, rollback, account/password mutation or promotion requires separate explicit Human Owner approval.
 
 ### Historical Production Release Closure Snapshot (06/10/2026) — Phase 12F-R1
