@@ -13,6 +13,9 @@ const mockPrisma = vi.hoisted(() => ({
   organization: {
     findUnique: vi.fn(),
   },
+  employee: {
+    findFirst: vi.fn(),
+  },
 }));
 
 vi.mock('@/lib/auth/guard', () => ({
@@ -32,6 +35,7 @@ import { GET } from '@/app/api/v1/dashboard/route';
 describe('Phase 2 — unified dashboard SUPER_ADMIN guard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrisma.employee.findFirst.mockResolvedValue(null);
     mockPrisma.organization.findUnique.mockResolvedValue({
       onboardingStep: 9,
       onboardingSkipped: false,
@@ -115,6 +119,67 @@ describe('Phase 2 — unified dashboard SUPER_ADMIN guard', () => {
     expect(mockDashboardService.getAdminHrDashboard).toHaveBeenCalledWith(session);
   });
 
+  it('hides employee view for OWNER/Admin without an employee linkage', async () => {
+    const session = makeSession({
+      roles: ['admin'],
+      tenantRole: 'OWNER',
+      employeeId: undefined,
+    });
+    mockRequireAuth.mockResolvedValue(session);
+    mockDashboardService.getAdminHrDashboard.mockResolvedValue({ kind: 'admin' });
+
+    const res = await GET(makeRequest());
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.currentRole).toBe('admin');
+    expect(json.data.availableRoles).toEqual(['manager', 'admin']);
+    expect(mockPrisma.employee.findFirst).toHaveBeenCalledWith({
+      where: {
+        userId: session.userId,
+        organizationId: session.organizationId,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    expect(mockDashboardService.getEmployeeDashboard).not.toHaveBeenCalled();
+  });
+
+  it('blocks direct employee view for privileged accounts without an employee linkage', async () => {
+    const session = makeSession({
+      roles: ['admin'],
+      tenantRole: 'OWNER',
+      employeeId: undefined,
+    });
+    mockRequireAuth.mockResolvedValue(session);
+
+    const res = await GET(makeRequest('/api/v1/dashboard?role=employee'));
+    const json = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(json.success).toBe(false);
+    expect(json.error.code).toBe('FORBIDDEN');
+    expect(mockDashboardService.getEmployeeDashboard).not.toHaveBeenCalled();
+  });
+
+  it('exposes employee view when an OWNER/Admin has a real employee linkage', async () => {
+    const session = makeSession({
+      roles: ['admin'],
+      tenantRole: 'OWNER',
+      employeeId: undefined,
+    });
+    mockRequireAuth.mockResolvedValue(session);
+    mockPrisma.employee.findFirst.mockResolvedValue({ id: 'emp-owner-001' });
+    mockDashboardService.getAdminHrDashboard.mockResolvedValue({ kind: 'admin' });
+
+    const res = await GET(makeRequest());
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.data.availableRoles).toEqual(['employee', 'manager', 'admin']);
+    expect(mockDashboardService.getAdminHrDashboard).toHaveBeenCalledWith(session);
+  });
+
   it('preserves normal HR dashboard routing', async () => {
     const session = makeSession({ roles: ['hr'], tenantRole: 'HR_MANAGER' });
     mockRequireAuth.mockResolvedValue(session);
@@ -143,6 +208,7 @@ describe('Phase 2 — unified dashboard SUPER_ADMIN guard', () => {
 
     expect(res.status).toBe(200);
     expect(json.data.currentRole).toBe('manager');
+    expect(json.data.availableRoles).toContain('employee');
     expect(json.data.payload).toEqual({ kind: 'manager' });
     expect(mockDashboardService.getManagerDashboard).toHaveBeenCalledWith(session);
   });
@@ -161,6 +227,7 @@ describe('Phase 2 — unified dashboard SUPER_ADMIN guard', () => {
 
     expect(res.status).toBe(200);
     expect(json.data.currentRole).toBe('employee');
+    expect(json.data.availableRoles).toEqual(['employee']);
     expect(json.data.payload).toEqual({ kind: 'employee' });
     expect(mockDashboardService.getEmployeeDashboard).toHaveBeenCalledWith(session);
   });
