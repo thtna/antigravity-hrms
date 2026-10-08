@@ -8,58 +8,53 @@
 
 ## 0. CURRENT RELEASE BASELINE & VERIFIED DEPLOYMENT SNAPSHOTS
 
-### Current Production Release & Handoff Readiness Snapshot (08/10/2026) — R5D1F-F5 PRODUCTION CLOSURE
+### Current Production Release & Handoff Readiness Snapshot (08/10/2026) — R5D1F-F5 FINAL HANDOFF RECONCILIATION
 
-This is the authoritative current-state snapshot after F5 dashboard hardening, PR #14 publication, merge to `main`, and post-merge Production verification. Older dated snapshots below are historical evidence only.
+This is the authoritative current-state snapshot after F5 dashboard hardening, application publication, custom-domain Resend enablement, real password-reset completion, and final Employee live-login UAT. Older dated snapshots below are historical evidence only.
 
-- **R5D1F-F5 Production closure**: `PASS / VERIFIED` for code, CI, Docker publication and Vercel Production deployment.
-- **F5B staging implementation commit**: `bdd15a4b27eaf5a0aa434b9e5200062192da5680`.
-- **F5B scope**: exactly three source/test files:
+- **R5D1F-F5 application closure**: `PASS / VERIFIED`.
+- **F5B implementation commit**: `bdd15a4b27eaf5a0aa434b9e5200062192da5680`; scope remained exactly:
   - `src/app/api/v1/dashboard/route.ts`
   - `src/components/dashboard/DashboardClient.tsx`
   - `src/app/api/v1/dashboard/__tests__/route.test.ts`
-- **F5B behavior**:
-  - privileged OWNER/Admin accounts without an Employee linkage no longer receive the Employee dashboard view;
-  - direct `?role=employee` access for a privileged account without Employee linkage returns `FORBIDDEN`;
-  - linked Employee behavior remains covered by regression tests;
+- **F5B verified behavior**:
+  - privileged OWNER/Admin accounts without Employee linkage do not receive the Employee dashboard view;
+  - direct `?role=employee` access for such privileged accounts is blocked with `FORBIDDEN`;
+  - linked Employee behavior remains available;
   - existing normal missing-Employee `404` behavior remains preserved.
-- **F5B staging CI #88 / run 37666659584**: `SUCCESS`; `Quality Gate` = `SUCCESS`.
-- **F5B staging Preview**: `dpl_7rnUwGwkhwbsYSfroEQ2zsXy44rM` = `READY` on exact F5B SHA.
-- **F5B OWNER/Admin live UAT**: `PASS / VERIFIED`.
+- **PR #14 — application fix**: `MERGED / CLOSED`; application merge SHA = `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
+- **PR #15 — prior documentation closure**: `MERGED / CLOSED`; pre-final-reconciliation `main` SHA = `cb11e8a0f4a17228c5a58a3b59e96f7ebe82bb13`; tree = `f53fb8deaacdf9b04d3936d8e9dedb5dcf65f30e`.
+- **Current-main verification before this final docs-only reconciliation**:
+  - GitHub CI #93 / run `37729960925` = `SUCCESS`; Quality Gate job `113156602597` = `SUCCESS`.
+  - Docker Build & Publish #21 / run `37729960311` = `SUCCESS`; Build & Push Docker Image job `113156600694` = `SUCCESS`.
+  - Vercel Production deployment `dpl_B9F28KQrzUno4dyL4Nd9HsH7NNQ1` = `READY`, source `main` / `cb11e8a0f4a17228c5a58a3b59e96f7ebe82bb13`.
+  - Canonical Production domain `antigravity-hrms-six.vercel.app` is attached to that READY deployment.
+- **F5 OWNER/Admin live UAT**: `PASS / VERIFIED`.
   - Admin dashboard loaded.
-  - Employee tab was hidden for the OWNER/Admin account without Employee linkage.
-  - Direct Employee dashboard request was blocked with `FORBIDDEN`.
-- **Real Employee live-login UAT**: `NOT VERIFIED / BLOCKED BY EMAIL DELIVERY CONFIGURATION`.
-  - A dedicated staging Employee test account was created and its User/Employee/OrganizationMember/employee-role/audit linkage was verified.
-  - Forgot Password request reached staging, but Resend rejected delivery with HTTP `403` because the Resend account is in test mode and can only send test messages to the Resend account owner's email until a custom sending domain is verified.
-  - Do **not** represent this blocked live Employee login as PASS.
-  - This block is an email-provider/test-mode constraint; it does not invalidate the automated Employee regression coverage or the verified OWNER/Admin live UAT.
-- **PR #14**: `Fix employee dashboard view guard` — `MERGED / CLOSED`.
-- **PR #14 head SHA**: `bdd15a4b27eaf5a0aa434b9e5200062192da5680`.
-- **PR CI #89 / run 37725953745**: `SUCCESS`; `Quality Gate` = `SUCCESS`; exact PR scope = one commit / three files.
-- **Current Production/main SHA**: `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
-- **Current Production/main tree**: `ca1c5ba7f1b7dcf9318fd826d913a16f3434f07a`.
-- **Post-merge GitHub CI #90 / run 37727065265**: `SUCCESS` on exact current `main` SHA.
-  - `Quality Gate` job `113147553249` = `SUCCESS`.
-  - TypeScript, lint, tests, Production build and docker-compose validation all completed successfully.
-- **Docker Build & Publish #20 / run 37727065202**: `SUCCESS` on exact current `main` SHA.
-  - Build & Push Docker Image job `113147552732` = `SUCCESS`.
-- **Canonical Vercel Production project**: `antigravity-hrms` (`prj_mXoCaJWR4TfXApRxDSwxuPmHz0dk`).
-- **Canonical Production deployment**: `dpl_HHZBNC6896Wgt5Q3agUCMGDN1heg` = `READY`.
-- **Canonical Production deployment branch/SHA**: `main` / `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
-- **Canonical Production domain**: `antigravity-hrms-six.vercel.app` = verified and attached to the exact READY deployment above.
-- **Production runtime errors in the fresh one-hour F5E audit window**: none observed.
-- **Independent HTTP probe qualification**: the external web-probe tool returned an access/cache-layer error for `/`, `/login` and `/api/health`; no HTTP status was inferred from that tool failure. Vercel deployment/alias/runtime evidence remained healthy. As always, `/api/health` would prove process responsiveness only, not DB health.
-- **Branch protection**:
-  - `main` = protected; `Quality Gate` required.
-  - `staging` = protected; force-push/deletion not allowed.
+  - Employee view was hidden for the OWNER/Admin account without Employee linkage.
+  - Direct Employee-role dashboard access was blocked with `FORBIDDEN`.
+- **Resend custom-domain recovery**: `PASS / VERIFIED`.
+  - `hrmsvn.com` = verified for sending.
+  - DKIM and sending records = verified.
+  - Staging sender = `no-reply@hrmsvn.com`.
+  - Active staging provider remained `resend`; Production was not modified by this recovery.
+- **Final staging Employee UAT deployment**: `dpl_54mFNvBguEcSLoexgc78JAeEMJNp` = `READY`, branch `staging`, SHA `4c4cda311eaef9f68ad8e19a3c40d29e81fb3ca6`; stable staging domain = `antigravity-hrms-jped.vercel.app`.
+- **Real Employee password-reset and live-login UAT**: `PASS / VERIFIED`.
+  - Dedicated Employee `UATF5B01` remained active with active Employee linkage, tenant role `EMPLOYEE`, and system role `employee`.
+  - Forgot Password reached staging and Resend reported successful dispatch.
+  - Password reset completed successfully on staging.
+  - Real login completed successfully with role `employee`.
+  - Employee Dashboard loaded the correct self-service view `Cá Nhân (Employee)`; no Admin/Manager view was exposed and the prior Employee-linkage `404` was not observed.
+  - No runtime errors were observed in the verification window.
+- **CUSTOMER_HANDOFF_READY**: `YES / VERIFIED`.
+  - F5 application code, CI, Docker and Production publication are verified.
+  - OWNER/Admin live regression is verified.
+  - Real Employee reset-email, password-reset, login and dashboard UAT are verified.
+  - The previous Resend test-mode/email-delivery blocker is resolved by the verified custom sending domain.
+- **Canonical-document publication state**: this final reconciliation is being committed/pushed to `staging` under `F5B-UAT2E`; publication to `main` still requires its own separately approved PR/merge gate. A new documentation-only Git SHA created by publication does **not** require another handoff-document rewrite if application source/content is unchanged and post-publication verification passes.
 - **Known accepted product limitation**: `NIGHT_OT_END_TO_END = BLOCKED_BY_DATA_MODEL / ACCEPTED LIMITATION`.
 - **DR evidence boundary**: managed Supabase backup/PITR capability, retention and restore SLA remain `UNVERIFIED / PLAN-DEPENDENT`; do not represent them as guaranteed.
 - **PROJECT_SPEC.md authority status**: `MISSING / UNPROVEN`; do not auto-create a substitute.
-- **CUSTOMER_HANDOFF_READY**: `CONDITIONAL YES / LIVE EMPLOYEE LOGIN UAT BLOCKED BY RESEND TEST-MODE`.
-  - F5 code, PR CI, merge-SHA CI, Docker and Production publication are verified.
-  - OWNER/Admin live regression is verified.
-  - Customer handoff must continue to disclose that real Employee live login remains unverified until a usable email-delivery path exists (for example, a verified Resend sending domain) and the Employee login UAT is executed under a separately approved gate.
 - **Production safety invariant**: any future Production DB write, migration, seed, env/WAF change, deploy, rollback, account/password mutation or promotion requires separate explicit Human Owner approval.
 
 ### Historical Production Release Closure Snapshot (06/10/2026) — Phase 12F-R1
