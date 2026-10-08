@@ -9,18 +9,22 @@
 > Current operational state is governed by `docs/PROJECT_STATE_HANDOFF.md`.
 
 - **Original Phase 0→10 implementation roadmap**: completed as historical product-development work.
-- **Current Production/main SHA**: `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
-- **Production F5 release / post-merge verification**: `PASS / VERIFIED`.
-- **Current lifecycle stage**: `POST-F5 PRODUCTION CLOSURE / HANDOFF DOCUMENTATION RECONCILIATION`.
-- **Current gate**: `R5D1F-F5F — CLOSURE / HANDOFF DOCUMENTATION UPDATE`.
-- **F5 publication**: PR #14 = `MERGED / CLOSED`; PR CI #89 = `SUCCESS`; merge SHA = `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
-- **Post-merge verification**: CI #90 = `SUCCESS`; Docker Build & Publish #20 = `SUCCESS`; canonical Vercel Production deployment `dpl_HHZBNC6896Wgt5Q3agUCMGDN1heg` = `READY`.
-- **F5 OWNER/Admin live regression**: `PASS / VERIFIED`; Employee dashboard view is hidden for privileged accounts without Employee linkage and direct Employee-role access is blocked.
-- **Real Employee live-login regression**: `NOT VERIFIED / BLOCKED BY RESEND TEST-MODE`; staging Forgot Password delivery to the dedicated Employee test recipient was rejected by Resend with HTTP `403` until a custom sending domain is verified.
-- **CUSTOMER_HANDOFF_READY**: `CONDITIONAL YES / LIVE EMPLOYEE LOGIN UAT BLOCKED BY RESEND TEST-MODE`.
+- **Application Production release SHA (PR #14 merge)**: `5be274c3db1aaec106cf1246d9f3abfa50f39add`.
+- **Pre-final-reconciliation main SHA (PR #15 docs merge)**: `cb11e8a0f4a17228c5a58a3b59e96f7ebe82bb13`; tree = `f53fb8deaacdf9b04d3936d8e9dedb5dcf65f30e`.
+- **Production F5 release / current-main verification**: `PASS / VERIFIED`.
+- **Current lifecycle stage**: `POST-F5 FINAL HANDOFF RECONCILIATION / CUSTOMER HANDOFF READY`.
+- **Current gate**: `F5B-UAT2E — COMMIT + PUSH FINAL HANDOFF DOCS TO STAGING`.
+- **Publication history**: PR #14 application fix = `MERGED / CLOSED`; PR #15 prior docs closure = `MERGED / CLOSED`.
+- **Current-main CI / Docker**: CI #93 / run `37729960925` = `SUCCESS`; Docker Build & Publish #21 / run `37729960311` = `SUCCESS`.
+- **Vercel Production**: deployment `dpl_B9F28KQrzUno4dyL4Nd9HsH7NNQ1` = `READY` on `main` / `cb11e8a0f4a17228c5a58a3b59e96f7ebe82bb13`; canonical domain = `antigravity-hrms-six.vercel.app`.
+- **F5 OWNER/Admin live regression**: `PASS / VERIFIED`.
+- **Resend custom-domain recovery**: `PASS / VERIFIED`; `hrmsvn.com` verified for sending and staging sender rebound to `no-reply@hrmsvn.com`.
+- **Real Employee password-reset + live-login regression**: `PASS / VERIFIED`; reset email dispatched through Resend, password reset succeeded, login succeeded as `employee`, and the Employee self-service Dashboard loaded without the prior linkage `404`.
+- **CUSTOMER_HANDOFF_READY**: `YES / VERIFIED`.
+- **Canonical-document publication**: this final docs-only reconciliation is being committed/pushed to `staging` under `F5B-UAT2E`; publication to `main` requires a separate Human Owner-approved PR/merge gate. A new docs-only SHA created by publication must not trigger an endless SHA-only documentation loop.
 - **Git governance**: `main` and `staging` are protected; `main` requires `Quality Gate`.
-- **Vercel Production**: canonical project `antigravity-hrms`; canonical domain `antigravity-hrms-six.vercel.app`; current exact merge deployment is `READY`.
 - **Known accepted limitation**: `NIGHT_OT_END_TO_END = BLOCKED_BY_DATA_MODEL / ACCEPTED LIMITATION`.
+- **DR evidence boundary**: Supabase backup/PITR retention and restore SLA remain `UNVERIFIED / PLAN-DEPENDENT`.
 - **New product-development phase**: none selected or approved.
 - Historical acceptance criteria and phase descriptions below must not be reinterpreted as fresh 08/10/2026 verification evidence.
 
