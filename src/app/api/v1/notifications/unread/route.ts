@@ -18,7 +18,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<a
       throw ApiError.badRequest('notificationId là bắt buộc');
     }
 
-    const success = await NotificationService.markAsUnread(session.userId, notificationId);
+    const success = await NotificationService.markAsUnread(session, notificationId);
 
     return NextResponse.json({
       success,

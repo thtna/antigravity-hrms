@@ -1,12 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { SuperAdminService, type TenantAction } from '../super-admin.service';
 import { MAX_REGISTERED_TENANTS } from '@/lib/constants/tenant-quota';
 import { prisma } from '@/lib/db/prisma';
 import { ApiError } from '@/lib/errors';
 import { UserSession } from '@/types';
+import { Prisma } from '@prisma/client';
 
 vi.mock('@/lib/db/prisma', () => ({
   prisma: {
+    user: { findUnique: vi.fn() },
+    $queryRaw: vi.fn(),
     organization: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -35,6 +38,7 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
     email: 'superadmin@antigravity.internal',
     fullName: 'System Super Admin',
     roles: ['super_admin'],
+    organizationId: null,
     permissions: ['*'],
     isActive: true,
   };
@@ -44,6 +48,7 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
     email: 'superadmin.caps@antigravity.internal',
     fullName: 'System Super Admin Caps',
     roles: ['SUPER_ADMIN'],
+    organizationId: null,
     permissions: ['*'],
     isActive: true,
   };
@@ -114,7 +119,16 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
   };
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    vi.mocked(prisma.user.findUnique).mockResolvedValue({
+      id: superAdminSession.userId, isActive: true, deletedAt: null,
+      userRoles: [{ role: { code: 'super_admin' } }],
+    } as any);
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([]);
+    vi.mocked(prisma.$transaction).mockImplementation(async (cb: any) => cb(prisma));
+    vi.mocked(prisma.auditLog.create).mockResolvedValue({} as any);
+    vi.mocked(prisma.auditLog.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.organization.count).mockResolvedValue(0);
   });
 
   // ── 1. Access Control (SUPER_ADMIN Only) ───────────────────────────────────
@@ -150,10 +164,12 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
       expect(metrics.maxTenants).toBe(5);
     });
 
-    it('allows SUPER_ADMIN (uppercase SUPER_ADMIN) to access', async () => {
+    it('rejects SUPER_ADMIN (uppercase alias) without querying tenant data', async () => {
       (prisma.organization.count as any).mockResolvedValue(0);
-      const metrics = await SuperAdminService.getTenantMetrics(superAdminCapsSession);
-      expect(metrics.maxTenants).toBe(5);
+      await expect(SuperAdminService.getTenantMetrics(superAdminCapsSession))
+        .rejects.toMatchObject({ statusCode: 403 });
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(prisma.organization.count).not.toHaveBeenCalled();
     });
   });
 
@@ -272,7 +288,7 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
       expect(res.organization.status).toBe('ACTIVE');
       expect(prisma.organization.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'org-001' },
+          where: { id: 'org-001', status: 'PENDING', updatedAt: mockOrgPending.updatedAt, deletedAt: null },
           data: expect.objectContaining({
             status: 'ACTIVE',
             approvedBy: superAdminSession.userId,
@@ -419,7 +435,9 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
       vi.mocked(prisma.organization.findUnique).mockResolvedValue({ ...mockOrgPending, status } as any);
       await expect(SuperAdminService.processTenantAction('org-001', action as TenantAction, superAdminSession))
         .rejects.toMatchObject({ statusCode: 400, errorCode: 'BAD_REQUEST' });
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      });
       expect(prisma.organization.update).not.toHaveBeenCalled();
       expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
@@ -447,6 +465,98 @@ describe('PHASE 5 — SUPER ADMIN SERVICE TEST SUITE', () => {
           }),
         })
       );
+    });
+  });
+
+  describe('Live authority and lifecycle transaction boundary (mock proof only)', () => {
+    it.each(['metrics', 'list', 'detail', 'action'])(
+      'direct %s entry rejects a revoked grant before tenant access or writes', async (entry) => {
+        vi.mocked(prisma.user.findUnique).mockResolvedValue({
+          id: superAdminSession.userId, isActive: true, deletedAt: null, userRoles: [],
+        } as any);
+        const calls: Record<string, () => Promise<unknown>> = {
+          metrics: () => SuperAdminService.getTenantMetrics(superAdminSession),
+          list: () => SuperAdminService.listTenants(superAdminSession),
+          detail: () => SuperAdminService.getTenantById('org-001', superAdminSession),
+          action: () => SuperAdminService.processTenantAction('org-001', 'APPROVE', superAdminSession),
+        };
+        await expect(calls[entry]()).rejects.toMatchObject({ statusCode: 403 });
+        expect(prisma.organization.findMany).not.toHaveBeenCalled();
+        expect(prisma.organization.findUnique).not.toHaveBeenCalled();
+        expect(prisma.organization.count).not.toHaveBeenCalled();
+        expect(prisma.organization.update).not.toHaveBeenCalled();
+        expect(prisma.auditLog.create).not.toHaveBeenCalled();
+      });
+
+    it('locks, validates authority, reads state, updates, audits and reads metrics inside one transaction', async () => {
+      let inTransaction = false;
+      vi.mocked(prisma.$transaction).mockImplementation(async (callback: any) => {
+        inTransaction = true;
+        try { return await callback(prisma); } finally { inTransaction = false; }
+      });
+      (prisma.user.findUnique as unknown as Mock).mockImplementation(async () => {
+        expect(inTransaction).toBe(true);
+        expect(prisma.$queryRaw).toHaveBeenCalledTimes(4);
+        return { id: superAdminSession.userId, isActive: true, deletedAt: null,
+          userRoles: [{ role: { code: 'super_admin' } }] } as any;
+      });
+      (prisma.organization.findUnique as unknown as Mock).mockImplementation(async () => {
+        expect(inTransaction).toBe(true);
+        expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+        return mockOrgPending as any;
+      });
+      vi.mocked(prisma.organization.update).mockResolvedValue({ ...mockOrgPending, status: 'ACTIVE' } as any);
+      (prisma.auditLog.create as unknown as Mock).mockImplementation(async () => {
+        expect(inTransaction).toBe(true);
+        expect(prisma.organization.update).toHaveBeenCalledTimes(1);
+        return {} as any;
+      });
+      (prisma.organization.count as unknown as Mock).mockImplementation(async () => {
+        expect(inTransaction).toBe(true);
+        expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+        return 1;
+      });
+      const result = await SuperAdminService.processTenantAction('org-001', 'APPROVE', superAdminSession);
+      expect(result.organization.status).toBe('ACTIVE');
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { isolationLevel: 'Serializable' });
+      expect(vi.mocked(prisma.$queryRaw).mock.calls.map((call: any) => call[0].text)).toEqual([
+        expect.stringContaining('FROM "organizations"'), expect.stringContaining('FROM "users"'),
+        expect.stringContaining('FROM "roles"'), expect.stringContaining('FROM "user_roles"'),
+      ]);
+      expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+      expect(prisma.organization.count).toHaveBeenCalledTimes(6);
+    });
+
+    it.each(['P2025', 'P2034'])('fails closed on %s without audit or automatic retry', async (code) => {
+      vi.mocked(prisma.organization.findUnique).mockResolvedValue(mockOrgPending as any);
+      vi.mocked(prisma.organization.update).mockRejectedValue(new Prisma.PrismaClientKnownRequestError(
+        'concurrent state change', { code, clientVersion: 'test' }));
+      await expect(SuperAdminService.processTenantAction('org-001', 'APPROVE', superAdminSession))
+        .rejects.toMatchObject({ statusCode: 409 });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it.each(['audit', 'metrics'])('does not commit the staged organization when %s fails', async (stage) => {
+      let committedStatus = 'PENDING';
+      let stagedStatus = committedStatus;
+      vi.mocked(prisma.$transaction).mockImplementation(async (callback: any) => {
+        const result = await callback(prisma);
+        committedStatus = stagedStatus;
+        return result;
+      });
+      vi.mocked(prisma.organization.findUnique).mockResolvedValue(mockOrgPending as any);
+      (prisma.organization.update as unknown as Mock).mockImplementation(async () => {
+        stagedStatus = 'ACTIVE';
+        return { ...mockOrgPending, status: stagedStatus } as any;
+      });
+      const error = new Error(`${stage} unavailable`);
+      if (stage === 'audit') vi.mocked(prisma.auditLog.create).mockRejectedValue(error);
+      else vi.mocked(prisma.organization.count).mockRejectedValue(error);
+      await expect(SuperAdminService.processTenantAction('org-001', 'APPROVE', superAdminSession)).rejects.toBe(error);
+      expect(stagedStatus).toBe('ACTIVE');
+      expect(committedStatus).toBe('PENDING');
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     });
   });
 

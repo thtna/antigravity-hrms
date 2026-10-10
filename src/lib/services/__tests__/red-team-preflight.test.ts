@@ -39,6 +39,7 @@ import { Prisma } from '@prisma/client';
 
 // ── Hoisted Mock Prisma ──────────────────────────────────────────────────────
 const mockPrisma = vi.hoisted(() => ({
+  $queryRaw: vi.fn().mockResolvedValue([]),
   organization: {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
@@ -789,6 +790,7 @@ describe('FINAL RED-TEAM PRODUCTION PREFLIGHT VERIFICATION', () => {
   describe('Pillar 13: Registered Tenant Quota', () => {
     const superAdminSession: UserSession = {
       userId: 'super-admin-root',
+      organizationId: null,
       email: 'root@antigravity.internal',
       fullName: 'Super Admin',
       roles: ['super_admin'],
@@ -796,10 +798,18 @@ describe('FINAL RED-TEAM PRODUCTION PREFLIGHT VERIFICATION', () => {
       isActive: true,
     };
 
+    beforeEach(() => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: superAdminSession.userId, isActive: true, deletedAt: null,
+        userRoles: [{ role: { code: 'super_admin' } }],
+      });
+    });
+
     it('13.1: Approving an existing tenant preserves registration quota metrics', async () => {
       mockPrisma.organization.findUnique.mockResolvedValue({
         id: 'tenant-5-id',
         status: 'PENDING',
+        updatedAt: new Date('2026-10-01T00:00:00Z'),
         deletedAt: null,
       });
 
@@ -828,6 +838,7 @@ describe('FINAL RED-TEAM PRODUCTION PREFLIGHT VERIFICATION', () => {
       mockPrisma.organization.findUnique.mockResolvedValue({
         id: 'tenant-6-id',
         status: 'PENDING',
+        updatedAt: new Date('2026-10-01T00:00:00Z'),
         deletedAt: null,
       });
 

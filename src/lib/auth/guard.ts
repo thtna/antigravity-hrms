@@ -1,7 +1,8 @@
 import { getSession } from './session';
 import { ApiError } from '@/lib/errors';
 import { RoleCode, UserSession } from '@/types';
-import { hasPermission, hasAnyRole, isSuperAdmin } from './roles';
+import { hasPermission, hasAnyRole } from './roles';
+import { requireLivePlatformAuthority } from './platform-authority';
 
 /**
  * Server-Side Guard: Ensures request is from an authenticated and active user
@@ -26,9 +27,7 @@ export async function requireAuth(): Promise<UserSession> {
 export async function requireSuperAdmin(): Promise<UserSession> {
   const session = await requireAuth();
 
-  if (!isSuperAdmin(session)) {
-    throw ApiError.forbidden('Chỉ SUPER_ADMIN mới có quyền truy cập chức năng này.');
-  }
+  await requireLivePlatformAuthority(session);
 
   return session;
 }

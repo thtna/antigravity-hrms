@@ -103,6 +103,11 @@ export async function middleware(request: NextRequest) {
     );
   }
 
+  // Only this system-job transport skips cookies; the route requires its bearer.
+  if (pathname === '/api/v1/jobs/run' && request.method === 'POST') {
+    return applySecurityHeaders(NextResponse.next());
+  }
+
   // Root is public, but an already-authenticated platform SUPER_ADMIN should
   // land on the platform console instead of the employee-oriented dashboard.
   if (pathname === '/') {

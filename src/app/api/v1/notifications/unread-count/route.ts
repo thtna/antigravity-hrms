@@ -11,7 +11,7 @@ import { ApiResponse } from '@/types';
 export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<{ unreadCount: number }>>> {
   try {
     const session = await requireAuth();
-    const unreadCount = await NotificationService.getUnreadCount(session.userId);
+    const unreadCount = await NotificationService.getUnreadCount(session);
 
     return NextResponse.json({
       success: true,

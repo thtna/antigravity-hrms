@@ -14,7 +14,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<a
     const body = await req.json().catch(() => ({}));
     const notificationId = body?.notificationId;
 
-    const count = await NotificationService.markAsRead(session.userId, notificationId);
+    const count = await NotificationService.markAsRead(session, notificationId);
 
     return NextResponse.json({
       success: true,

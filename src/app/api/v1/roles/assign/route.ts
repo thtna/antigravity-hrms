@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/guard';
 import { handleApiError } from '@/lib/errors';
-import { PermissionService } from '@/lib/services/permission.service';
+import { ASSIGNABLE_ROLE_CODES, PermissionService } from '@/lib/services/permission.service';
 import { ApiResponse } from '@/types';
 import { z } from 'zod';
 import { validateRequest } from '@/lib/validations';
 
 const AssignRolesSchema = z.object({
   targetUserId: z.string().uuid('ID người dùng không hợp lệ'),
-  roleCodes: z.array(z.string()).min(1, 'Phải chỉ định ít nhất một vai trò'),
-});
+  roleCodes: z.array(z.enum(ASSIGNABLE_ROLE_CODES)).length(1),
+}).strict();
 
 export async function POST(request: NextRequest): Promise<NextResponse<ApiResponse<any>>> {
   try {

@@ -14,6 +14,7 @@ import { ReportResult } from '../report.service';
 
 // ── Hoisted Mock Prisma ──────────────────────────────────────────────────────
 const mockPrisma = vi.hoisted(() => ({
+  $queryRaw: vi.fn().mockResolvedValue([]),
   organization: {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
@@ -124,6 +125,7 @@ describe('PHASE 10 — PRODUCTION ACCEPTANCE & FINAL ACCEPTANCE TEST SUITE', () 
     email: 'superadmin@antigravity.internal',
     fullName: 'Global Platform Admin',
     roles: ['super_admin'],
+    organizationId: null,
     permissions: ['*'],
     isActive: true,
   };
@@ -176,6 +178,10 @@ describe('PHASE 10 — PRODUCTION ACCEPTANCE & FINAL ACCEPTANCE TEST SUITE', () 
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: superAdminSession.userId, isActive: true, deletedAt: null,
+      userRoles: [{ role: { code: 'super_admin' } }],
+    });
   });
 
   // ============================================================================

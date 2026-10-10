@@ -7,6 +7,7 @@ import {
   parseBusinessDate,
 } from '@/lib/time/business-time';
 import { UserSession } from '@/types';
+import { NotificationService } from './notification.service';
 
 export interface AdminHrDashboardData {
   totalEmployees: number;
@@ -858,6 +859,7 @@ export class DashboardService {
    * EMPLOYEE DASHBOARD
    */
   static async getEmployeeDashboard(session: UserSession): Promise<EmployeeDashboardData> {
+    const notificationScope = await NotificationService.requireTenantContext(session);
     const { startOfToday, endOfToday, dateStr } = this.getTodayRange();
     const { startOfMonth, endOfMonth, periodStr } = this.getCurrentMonthRange();
 
@@ -961,10 +963,10 @@ export class DashboardService {
       }),
       // 7. Notifications
       prisma.notification.count({
-        where: { userId: session.userId, isRead: false },
+        where: { ...notificationScope, isRead: false },
       }),
       prisma.notification.findMany({
-        where: { userId: session.userId },
+        where: notificationScope,
         orderBy: { createdAt: 'desc' },
         take: 8,
       }),
@@ -1166,19 +1168,7 @@ export class DashboardService {
   /**
    * Mark notification(s) as read
    */
-  static async markNotificationAsRead(userId: string, notificationId?: string): Promise<number> {
-    if (notificationId) {
-      const updated = await prisma.notification.updateMany({
-        where: { id: notificationId, userId },
-        data: { isRead: true },
-      });
-      return updated.count;
-    }
-
-    const updated = await prisma.notification.updateMany({
-      where: { userId, isRead: false },
-      data: { isRead: true },
-    });
-    return updated.count;
+  static async markNotificationAsRead(session: UserSession, notificationId?: string): Promise<number> {
+    return NotificationService.markAsRead(session, notificationId);
   }
 }

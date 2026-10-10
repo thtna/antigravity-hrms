@@ -2,7 +2,8 @@ import { prisma } from '@/lib/db/prisma';
 import { ApiError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
-import { isSuperAdmin } from '@/lib/auth/roles';
+import { assertPlatformSession, requireLivePlatformAuthority } from '@/lib/auth/platform-authority';
+import { Prisma } from '@prisma/client';
 import { MAX_REGISTERED_TENANTS } from '@/lib/constants/tenant-quota';
 
 export type TenantAction = 'APPROVE' | 'REJECT' | 'SUSPEND' | 'ACTIVATE' | 'CLOSE';
@@ -42,27 +43,21 @@ export interface TenantListItem {
 
 export class SuperAdminService {
   /**
-   * Helper to assert that caller is a SUPER_ADMIN
-   */
-  private static ensureSuperAdmin(session: UserSession) {
-    if (!isSuperAdmin(session)) {
-      throw ApiError.forbidden('Chỉ SUPER_ADMIN mới có quyền truy cập chức năng này.');
-    }
-  }
-
-  /**
    * Aggregate high-level SaaS tenant metrics and quota usage (X / 5)
    */
   static async getTenantMetrics(session: UserSession): Promise<TenantMetrics> {
-    this.ensureSuperAdmin(session);
+    await requireLivePlatformAuthority(session);
+    return this.readTenantMetrics(prisma);
+  }
 
+  private static async readTenantMetrics(db: Pick<Prisma.TransactionClient, 'organization'>): Promise<TenantMetrics> {
     const [totalTenants, pending, active, suspended, rejected, closed] = await Promise.all([
-      prisma.organization.count({ where: { deletedAt: null } }),
-      prisma.organization.count({ where: { status: 'PENDING', deletedAt: null } }),
-      prisma.organization.count({ where: { status: 'ACTIVE', deletedAt: null } }),
-      prisma.organization.count({ where: { status: 'SUSPENDED', deletedAt: null } }),
-      prisma.organization.count({ where: { status: 'REJECTED', deletedAt: null } }),
-      prisma.organization.count({ where: { status: 'CLOSED', deletedAt: null } }),
+      db.organization.count({ where: { deletedAt: null } }),
+      db.organization.count({ where: { status: 'PENDING', deletedAt: null } }),
+      db.organization.count({ where: { status: 'ACTIVE', deletedAt: null } }),
+      db.organization.count({ where: { status: 'SUSPENDED', deletedAt: null } }),
+      db.organization.count({ where: { status: 'REJECTED', deletedAt: null } }),
+      db.organization.count({ where: { status: 'CLOSED', deletedAt: null } }),
     ]);
 
     return {
@@ -85,7 +80,7 @@ export class SuperAdminService {
     session: UserSession,
     filter?: { status?: string; search?: string }
   ): Promise<{ items: TenantListItem[]; metrics: TenantMetrics }> {
-    this.ensureSuperAdmin(session);
+    await requireLivePlatformAuthority(session);
 
     const where: any = { deletedAt: null };
 
@@ -133,7 +128,7 @@ export class SuperAdminService {
           },
         },
       }),
-      this.getTenantMetrics(session),
+      this.readTenantMetrics(prisma),
     ]);
 
     const items: TenantListItem[] = orgs.map((org) => {
@@ -187,7 +182,7 @@ export class SuperAdminService {
    * Retrieve tenant detailed record
    */
   static async getTenantById(id: string, session: UserSession) {
-    this.ensureSuperAdmin(session);
+    await requireLivePlatformAuthority(session);
 
     const org = await prisma.organization.findUnique({
       where: { id },
@@ -266,130 +261,156 @@ export class SuperAdminService {
       clientInfo?: { ipAddress?: string; userAgent?: string };
     }
   ) {
-    this.ensureSuperAdmin(session);
+    assertPlatformSession(session);
+    let result;
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        // Match the tenant writer lock order: organization, actor, roles, grants.
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "organizations" WHERE "id" = ${id} FOR UPDATE
+        `);
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "users" WHERE "id" = ${session.userId} FOR UPDATE
+        `);
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "roles"
+          WHERE "id" IN (SELECT "role_id" FROM "user_roles" WHERE "user_id" = ${session.userId})
+          ORDER BY "id" FOR UPDATE
+        `);
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "user_id", "role_id" FROM "user_roles"
+          WHERE "user_id" = ${session.userId} ORDER BY "user_id", "role_id" FOR UPDATE
+        `);
+        await requireLivePlatformAuthority(session, tx);
 
-    const org = await prisma.organization.findUnique({
-      where: { id },
-    });
+        const org = await tx.organization.findUnique({
+          where: { id },
+        });
 
-    if (!org || org.deletedAt) {
-      throw ApiError.notFound(`Không tìm thấy tổ chức có ID: ${id}`);
-    }
-
-    const previousStatus = org.status;
-    let nextStatus: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED' | 'CLOSED';
-    let approvedAtDate: Date | null = null;
-    let approvedByUser: string | null = null;
-
-    switch (action) {
-      case 'APPROVE': {
-        if (previousStatus !== 'PENDING') {
-          throw ApiError.badRequest(
-            `Chỉ có thể phê duyệt tổ chức đang ở trạng thái PENDING. Trạng thái hiện tại: ${previousStatus}.`
-          );
+        if (!org || org.deletedAt) {
+          throw ApiError.notFound(`Không tìm thấy tổ chức có ID: ${id}`);
         }
 
-        nextStatus = 'ACTIVE';
-        approvedAtDate = new Date();
-        approvedByUser = session.userId;
-        break;
-      }
+        const previousStatus = org.status;
+        let nextStatus: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUSPENDED' | 'CLOSED';
+        let approvedAtDate: Date | null = null;
+        let approvedByUser: string | null = null;
 
-      case 'REJECT': {
-        if (previousStatus !== 'PENDING') {
-          throw ApiError.badRequest(
-            `Chỉ có thể từ chối tổ chức đang ở trạng thái PENDING. Trạng thái hiện tại: ${previousStatus}.`
-          );
+        switch (action) {
+          case 'APPROVE': {
+            if (previousStatus !== 'PENDING') {
+              throw ApiError.badRequest(
+                `Chỉ có thể phê duyệt tổ chức đang ở trạng thái PENDING. Trạng thái hiện tại: ${previousStatus}.`
+              );
+            }
+
+            nextStatus = 'ACTIVE';
+            approvedAtDate = new Date();
+            approvedByUser = session.userId;
+            break;
+          }
+
+          case 'REJECT': {
+            if (previousStatus !== 'PENDING') {
+              throw ApiError.badRequest(
+                `Chỉ có thể từ chối tổ chức đang ở trạng thái PENDING. Trạng thái hiện tại: ${previousStatus}.`
+              );
+            }
+            nextStatus = 'REJECTED';
+            break;
+          }
+
+          case 'SUSPEND': {
+            if (previousStatus !== 'ACTIVE') {
+              throw ApiError.badRequest(
+                `Chỉ có thể tạm đình chỉ tổ chức đang hoạt động (ACTIVE). Trạng thái hiện tại: ${previousStatus}.`
+              );
+            }
+            nextStatus = 'SUSPENDED';
+            break;
+          }
+
+          case 'ACTIVATE': {
+            if (previousStatus === 'ACTIVE') {
+              throw ApiError.badRequest('Tổ chức này đã ở trạng thái ACTIVE.');
+            }
+
+            nextStatus = 'ACTIVE';
+            if (!org.approvedAt) {
+              approvedAtDate = new Date();
+              approvedByUser = session.userId;
+            }
+            break;
+          }
+
+          case 'CLOSE': {
+            if (previousStatus === 'CLOSED') {
+              throw ApiError.badRequest('Tổ chức này đã ở trạng thái CLOSED.');
+            }
+            nextStatus = 'CLOSED';
+            break;
+          }
+
+          default:
+            throw ApiError.badRequest(`Hành động không hợp lệ: ${action}`);
         }
-        nextStatus = 'REJECTED';
-        break;
-      }
 
-      case 'SUSPEND': {
-        if (previousStatus !== 'ACTIVE') {
-          throw ApiError.badRequest(
-            `Chỉ có thể tạm đình chỉ tổ chức đang hoạt động (ACTIVE). Trạng thái hiện tại: ${previousStatus}.`
-          );
-        }
-        nextStatus = 'SUSPENDED';
-        break;
-      }
-
-      case 'ACTIVATE': {
-        if (previousStatus === 'ACTIVE') {
-          throw ApiError.badRequest('Tổ chức này đã ở trạng thái ACTIVE.');
-        }
-
-        nextStatus = 'ACTIVE';
-        if (!org.approvedAt) {
-          approvedAtDate = new Date();
-          approvedByUser = session.userId;
-        }
-        break;
-      }
-
-      case 'CLOSE': {
-        if (previousStatus === 'CLOSED') {
-          throw ApiError.badRequest('Tổ chức này đã ở trạng thái CLOSED.');
-        }
-        nextStatus = 'CLOSED';
-        break;
-      }
-
-      default:
-        throw ApiError.badRequest(`Hành động không hợp lệ: ${action}`);
-    }
-
-    // Atomic transaction: Update Organization + Create Audit Log
-    const result = await prisma.$transaction(async (tx) => {
-      const updatedOrg = await tx.organization.update({
-        where: { id },
-        data: {
-          status: nextStatus,
-          ...(approvedAtDate ? { approvedAt: approvedAtDate } : {}),
-          ...(approvedByUser ? { approvedBy: approvedByUser } : {}),
-        },
-      });
-
-      // Audit Log for every action
-      await tx.auditLog.create({
-        data: {
-          organizationId: org.id,
-          actorId: session.userId,
-          action: `TENANT_${action}`,
-          entity: 'organization',
-          entityId: org.id,
-          oldValues: {
-            status: previousStatus,
-          },
-          newValues: {
+        const updatedOrg = await tx.organization.update({
+          where: { id, status: previousStatus, updatedAt: org.updatedAt, deletedAt: null },
+          data: {
             status: nextStatus,
-            action,
-            reason: options?.reason || null,
+            ...(approvedAtDate ? { approvedAt: approvedAtDate } : {}),
+            ...(approvedByUser ? { approvedBy: approvedByUser } : {}),
           },
-          ipAddress: options?.clientInfo?.ipAddress || null,
-          userAgent: options?.clientInfo?.userAgent || null,
-        },
-      });
+        });
 
-      return updatedOrg;
-    });
+        // Audit Log for every action
+        await tx.auditLog.create({
+          data: {
+            organizationId: org.id,
+            actorId: session.userId,
+            action: `TENANT_${action}`,
+            entity: 'organization',
+            entityId: org.id,
+            oldValues: {
+              status: previousStatus,
+            },
+            newValues: {
+              status: nextStatus,
+              action,
+              reason: options?.reason || null,
+            },
+            ipAddress: options?.clientInfo?.ipAddress || null,
+            userAgent: options?.clientInfo?.userAgent || null,
+          },
+        });
+
+        // Complete reads and serialization before commit; no fallible DB work after it.
+        const metrics = await this.readTenantMetrics(tx);
+        return {
+          organization: {
+            ...updatedOrg,
+            createdAt: updatedOrg.createdAt.toISOString(),
+            updatedAt: updatedOrg.updatedAt.toISOString(),
+            approvedAt: updatedOrg.approvedAt?.toISOString() || null,
+          },
+          metrics,
+          message: `Thực hiện ${action} thành công cho tổ chức ${org.name}. Trạng thái hiện tại: ${nextStatus}.`,
+        };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError &&
+          (error.code === 'P2025' || error.code === 'P2034' ||
+            (error.code === 'P2010' && ['40001', '40P01'].includes(String(error.meta?.code))))) {
+        throw ApiError.conflict('Tenant or authority state changed concurrently. Please reload before retrying.');
+      }
+      throw error;
+    }
 
     logger.info(
-      `[SuperAdminService] Tenant ${org.name} (${org.slug}) status transitioned: ${previousStatus} -> ${nextStatus} by ${session.email}`
+      `[SuperAdminService] Tenant ${result.organization.name} (${result.organization.slug}) transitioned via ${action} by ${session.email}`
     );
 
-    const newMetrics = await this.getTenantMetrics(session);
-
-    return {
-      organization: {
-        ...result,
-        createdAt: result.createdAt.toISOString(),
-        updatedAt: result.updatedAt.toISOString(),
-        approvedAt: result.approvedAt?.toISOString() || null,
-      },
-      metrics: newMetrics,
-      message: `Thực hiện ${action} thành công cho tổ chức ${org.name}. Trạng thái hiện tại: ${nextStatus}.`,
-    };
+    return result;
   }
 }

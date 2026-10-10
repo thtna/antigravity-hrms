@@ -22,6 +22,7 @@ export type AuditActionType =
 
 export interface LogAuditParams {
   actorId?: string | null;
+  organizationId?: string | null;
   action: AuditActionType;
   entity: string;
   entityId: string;
@@ -56,6 +57,7 @@ export class AuditService {
       const record = await client.auditLog.create({
         data: {
           actorId: params.actorId ?? null,
+          ...(params.organizationId !== undefined ? { organizationId: params.organizationId } : {}),
           action: params.action,
           entity: params.entity,
           entityId: params.entityId,
@@ -283,31 +285,45 @@ export class AuditService {
 
   // ── 8. PERMISSION CHANGE ────────────────────────────────────────────────────
   static async logPermissionChange(params: {
-    targetUserId: string;
-    targetEmail?: string;
-    actorId?: string | null;
-    actionType: 'ASSIGN_ROLES' | 'UPDATE_PERMISSIONS' | 'REVOKE_ROLES';
+    actorId: string;
     oldRoles?: string[];
     newRoles?: string[];
     oldPermissions?: string[];
     newPermissions?: string[];
     ipAddress?: string | null;
     userAgent?: string | null;
-    tx?: Prisma.TransactionClient;
-  }) {
+    tx: Prisma.TransactionClient;
+  } & (
+    { scope: 'tenant'; organizationId: string; membershipId: string; targetUserId: string;
+      targetEmail?: string; actionType: 'ASSIGN_ROLES' | 'REVOKE_ROLES' } |
+    { scope: 'platform'; organizationId: null; roleId: string; roleCode: string;
+      actionType: 'UPDATE_PERMISSIONS' }
+  )) {
+    if (!params.tx || !params.actorId ||
+        (params.scope === 'tenant'
+          ? !params.organizationId?.trim() || !params.membershipId || !params.targetUserId ||
+            !['ASSIGN_ROLES', 'REVOKE_ROLES'].includes(params.actionType)
+          : params.scope !== 'platform' || params.organizationId !== null || !params.roleId ||
+            !params.roleCode || params.actionType !== 'UPDATE_PERMISSIONS')) {
+      throw ApiError.badRequest('Permission audit requires an explicit scope and transaction.');
+    }
+    const target = params.scope === 'tenant'
+      ? { targetUserId: params.targetUserId, targetEmail: params.targetEmail }
+      : { roleCode: params.roleCode };
     return this.logEvent({
       actorId: params.actorId,
+      organizationId: params.organizationId,
       action: AUDIT_ACTIONS.PERMISSION_CHANGE,
-      entity: 'users',
-      entityId: params.targetUserId,
+      entity: params.scope === 'tenant' ? 'organization_members' : 'roles',
+      entityId: params.scope === 'tenant' ? params.membershipId : params.roleId,
       oldValues: {
-        targetEmail: params.targetEmail,
+        ...target,
         roles: params.oldRoles ?? [],
         permissions: params.oldPermissions ?? [],
       },
       newValues: {
         actionType: params.actionType,
-        targetEmail: params.targetEmail,
+        ...target,
         roles: params.newRoles ?? [],
         permissions: params.newPermissions ?? [],
         changedAt: new Date().toISOString(),

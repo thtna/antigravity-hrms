@@ -145,9 +145,9 @@ export async function POST(
       if (!rawRoles.includes('manager')) rawRoles.push('manager');
     }
 
-    const roles: RoleCode[] = rawRoles.length > 0 
-      ? rawRoles.map(normalizeRole) 
-      : ['employee'];
+    const normalizedRoles = rawRoles.map(normalizeRole)
+      .filter((role) => isSuperAdmin || role !== 'super_admin');
+    const roles: RoleCode[] = normalizedRoles.length > 0 ? normalizedRoles : ['employee'];
 
     const permissionSet = new Set<string>();
     // Collect DB-assigned permissions

@@ -43,15 +43,24 @@ const mockPrisma = vi.hoisted(() => ({
     findMany: vi.fn(),
     updateMany: vi.fn(),
   },
+  organizationMember: {
+    findFirst: vi.fn(),
+  },
 }));
 
 vi.mock('@/lib/db/prisma', () => ({ prisma: mockPrisma }));
 vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
+vi.mock('@/lib/email/email.service', () => ({ EmailService: {} }));
+vi.mock('@/lib/auth/guard', () => ({ requireAuth: vi.fn() }));
 
 import { DashboardService } from '../dashboard.service';
 import { UserSession } from '@/types';
+import { NotificationService } from '../notification.service';
+import { requireAuth } from '@/lib/auth/guard';
+import { NextRequest } from 'next/server';
+import { POST as markDashboardNotifications } from '@/app/api/v1/dashboard/notifications/route';
 
 describe('Phase 18 — Role-Based Dashboard Service', () => {
   const adminSession: UserSession = {
@@ -89,7 +98,14 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
   };
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    vi.stubGlobal('fetch', vi.fn(() => { throw new Error('Real network forbidden in dashboard tests'); }));
+    mockPrisma.organizationMember.findFirst.mockImplementation(async ({ where }) =>
+      ['usr-emp', 'usr-fresh', 'usr-unlinked', 'usr-cross-tenant'].includes(where.userId) &&
+      where.organizationId === 'org-test-dashboard' && where.isActive === true &&
+      where.user.isActive === true && where.user.deletedAt === null &&
+      where.organization.status === 'ACTIVE' && where.organization.deletedAt === null
+        ? { role: 'EMPLOYEE' } : null);
     mockPrisma.employee.findFirst.mockImplementation(async ({ where }) => {
       const employee = await mockPrisma.employee.findUnique({ where: { id: where.id } });
       return employee?.organizationId === where.organizationId ? employee : null;
@@ -98,6 +114,7 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   describe('R2A-DERIVED-D1 Vietnam business calendar helpers', () => {
@@ -1041,22 +1058,111 @@ describe('Phase 18 — Role-Based Dashboard Service', () => {
   });
 
   // ── 4. Notification Management ───────────────────────────────────────────
+  describe('R3 dashboard notification tenant parity', () => {
+    type Row = { id: string; organizationId: string | null; userId: string; isRead: boolean; title: string; message: string; type: string; actionUrl: null; createdAt: Date };
+    let rows: Row[];
+    let liveMembership: boolean;
+    const sessionA = { ...employeeSession, organizationId: 'org-a' };
+    const sessionB = { ...employeeSession, organizationId: 'org-b' };
+    const matching = (where: Record<string, unknown>) => rows.filter((row) =>
+      Object.entries(where).every(([key, value]) => row[key as keyof Row] === value));
+
+    beforeEach(() => {
+      liveMembership = true;
+      rows = ['org-a', 'org-b', null].map((organizationId, index) => ({
+        id: `scope-${index}`, organizationId, userId: 'usr-emp', isRead: false,
+        title: 'Tenant notice', message: 'Fixture', type: 'system_event', actionUrl: null, createdAt: new Date(),
+      }));
+      rows.push({ ...rows[1], id: 'other-user', userId: 'usr-other' });
+      mockPrisma.organizationMember.findFirst.mockImplementation(async ({ where }) =>
+        liveMembership && where.userId === 'usr-emp' && ['org-a', 'org-b'].includes(where.organizationId) &&
+        where.isActive === true && where.user.isActive === true && where.user.deletedAt === null &&
+        where.organization.status === 'ACTIVE' && where.organization.deletedAt === null
+          ? { role: 'EMPLOYEE' } : null);
+      mockPrisma.employee.findFirst.mockImplementation(async ({ where }) => ({
+        id: 'emp-dev-1', organizationId: where.organizationId, employeeCode: 'EMP-1',
+        firstName: 'Shared', lastName: 'User', contractSalary: 0, hourlyRate: 0, department: null, position: null,
+      }));
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.attendance.aggregate.mockResolvedValue({ _sum: { actualWorkHours: null, otHours: null } });
+      mockPrisma.leaveRequest.findMany.mockResolvedValue([]);
+      mockPrisma.leaveRequest.count.mockResolvedValue(0);
+      mockPrisma.employeeKpiResult.findMany.mockResolvedValue([]);
+      mockPrisma.payroll.findFirst.mockResolvedValue(null);
+      mockPrisma.notification.count.mockImplementation(async ({ where }) => matching(where).length);
+      mockPrisma.notification.findMany.mockImplementation(async ({ where, skip = 0, take = 20 }) => matching(where).slice(skip, skip + take));
+      mockPrisma.notification.updateMany.mockImplementation(async ({ where, data }) => {
+        const selected = matching(where);
+        selected.forEach((row) => { row.isRead = data.isRead; });
+        return { count: selected.length };
+      });
+    });
+
+    it.each(['org-a', 'org-b'])('matches API boundary at %s and excludes NULL/other-user notifications', async (organizationId) => {
+      const session = { ...employeeSession, organizationId };
+      const dashboard = await DashboardService.getEmployeeDashboard(session);
+      const api = await NotificationService.getUserNotifications(session);
+      expect(dashboard.notifications.unreadCount).toBe(1);
+      expect(dashboard.notifications.items.map(({ id }) => id)).toEqual(api.items.map(({ id }) => id));
+      expect(dashboard.notifications.items.map(({ id }) => id)).toEqual([organizationId === 'org-a' ? 'scope-0' : 'scope-1']);
+      expect(api.meta.unreadCount).toBe(dashboard.notifications.unreadCount);
+      expect(mockPrisma.notification.count).toHaveBeenCalledWith({ where: { organizationId, userId: 'usr-emp', isRead: false } });
+    });
+
+    it.each(['scope-0', 'scope-2', 'other-user'])('dashboard mark-read cannot touch foreign/NULL/other-user %s', async (notificationId) => {
+      const original = structuredClone(rows);
+      expect(await DashboardService.markNotificationAsRead(sessionB, notificationId)).toBe(0);
+      expect(rows).toEqual(original);
+    });
+
+    it('dashboard route ignores forged body organization and preserves markedCount shape', async () => {
+      vi.mocked(requireAuth).mockResolvedValue(sessionB);
+      const response = await markDashboardNotifications(new NextRequest('http://localhost/api/v1/dashboard/notifications', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organizationId: 'org-a' }),
+      }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ success: true, data: { markedCount: 1 }, meta: { timestamp: expect.any(String) } });
+      expect(rows.map(({ isRead }) => isRead)).toEqual([false, true, false, false]);
+      expect((await DashboardService.getEmployeeDashboard(sessionA)).notifications.unreadCount).toBe(1);
+      expect((await DashboardService.getEmployeeDashboard(sessionB)).notifications.unreadCount).toBe(0);
+    });
+
+    it('revoked membership denies dashboard reads/marks before ORM side effects', async () => {
+      liveMembership = false;
+      await expect(DashboardService.getEmployeeDashboard(sessionB)).rejects.toMatchObject({ statusCode: 403 });
+      await expect(DashboardService.markNotificationAsRead(sessionB)).rejects.toMatchObject({ statusCode: 403 });
+      expect(mockPrisma.employee.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.count).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('missing Platform tenant context cannot use dashboard notification paths', async () => {
+      const session = { ...sessionB, organizationId: undefined, roles: ['super_admin'] as UserSession['roles'] };
+      await expect(DashboardService.getEmployeeDashboard(session)).rejects.toMatchObject({ statusCode: 403 });
+      await expect(DashboardService.markNotificationAsRead(session)).rejects.toMatchObject({ statusCode: 403 });
+      expect(mockPrisma.organizationMember.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Notification Management (markNotificationAsRead)', () => {
     it('marks a single notification or all notifications as read', async () => {
       mockPrisma.notification.updateMany.mockResolvedValue({ count: 1 });
 
-      const count1 = await DashboardService.markNotificationAsRead('usr-emp', 'notif-1');
+      const count1 = await DashboardService.markNotificationAsRead(employeeSession, 'notif-1');
       expect(count1).toBe(1);
       expect(mockPrisma.notification.updateMany).toHaveBeenCalledWith({
-        where: { id: 'notif-1', userId: 'usr-emp' },
+        where: { id: 'notif-1', userId: 'usr-emp', organizationId: 'org-test-dashboard' },
         data: { isRead: true },
       });
 
       mockPrisma.notification.updateMany.mockResolvedValue({ count: 5 });
-      const countAll = await DashboardService.markNotificationAsRead('usr-emp');
+      const countAll = await DashboardService.markNotificationAsRead(employeeSession);
       expect(countAll).toBe(5);
       expect(mockPrisma.notification.updateMany).toHaveBeenCalledWith({
-        where: { userId: 'usr-emp', isRead: false },
+        where: { userId: 'usr-emp', organizationId: 'org-test-dashboard', isRead: false },
         data: { isRead: true },
       });
     });

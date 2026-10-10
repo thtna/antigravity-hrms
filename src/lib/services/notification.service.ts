@@ -2,6 +2,8 @@ import { prisma } from '@/lib/db/prisma';
 import { EmailService } from '@/lib/email/email.service';
 import { logger } from '@/lib/logger';
 import { ApiError } from '@/lib/errors';
+import type { UserSession } from '@/types';
+import { TenantRole } from '@prisma/client';
 
 export type NotificationType =
   | 'leave_request'
@@ -54,20 +56,79 @@ export interface NotificationListResult {
 }
 
 export class NotificationService {
+  static async requireTenantContext(session: UserSession, forSending = false) {
+    if (!session?.userId || session.isActive !== true ||
+        typeof session.organizationId !== 'string' || !session.organizationId.trim()) {
+      throw ApiError.forbidden('An authenticated tenant context is required.');
+    }
+
+    const membership = await prisma.organizationMember.findFirst({
+      where: {
+        userId: session.userId,
+        organizationId: session.organizationId,
+        isActive: true,
+        user: { isActive: true, deletedAt: null },
+        organization: { status: 'ACTIVE', deletedAt: null },
+      },
+      select: { role: true },
+    });
+    if (!membership || (forSending &&
+        ![TenantRole.OWNER, TenantRole.ADMIN, TenantRole.HR_MANAGER]
+          .some((role) => role === membership.role))) {
+      throw ApiError.forbidden('Live tenant membership authority is required.');
+    }
+
+    return { organizationId: session.organizationId, userId: session.userId };
+  }
+
+  private static async getEligibleRecipients(organizationId: string, userIds: string[] | 'all') {
+    if (userIds !== 'all' && (!Array.isArray(userIds) ||
+        userIds.some((id) => typeof id !== 'string' || !id.trim()))) {
+      throw ApiError.badRequest('Valid recipient user IDs are required.');
+    }
+    const requestedIds = userIds === 'all' ? null : [...new Set(userIds)];
+    const members = await prisma.organizationMember.findMany({
+      where: {
+        organizationId,
+        isActive: true,
+        user: { isActive: true, deletedAt: null },
+        ...(requestedIds ? { userId: { in: requestedIds } } : {}),
+      },
+      select: { user: { select: { id: true, email: true } } },
+    });
+    const recipients = [...new Map(members.map(({ user }) => [user.id, user])).values()];
+    if (requestedIds && (recipients.length !== requestedIds.length ||
+        requestedIds.some((id) => !recipients.some((user) => user.id === id)))) {
+      throw ApiError.forbidden('Every recipient must be an active member of this tenant.');
+    }
+    return recipients;
+  }
+
   /**
    * Dispatches a single in-app notification and optional email
    */
-  static async createNotification(input: CreateNotificationInput) {
-    if (!input.userId) {
+  static async createNotification(input: CreateNotificationInput, session: UserSession) {
+    const { organizationId } = await this.requireTenantContext(session, true);
+    if (typeof input.userId !== 'string' || !input.userId.trim()) {
       throw ApiError.badRequest('userId là bắt buộc để gửi thông báo');
     }
-    if (!input.title || !input.message) {
+    if (typeof input.title !== 'string' || !input.title.trim() ||
+        typeof input.message !== 'string' || !input.message.trim()) {
       throw ApiError.badRequest('Tiêu đề và nội dung thông báo không được để trống');
     }
 
-    // 1. Create In-App Notification in database
+    const [recipient] = await this.getEligibleRecipients(organizationId, [input.userId]);
+    const recipientEmail = recipient.email.toLowerCase().trim();
+    if (input.emailRecipient !== undefined &&
+        (typeof input.emailRecipient !== 'string' ||
+          input.emailRecipient.toLowerCase().trim() !== recipientEmail)) {
+      throw ApiError.badRequest('emailRecipient must match the authoritative recipient email.');
+    }
+
+    // Validate authority and all recipient input before creating or sending anything.
     const notification = await prisma.notification.create({
       data: {
+        organizationId,
         userId: input.userId,
         title: input.title,
         message: input.message,
@@ -80,7 +141,7 @@ export class NotificationService {
     logger.info(`[NotificationService] In-app notification created: ${notification.id} for user ${input.userId} (${input.type})`);
 
     // 2. Optional Email dispatch
-    if (input.sendEmail && input.emailRecipient) {
+    if (input.sendEmail) {
       try {
         const html = EmailService.renderNotificationEmail({
           title: input.title,
@@ -91,7 +152,7 @@ export class NotificationService {
         });
 
         await EmailService.sendEmail({
-          to: input.emailRecipient,
+          to: recipientEmail,
           subject: input.title,
           html,
           text: input.message,
@@ -117,7 +178,7 @@ export class NotificationService {
     days: number;
     startDate: string;
     requestId: string;
-  }) {
+  }, session: UserSession) {
     return this.createNotification({
       userId: options.approverUserId,
       type: 'leave_request',
@@ -127,7 +188,7 @@ export class NotificationService {
       sendEmail: Boolean(options.approverEmail),
       emailRecipient: options.approverEmail,
       recipientName: options.approverName,
-    });
+    }, session);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -142,7 +203,7 @@ export class NotificationService {
     leaveType: string;
     reason?: string;
     requestId: string;
-  }) {
+  }, session: UserSession) {
     const isApproved = options.status === 'APPROVED';
     const statusText = isApproved ? 'ĐÃ ĐƯỢC DUYỆT' : 'ĐÃ BỊ TỪ CHỐI';
 
@@ -155,7 +216,7 @@ export class NotificationService {
       sendEmail: Boolean(options.requesterEmail),
       emailRecipient: options.requesterEmail,
       recipientName: options.requesterName,
-    });
+    }, session);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -169,7 +230,7 @@ export class NotificationService {
     date: string;
     minutes?: number;
     details?: string;
-  }) {
+  }, session: UserSession) {
     let title = 'Cảnh báo vi phạm chấm công';
     let message = `Ghi nhận bất thường chấm công ngày ${options.date}.`;
 
@@ -205,7 +266,7 @@ export class NotificationService {
       sendEmail: Boolean(options.employeeEmail),
       emailRecipient: options.employeeEmail,
       recipientName: options.employeeName,
-    });
+    }, session);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -218,7 +279,7 @@ export class NotificationService {
     amount: number;
     reason: string;
     bonusId: string;
-  }) {
+  }, session: UserSession) {
     const formattedAmount = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(options.amount);
 
     return this.createNotification({
@@ -230,7 +291,7 @@ export class NotificationService {
       sendEmail: Boolean(options.employeeEmail),
       emailRecipient: options.employeeEmail,
       recipientName: options.employeeName,
-    });
+    }, session);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -243,7 +304,7 @@ export class NotificationService {
     amount: number;
     reason: string;
     penaltyId: string;
-  }) {
+  }, session: UserSession) {
     const formattedAmount = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(options.amount);
 
     return this.createNotification({
@@ -255,7 +316,7 @@ export class NotificationService {
       sendEmail: Boolean(options.employeeEmail),
       emailRecipient: options.employeeEmail,
       recipientName: options.employeeName,
-    });
+    }, session);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -268,7 +329,7 @@ export class NotificationService {
     periodName: string;
     netSalary: number;
     payslipId?: string;
-  }) {
+  }, session: UserSession) {
     const formattedNet = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(options.netSalary);
 
     return this.createNotification({
@@ -280,7 +341,7 @@ export class NotificationService {
       sendEmail: Boolean(options.employeeEmail),
       emailRecipient: options.employeeEmail,
       recipientName: options.employeeName,
-    });
+    }, session);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -291,22 +352,19 @@ export class NotificationService {
     title: string;
     message: string;
     actionUrl?: string;
-  }) {
-    let targetUserIds: string[] = [];
-
-    if (options.userIds === 'all') {
-      const users = await prisma.user.findMany({
-        where: { isActive: true },
-        select: { id: true },
-      });
-      targetUserIds = users.map((u) => u.id);
-    } else {
-      targetUserIds = options.userIds;
+  }, session: UserSession) {
+    const { organizationId } = await this.requireTenantContext(session, true);
+    if (typeof options.title !== 'string' || !options.title.trim() ||
+        typeof options.message !== 'string' || !options.message.trim()) {
+      throw ApiError.badRequest('Notification title and message are required.');
     }
+    const recipients = await this.getEligibleRecipients(organizationId, options.userIds);
+    const targetUserIds = recipients.map((user) => user.id);
 
     if (targetUserIds.length === 0) return 0;
 
     const notificationsData = targetUserIds.map((userId) => ({
+      organizationId,
       userId,
       title: options.title,
       message: options.message,
@@ -331,14 +389,15 @@ export class NotificationService {
    * Retrieves paginated notifications for a user with filters
    */
   static async getUserNotifications(
-    userId: string,
+    session: UserSession,
     options: NotificationQueryOptions = {}
   ): Promise<NotificationListResult> {
+    const scope = await this.requireTenantContext(session);
     const page = Math.max(1, options.page || 1);
     const limit = Math.max(1, Math.min(100, options.limit || 20));
     const skip = (page - 1) * limit;
 
-    const whereClause: any = { userId };
+    const whereClause: any = { ...scope };
 
     if (options.isRead !== undefined) {
       whereClause.isRead = options.isRead;
@@ -357,7 +416,7 @@ export class NotificationService {
 
     const [total, unreadCount, items] = await Promise.all([
       prisma.notification.count({ where: whereClause }),
-      prisma.notification.count({ where: { userId, isRead: false } }),
+      prisma.notification.count({ where: { ...scope, isRead: false } }),
       prisma.notification.findMany({
         where: whereClause,
         orderBy: options.sortBy
@@ -383,9 +442,10 @@ export class NotificationService {
   /**
    * Get unread notification count for badge
    */
-  static async getUnreadCount(userId: string): Promise<number> {
+  static async getUnreadCount(session: UserSession): Promise<number> {
+    const scope = await this.requireTenantContext(session);
     return prisma.notification.count({
-      where: { userId, isRead: false },
+      where: { ...scope, isRead: false },
     });
   }
 
@@ -393,17 +453,18 @@ export class NotificationService {
    * Mark notification(s) as read
    * If notificationId is provided, marks that specific one. Otherwise marks all for user.
    */
-  static async markAsRead(userId: string, notificationId?: string): Promise<number> {
+  static async markAsRead(session: UserSession, notificationId?: string): Promise<number> {
+    const scope = await this.requireTenantContext(session);
     if (notificationId) {
       const result = await prisma.notification.updateMany({
-        where: { id: notificationId, userId },
+        where: { id: notificationId, ...scope },
         data: { isRead: true },
       });
       return result.count;
     }
 
     const result = await prisma.notification.updateMany({
-      where: { userId, isRead: false },
+      where: { ...scope, isRead: false },
       data: { isRead: true },
     });
     return result.count;
@@ -412,9 +473,10 @@ export class NotificationService {
   /**
    * Mark a notification as unread
    */
-  static async markAsUnread(userId: string, notificationId: string): Promise<boolean> {
+  static async markAsUnread(session: UserSession, notificationId: string): Promise<boolean> {
+    const scope = await this.requireTenantContext(session);
     const result = await prisma.notification.updateMany({
-      where: { id: notificationId, userId },
+      where: { id: notificationId, ...scope },
       data: { isRead: false },
     });
     return result.count > 0;
@@ -423,9 +485,10 @@ export class NotificationService {
   /**
    * Delete / dismiss a notification
    */
-  static async deleteNotification(userId: string, notificationId: string): Promise<boolean> {
+  static async deleteNotification(session: UserSession, notificationId: string): Promise<boolean> {
+    const scope = await this.requireTenantContext(session);
     const result = await prisma.notification.deleteMany({
-      where: { id: notificationId, userId },
+      where: { id: notificationId, ...scope },
     });
     return result.count > 0;
   }

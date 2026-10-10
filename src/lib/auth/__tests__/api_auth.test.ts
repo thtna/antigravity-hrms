@@ -4,6 +4,7 @@ import { POST as loginHandler } from '@/app/api/v1/auth/login/route';
 import { POST as registerHandler } from '@/app/api/v1/auth/register/route';
 import { GET as meHandler } from '@/app/api/v1/auth/me/route';
 import { hashPassword } from '@/lib/auth/password';
+import { setSessionCookie, verifySessionToken } from '@/lib/auth/session';
 import { prisma } from '@/lib/db/prisma';
 import { resetRateLimit } from '@/lib/security/rate-limit';
 
@@ -482,6 +483,62 @@ describe('PHASE 2 — AUTHENTICATION API ROUTE TESTS', () => {
   });
 
   // --------------------------------------------------------------------------
+  it.each(['SUPER_ADMIN', 'superadmin', ' super_admin ', ' SuperAdmin '])(
+    'does not normalize alias-only %s into tenant Platform authority or default permissions', async (code) => {
+      (prisma.user.findUnique as unknown as Mock).mockResolvedValue({
+        id: 'usr-alias', email: 'alias@example.test', passwordHash: hashedPassword, isActive: true,
+        employee: null, userRoles: [{ role: { code,
+          rolePermissions: [{ permission: { code: 'custom:legacy-explicit' } }] } }],
+        organizationMembers: [{ id: 'member-alias', organizationId: 'org-alias', role: 'EMPLOYEE',
+          isActive: true, isDefault: true, organization: { id: 'org-alias', name: 'Alias Tenant',
+            slug: 'alias-tenant', status: 'ACTIVE' } }],
+      });
+      const response = await loginHandler(new NextRequest('http://localhost:3000/api/v1/auth/login', {
+        method: 'POST', body: JSON.stringify({ email: 'alias@example.test', password: testPassword }),
+      }));
+      expect(response.status).toBe(200);
+      const token = vi.mocked(setSessionCookie).mock.calls[0][0];
+      const jwt = await verifySessionToken(token);
+      expect(jwt).toMatchObject({ organizationId: 'org-alias', tenantRole: 'EMPLOYEE', roles: ['employee'] });
+      expect(jwt!.roles).not.toContain('super_admin');
+      expect(jwt!.permissions).toContain('custom:legacy-explicit');
+      expect(jwt!.permissions).not.toContain('*');
+      expect(jwt!.permissions).not.toContain('tenant:approve');
+      expect(prisma.userRole.create).not.toHaveBeenCalled();
+    });
+
+  it('does not turn an alias-only account without membership into a Platform session', async () => {
+    (prisma.user.findUnique as unknown as Mock).mockResolvedValue({
+      id: 'usr-alias', email: 'alias@example.test', passwordHash: hashedPassword, isActive: true,
+      employee: null, userRoles: [{ role: { code: 'SUPER_ADMIN', rolePermissions: [] } }],
+      organizationMembers: [],
+    });
+    const response = await loginHandler(new NextRequest('http://localhost:3000/api/v1/auth/login', {
+      method: 'POST', body: JSON.stringify({ email: 'alias@example.test', password: testPassword }),
+    }));
+    expect(response.status).toBe(403);
+    expect(setSessionCookie).not.toHaveBeenCalled();
+  });
+
+  it('preserves explicit legacy permission records without claiming full legacy grant isolation', async () => {
+    (prisma.user.findUnique as unknown as Mock).mockResolvedValue({
+      id: 'usr-legacy', email: 'legacy@example.test', passwordHash: hashedPassword, isActive: true,
+      employee: null, userRoles: [{ role: { code: 'SUPER_ADMIN',
+        rolePermissions: [{ permission: { code: '*' } }] } }],
+      organizationMembers: [{ id: 'member-legacy', organizationId: 'org-legacy', role: 'EMPLOYEE',
+        isActive: true, isDefault: true, organization: { id: 'org-legacy', name: 'Legacy Tenant',
+          slug: 'legacy-tenant', status: 'ACTIVE' } }],
+    });
+    const response = await loginHandler(new NextRequest('http://localhost:3000/api/v1/auth/login', {
+      method: 'POST', body: JSON.stringify({ email: 'legacy@example.test', password: testPassword }),
+    }));
+    expect(response.status).toBe(200);
+    const jwt = await verifySessionToken(vi.mocked(setSessionCookie).mock.calls[0][0]);
+    expect(jwt).toMatchObject({ organizationId: 'org-legacy', roles: ['employee'] });
+    expect(jwt!.permissions).toContain('*');
+    expect(prisma.userRole.create).not.toHaveBeenCalled();
+  });
+
   // 11. Tenant User Guard: Rejection when No Active Membership Exists
   // --------------------------------------------------------------------------
   it('POST /api/v1/auth/login - should strictly reject tenant user without active organization membership with 403', async () => {

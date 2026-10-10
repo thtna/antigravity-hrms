@@ -20,7 +20,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<an
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '20', 10);
 
-    const result = await NotificationService.getUserNotifications(session.userId, {
+    const result = await NotificationService.getUserNotifications(session, {
       isRead,
       type,
       search,
@@ -44,12 +44,6 @@ export async function GET(req: NextRequest): Promise<NextResponse<ApiResponse<an
 export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<any>>> {
   try {
     const session = await requireAuth();
-    const isAdminOrHr = session.roles.includes('admin') || session.roles.includes('hr');
-
-    if (!isAdminOrHr) {
-      throw ApiError.forbidden('Chỉ Admin hoặc HR mới có quyền tạo thông báo trực tiếp');
-    }
-
     const body = await req.json();
     const { userId, userIds, title, message, type, actionUrl, sendEmail, emailRecipient } = body;
 
@@ -59,7 +53,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<a
         title,
         message,
         actionUrl,
-      });
+      }, session);
 
       return NextResponse.json({
         success: true,
@@ -80,7 +74,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<ApiResponse<a
       actionUrl,
       sendEmail,
       emailRecipient,
-    });
+    }, session);
 
     return NextResponse.json(
       {

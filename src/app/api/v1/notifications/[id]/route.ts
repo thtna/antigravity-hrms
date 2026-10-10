@@ -20,7 +20,7 @@ export async function DELETE(
       throw ApiError.badRequest('id thông báo là bắt buộc');
     }
 
-    const success = await NotificationService.deleteNotification(session.userId, id);
+    const success = await NotificationService.deleteNotification(session, id);
 
     if (!success) {
       throw ApiError.notFound('Không tìm thấy thông báo hoặc bạn không có quyền xóa');

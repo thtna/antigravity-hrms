@@ -3,6 +3,59 @@ import { ApiError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { UserSession } from '@/types';
 import { AuditService } from './audit.service';
+import { normalizeRole } from '@/lib/auth/roles';
+import { Prisma, TenantRole } from '@prisma/client';
+import { assertPlatformSession, requireLivePlatformAuthority } from '@/lib/auth/platform-authority';
+
+export const ASSIGNABLE_ROLE_CODES = ['admin', 'hr', 'manager', 'employee'] as const;
+
+const TENANT_ROLE_BY_CODE: Record<(typeof ASSIGNABLE_ROLE_CODES)[number], TenantRole> = {
+  admin: TenantRole.ADMIN,
+  hr: TenantRole.HR_MANAGER,
+  manager: TenantRole.MANAGER,
+  employee: TenantRole.EMPLOYEE,
+};
+
+function hasPlatformRole(user: { userRoles: { role: { code: string } }[] }) {
+  return user.userRoles.some(({ role }) => normalizeRole(role.code) === 'super_admin');
+}
+
+async function lockUserAuthority(
+  tx: Prisma.TransactionClient,
+  userIds: string[],
+  templateCode: string | null = null
+) {
+  const ids = Prisma.join([...new Set(userIds)].sort());
+  // Lock parents and grants in a stable order, including absent-grant insert protection.
+  await tx.$queryRaw(Prisma.sql`
+    SELECT "id" FROM "users" WHERE "id" IN (${ids}) ORDER BY "id" FOR UPDATE
+  `);
+  await tx.$queryRaw(Prisma.sql`
+    SELECT "id" FROM "roles"
+    WHERE "id" IN (SELECT "role_id" FROM "user_roles" WHERE "user_id" IN (${ids}))
+       OR "code" = ${templateCode}
+    ORDER BY "id" FOR UPDATE
+  `);
+  await tx.$queryRaw(Prisma.sql`
+    SELECT "user_id", "role_id" FROM "user_roles"
+    WHERE "user_id" IN (${ids}) ORDER BY "user_id", "role_id" FOR UPDATE
+  `);
+}
+
+async function authorityTransaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {
+  try {
+    return await prisma.$transaction(operation, {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === 'P2034' ||
+          (error.code === 'P2010' && ['40001', '40P01'].includes(String(error.meta?.code))))) {
+      throw ApiError.conflict('Authorization state changed concurrently. Please reload before retrying.');
+    }
+    throw error;
+  }
+}
 
 export interface AssignUserRolesInput {
   targetUserId: string;
@@ -49,108 +102,121 @@ export class PermissionService {
   }
 
   /**
-   * Assign roles to a user (Admin only).
-   * Generates PERMISSION_CHANGE audit log.
+   * Assign one tenant membership role using live OWNER/ADMIN authority.
+   * Legacy global grants are deliberately left untouched.
    */
   static async assignUserRoles(
     input: AssignUserRolesInput,
     session: UserSession,
     clientInfo?: { ipAddress?: string; userAgent?: string }
   ) {
-    // Privilege Escalation Prevention: Only Admin can assign/modify roles
-    if (!session.roles.includes('admin')) {
-      throw ApiError.forbidden('Chỉ Quản trị viên tối cao (Admin) mới có quyền gán hoặc thay đổi vai trò tài khoản.');
+    if (!session?.userId) throw ApiError.unauthorized();
+    if (!session.isActive) throw ApiError.forbidden();
+    const organizationId = session.organizationId;
+    if (typeof organizationId !== 'string' || !organizationId.trim()) {
+      throw ApiError.forbidden('An authenticated tenant context is required.');
     }
-
-    if (!input.roleCodes || input.roleCodes.length === 0) {
-      throw ApiError.badRequest('Tài khoản phải có ít nhất một vai trò hợp lệ.');
+    const roleCode = input.roleCodes?.[0];
+    if (!Array.isArray(input.roleCodes) || input.roleCodes.length !== 1 ||
+        !ASSIGNABLE_ROLE_CODES.some((code) => code === roleCode)) {
+      throw ApiError.badRequest('Exactly one canonical tenant-assignable role is required.');
     }
+    const newRole = TENANT_ROLE_BY_CODE[roleCode as (typeof ASSIGNABLE_ROLE_CODES)[number]];
 
-    // Target user check
-    const targetUser = await prisma.user.findUnique({
-      where: { id: input.targetUserId },
-      include: {
-        userRoles: {
-          include: { role: true },
-        },
-      },
-    });
-
-    if (!targetUser) {
-      throw ApiError.notFound(`Không tìm thấy người dùng có ID: ${input.targetUserId}`);
-    }
-
-    // Prevent self-lockout: An admin cannot remove the 'admin' role from themselves if they are the last admin
-    if (session.userId === targetUser.id && !input.roleCodes.includes('admin')) {
-      const adminCount = await prisma.userRole.count({
-        where: {
-          role: { code: 'admin' },
-          user: { isActive: true },
-        },
-      });
-      if (adminCount <= 1) {
-        throw ApiError.badRequest(
-          'Không thể tự thu hồi quyền Admin của chính mình khi bạn là Quản trị viên duy nhất còn hoạt động (Chống khóa hệ thống).'
-        );
+    const result = await authorityTransaction(async (tx) => {
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id" FROM "organizations" WHERE "id" = ${organizationId} FOR UPDATE
+      `);
+      const organization = await tx.organization.findUnique({ where: { id: organizationId } });
+      if (!organization || organization.status !== 'ACTIVE' || organization.deletedAt) {
+        throw ApiError.forbidden('The tenant context is not active.');
       }
-    }
 
-    // Resolve target roles
-    const rolesToAssign = await prisma.role.findMany({
-      where: { code: { in: input.roleCodes } },
-    });
-
-    if (rolesToAssign.length !== input.roleCodes.length) {
-      const foundCodes = rolesToAssign.map((r) => r.code);
-      const missing = input.roleCodes.filter((c) => !foundCodes.includes(c));
-      throw ApiError.badRequest(`Các vai trò sau không tồn tại: ${missing.join(', ')}`);
-    }
-
-    const oldRoles = targetUser.userRoles.map((ur) => ur.role.code);
-    const newRoles = rolesToAssign.map((r) => r.code);
-
-    // Atomic transaction for role updates
-    await prisma.$transaction(async (tx) => {
-      // Remove current roles
-      await tx.userRole.deleteMany({
-        where: { userId: targetUser.id },
+      await lockUserAuthority(tx, [session.userId, input.targetUserId]);
+      await tx.$queryRaw(Prisma.sql`
+        SELECT "id" FROM "organization_members"
+        WHERE "user_id" = ${session.userId}
+           OR ("organization_id" = ${organizationId} AND "user_id" = ${input.targetUserId})
+        ORDER BY "id" FOR UPDATE
+      `);
+      const actor = await tx.user.findUnique({
+        where: { id: session.userId },
+        include: { userRoles: { include: { role: true } } },
       });
-
-      // Insert new roles
-      await tx.userRole.createMany({
-        data: rolesToAssign.map((role) => ({
-          userId: targetUser.id,
-          roleId: role.id,
-        })),
+      if (!actor || !actor.isActive || actor.deletedAt || hasPlatformRole(actor)) {
+        throw ApiError.forbidden('Live tenant assignment authority is required.');
+      }
+      const memberships = await tx.organizationMember.findMany({
+        where: { userId: actor.id, isActive: true },
       });
+      // Existing JWTs do not prove explicit tenant selection for multi-membership actors.
+      const actorMembership = memberships[0];
+      if (memberships.length !== 1 || actorMembership.organizationId !== organizationId ||
+          ![TenantRole.OWNER, TenantRole.ADMIN].some((role) => role === actorMembership.role)) {
+        throw ApiError.forbidden('Unambiguous live OWNER or ADMIN authority is required.');
+      }
 
-      // Record Audit Log: 8th Critical Event PERMISSION_CHANGE
+      const target = await tx.organizationMember.findFirst({
+        where: {
+          organizationId,
+          userId: input.targetUserId,
+          isActive: true,
+          user: { isActive: true, deletedAt: null },
+        },
+        include: { user: { include: { userRoles: { include: { role: true } } } } },
+      });
+      if (!target) throw ApiError.notFound('Eligible tenant membership not found.');
+      if (hasPlatformRole(target.user) || target.role === TenantRole.OWNER ||
+          (actorMembership.role === TenantRole.ADMIN &&
+            (newRole === TenantRole.ADMIN ||
+              (target.role === TenantRole.ADMIN && target.userId !== actor.id)))) {
+        throw ApiError.forbidden('This membership role change is not permitted.');
+      }
+
+      const updated = await tx.organizationMember.updateMany({
+        where: {
+          id: target.id,
+          organizationId,
+          userId: input.targetUserId,
+          isActive: true,
+          role: target.role,
+          updatedAt: target.updatedAt,
+          user: { isActive: true, deletedAt: null },
+          organization: { status: 'ACTIVE', deletedAt: null },
+        },
+        data: { role: newRole },
+      });
+      if (updated.count !== 1) {
+        throw ApiError.conflict('The membership changed before the role update.');
+      }
       await AuditService.logPermissionChange({
-        targetUserId: targetUser.id,
-        targetEmail: targetUser.email,
+        scope: 'tenant',
+        organizationId,
+        membershipId: target.id,
+        targetUserId: target.userId,
+        targetEmail: target.user.email,
         actorId: session.userId,
         actionType: 'ASSIGN_ROLES',
-        oldRoles,
-        newRoles,
+        oldRoles: [target.role],
+        newRoles: [newRole],
         ipAddress: clientInfo?.ipAddress,
         userAgent: clientInfo?.userAgent,
         tx,
       });
+      return {
+        userId: target.userId,
+        email: target.user.email,
+        roles: [roleCode],
+        updatedAt: new Date().toISOString(),
+      };
     });
 
-    logger.info(`[PermissionService] Roles updated for ${targetUser.email}`, {
-      targetUserId: targetUser.id,
-      oldRoles,
-      newRoles,
+    logger.info('[PermissionService] Tenant membership role updated', {
+      targetUserId: result.userId,
+      organizationId,
       actor: session.userId,
     });
-
-    return {
-      userId: targetUser.id,
-      email: targetUser.email,
-      roles: newRoles,
-      updatedAt: new Date().toISOString(),
-    };
+    return result;
   }
 
   /**
@@ -162,49 +228,44 @@ export class PermissionService {
     session: UserSession,
     clientInfo?: { ipAddress?: string; userAgent?: string }
   ) {
-    if (!session.roles.includes('admin')) {
-      throw ApiError.forbidden('Chỉ Quản trị viên (Admin) mới có quyền chỉnh sửa quyền hạn của vai trò.');
+    assertPlatformSession(session);
+    if (typeof input.roleCode !== 'string' || !input.roleCode.trim() ||
+        !Array.isArray(input.permissionCodes) ||
+        input.permissionCodes.some((code) => typeof code !== 'string' || !code.trim()) ||
+        new Set(input.permissionCodes).size !== input.permissionCodes.length) {
+      throw ApiError.badRequest('A role and distinct valid permission codes are required.');
     }
 
-    const role = await prisma.role.findUnique({
-      where: { code: input.roleCode },
-      include: {
-        rolePermissions: {
-          include: { permission: true },
-        },
-      },
-    });
-
-    if (!role) {
-      throw ApiError.notFound(`Không tìm thấy vai trò: ${input.roleCode}`);
-    }
-
-    // Verify all requested permissions exist
-    const permissions = await prisma.permission.findMany({
-      where: { code: { in: input.permissionCodes } },
-    });
-
-    const oldPermissions = role.rolePermissions.map((rp) => rp.permission.code);
-    const newPermissions = permissions.map((p) => p.code);
-
-    await prisma.$transaction(async (tx) => {
-      await tx.rolePermission.deleteMany({
-        where: { roleId: role.id },
+    const result = await authorityTransaction(async (tx) => {
+      await lockUserAuthority(tx, [session.userId], input.roleCode);
+      await requireLivePlatformAuthority(session, tx);
+      const role = await tx.role.findUnique({
+        where: { code: input.roleCode },
+        include: { rolePermissions: { include: { permission: true } } },
       });
-
+      if (!role) throw ApiError.notFound('Role template not found.');
+      const permissions = await tx.permission.findMany({
+        where: { code: { in: input.permissionCodes } },
+      });
+      if (permissions.length !== input.permissionCodes.length) {
+        throw ApiError.badRequest('One or more permission codes do not exist.');
+      }
+      const oldPermissions = role.rolePermissions.map((rp) => rp.permission.code);
+      const newPermissions = permissions.map((permission) => permission.code);
+      await tx.rolePermission.deleteMany({ where: { roleId: role.id } });
       if (permissions.length > 0) {
         await tx.rolePermission.createMany({
-          data: permissions.map((p) => ({
+          data: permissions.map((permission) => ({
             roleId: role.id,
-            permissionId: p.id,
+            permissionId: permission.id,
           })),
         });
       }
-
-      // Record Audit Log: PERMISSION_CHANGE
       await AuditService.logPermissionChange({
-        targetUserId: role.id, // Role entity ID
-        targetEmail: `Role: ${role.name} (${role.code})`,
+        scope: 'platform',
+        organizationId: null,
+        roleId: role.id,
+        roleCode: role.code,
         actorId: session.userId,
         actionType: 'UPDATE_PERMISSIONS',
         oldPermissions,
@@ -213,19 +274,13 @@ export class PermissionService {
         userAgent: clientInfo?.userAgent,
         tx,
       });
+      return { roleCode: role.code, permissions: newPermissions, updatedAt: new Date().toISOString() };
     });
 
-    logger.info(`[PermissionService] Permissions updated for role ${role.code}`, {
-      role: role.code,
-      oldPermissions,
-      newPermissions,
+    logger.info('[PermissionService] Global role template permissions updated', {
+      role: result.roleCode,
       actor: session.userId,
     });
-
-    return {
-      roleCode: role.code,
-      permissions: newPermissions,
-      updatedAt: new Date().toISOString(),
-    };
+    return result;
   }
 }

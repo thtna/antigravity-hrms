@@ -15,8 +15,9 @@
  *    - Valid CRON_SECRET bearer => 200 authorized
  *    - Missing CRON_SECRET + legacy hardcoded bearer ('antigravity_cron_internal_2026') => 401 rejected
  *    - Wrong bearer secret => 401 rejected
- *    - Authenticated admin session invocation => 200 authorized
- *    - Authenticated non-admin employee invocation without cron bearer => 401 rejected
+ *    - Every JWT role, including admin/HR/super_admin, without cron bearer => 401 rejected
+ *    - Only three registered jobs with strict job-specific payloads may dispatch
+ *    - GET never lists or executes jobs; only exact POST skips middleware cookies
  *
  * 3. AUTH SESSION & MIDDLEWARE FAIL-CLOSED:
  *    - Production + AUTH_SECRET present => sign/verify succeeds
@@ -46,7 +47,11 @@ import { SignJWT } from 'jose';
 
 // ── Mock Dependencies for Cron Route Handler ─────────────────────────────────
 const mockJobRunner = vi.hoisted(() => ({
-  listJobs: vi.fn(() => [{ name: 'cleanup-tokens', description: 'test' }]),
+  listJobs: vi.fn(() => [
+    { name: 'DAILY_ATTENDANCE_RECONCILIATION', description: 'test' },
+    { name: 'NOTIFICATION_PRUNING', description: 'test' },
+    { name: 'CACHE_WARMUP', description: 'test' },
+  ]),
   runJob: vi.fn(async (name: string, params: any) => ({
     status: 'SUCCESS',
     jobName: name,
@@ -63,6 +68,12 @@ vi.mock('@/lib/jobs/job-runner', () => ({
   JobRunner: mockJobRunner,
 }));
 
+vi.mock('@/lib/db/prisma', () => ({
+  prisma: new Proxy({}, {
+    get() { throw new Error('Database access is forbidden in this isolated suite.'); },
+  }),
+}));
+
 vi.mock('@/lib/auth/session', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/auth/session')>();
   return {
@@ -72,7 +83,7 @@ vi.mock('@/lib/auth/session', async (importOriginal) => {
 });
 
 import { getQrSecret, QrAttendanceService } from '@/lib/services/qr-attendance.service';
-import { POST as cronPostHandler } from '@/app/api/v1/jobs/run/route';
+import { GET as cronGetHandler, POST as cronPostHandler } from '@/app/api/v1/jobs/run/route';
 import { signSessionToken, verifySessionToken } from '@/lib/auth/session';
 import { getAuthSecretKey, getAuthSecretString } from '@/lib/auth/auth-secret';
 import { middleware } from '@/middleware';
@@ -107,10 +118,18 @@ describe('SECURITY FAIL-CLOSED AUDIT & REGRESSION SUITE', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env = { ...originalEnv };
+    vi.stubGlobal('fetch', vi.fn(() => {
+      throw new Error('Network access is forbidden in this isolated suite.');
+    }));
   });
 
   afterEach(() => {
-    process.env = { ...originalEnv };
+    try {
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      process.env = { ...originalEnv };
+    }
   });
 
   // ===========================================================================
@@ -218,121 +237,289 @@ describe('SECURITY FAIL-CLOSED AUDIT & REGRESSION SUITE', () => {
   describe('2. Cron Bearer Authorization Fail-Closed Contract', () => {
     const LEGACY_CRON_SECRET = 'antigravity_cron_internal_2026';
     const VALID_CRON_SECRET = 'prod-super-secure-cron-secret-2026-xyz';
+    const endpoint = 'http://localhost:3000/api/v1/jobs/run';
+    const validBody = { jobName: 'CACHE_WARMUP' };
 
-    it('2.1 Valid CRON_SECRET bearer => authorized (200 OK)', async () => {
-      process.env.CRON_SECRET = VALID_CRON_SECRET;
-
-      const req = new NextRequest('http://localhost:3000/api/v1/jobs/run', {
+    function request(body: unknown = validBody, authorization = `Bearer ${VALID_CRON_SECRET}`) {
+      return new NextRequest(endpoint, {
         method: 'POST',
-        headers: {
-          authorization: `Bearer ${VALID_CRON_SECRET}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ jobName: 'cleanup-expired-tokens' }),
+        headers: { authorization, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
       });
+    }
 
+    async function expectDenied(req: NextRequest, status: number) {
       const res = await cronPostHandler(req);
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(status);
+      const json = await res.json();
+      expect(json.success).toBe(false);
+      expect(json.error.code).toBe(status === 401 ? 'UNAUTHORIZED' : 'BAD_REQUEST');
+      expect(mockJobRunner.runJob).not.toHaveBeenCalled();
+      expect(mockJobRunner.listJobs).not.toHaveBeenCalled();
+      expect(mockSessionModule.getSession).not.toHaveBeenCalled();
+      expect(JSON.stringify(json)).not.toContain(VALID_CRON_SECRET);
+      return json;
+    }
 
+    beforeEach(() => { process.env.CRON_SECRET = VALID_CRON_SECRET; });
+
+    it.each([
+      ['DAILY_ATTENDANCE_RECONCILIATION', undefined],
+      ['DAILY_ATTENDANCE_RECONCILIATION', { targetDate: '2024-02-29' }],
+      ['DAILY_ATTENDANCE_RECONCILIATION', {
+        targetDate: '2024-10-10', organizationId: '00b0afd8-1e9e-43da-8514-e2aa3483c4f2',
+      }],
+      ['DAILY_ATTENDANCE_RECONCILIATION', { organizationId: '00b0afd8-1e9e-43da-8514-e2aa3483c4f2' }],
+      ['NOTIFICATION_PRUNING', undefined],
+      ['NOTIFICATION_PRUNING', { retentionDays: 180 }],
+      ['NOTIFICATION_PRUNING', { retentionDays: 90 }],
+      ['CACHE_WARMUP', undefined],
+      ['CACHE_WARMUP', {}],
+    ])('2.1 Valid bearer dispatches %s with params %j to its mock', async (jobName, params) => {
+      const res = await cronPostHandler(request({ jobName, ...(params === undefined ? {} : { params }) }));
+      expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.success).toBe(true);
-      expect(mockJobRunner.runJob).toHaveBeenCalledWith('cleanup-expired-tokens', {});
+      expect(json.data.jobName).toBe(jobName);
+      expect(json.meta.timestamp).toEqual(expect.any(String));
+      expect(mockJobRunner.runJob).toHaveBeenCalledTimes(1);
+      expect(mockJobRunner.runJob).toHaveBeenCalledWith(jobName, params ?? {});
+      expect(mockSessionModule.getSession).not.toHaveBeenCalled();
     });
+
+    it.each([
+      ['2026-10-09T16:59:59Z', '2026-10-09'],
+      ['2026-10-09T16:59:59Z', '2026-10-10'],
+      ['2026-10-09T17:00:00Z', '2026-10-10'],
+      ['2026-10-09T17:00:00Z', '2026-10-11'],
+      ['2026-10-31T17:00:00Z', '2026-11-01'],
+      ['2025-12-31T17:00:00Z', '2026-01-01'],
+      ['2025-12-31T18:30:00Z', '2026-01-02'],
+      ['2026-10-09T17:00:00Z', '2099-12-31'],
+    ])('rejects same-day/future Vietnam business date %s -> %s before dispatch', async (now, targetDate) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(now));
+      try {
+        await expectDenied(request({ jobName: 'DAILY_ATTENDANCE_RECONCILIATION', params: { targetDate } }), 400);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      ['2026-10-09T16:59:59Z', '2026-10-08'],
+      ['2026-10-09T17:00:00Z', '2026-10-09'],
+      ['2026-10-09T18:30:00Z', '2026-10-09'],
+      ['2026-10-31T17:00:00Z', '2026-10-31'],
+      ['2025-12-31T17:00:00Z', '2025-12-31'],
+      ['2026-10-09T17:00:00Z', '2024-02-29'],
+      ['2024-02-29T17:00:00Z', '2024-02-29'],
+    ])('allows strictly past Vietnam business date %s -> %s', async (now, targetDate) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(now));
+      try {
+        const res = await cronPostHandler(request({ jobName: 'DAILY_ATTENDANCE_RECONCILIATION', params: { targetDate } }));
+        expect(res.status).toBe(200);
+        expect((await res.json()).success).toBe(true);
+        expect(mockJobRunner.runJob).toHaveBeenCalledTimes(1);
+        expect(mockJobRunner.runJob).toHaveBeenCalledWith('DAILY_ATTENDANCE_RECONCILIATION', { targetDate });
+        expect(mockSessionModule.getSession).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each([
+      undefined,
+      {},
+      { organizationId: '00b0afd8-1e9e-43da-8514-e2aa3483c4f2' },
+    ])('delegates omitted targetDate unchanged to the JobRunner yesterday default (%j)', async (params) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2025-12-31T17:00:00Z'));
+      try {
+        const res = await cronPostHandler(request({
+          jobName: 'DAILY_ATTENDANCE_RECONCILIATION',
+          ...(params === undefined ? {} : { params }),
+        }));
+        expect(res.status).toBe(200);
+        expect((await res.json()).success).toBe(true);
+        expect(mockJobRunner.runJob).toHaveBeenCalledTimes(1);
+        expect(mockJobRunner.runJob).toHaveBeenCalledWith('DAILY_ATTENDANCE_RECONCILIATION', params ?? {});
+        expect(mockJobRunner.runJob.mock.calls[0][1]).not.toHaveProperty('targetDate');
+        expect(mockSessionModule.getSession).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.each(['', 'Bearer invalid-cron-bearer'])(
+      'requires a valid bearer even for a strictly past reconciliation date (%j)', async (authorization) => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date('2026-10-09T17:00:00Z'));
+        try {
+          await expectDenied(request({
+            jobName: 'DAILY_ATTENDANCE_RECONCILIATION', params: { targetDate: '2026-10-09' },
+          }, authorization), 401);
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
 
     it('2.2 Missing CRON_SECRET in env + legacy hardcoded bearer => rejected (401 Unauthorized)', async () => {
       delete process.env.CRON_SECRET;
-      mockSessionModule.getSession.mockResolvedValue(null);
-
-      const req = new NextRequest('http://localhost:3000/api/v1/jobs/run', {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${LEGACY_CRON_SECRET}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ jobName: 'cleanup-expired-tokens' }),
-      });
-
-      const res = await cronPostHandler(req);
-      expect(res.status).toBe(401);
-
-      const json = await res.json();
-      expect(json.success).toBe(false);
+      const json = await expectDenied(request(validBody, `Bearer ${LEGACY_CRON_SECRET}`), 401);
       expect(json.error.message).toContain('Yêu cầu khóa xác thực tác vụ tự động');
-      expect(mockJobRunner.runJob).not.toHaveBeenCalled();
     });
 
     it('2.3 Wrong bearer token => rejected (401 Unauthorized)', async () => {
-      process.env.CRON_SECRET = VALID_CRON_SECRET;
-      mockSessionModule.getSession.mockResolvedValue(null);
-
-      const req = new NextRequest('http://localhost:3000/api/v1/jobs/run', {
-        method: 'POST',
-        headers: {
-          authorization: 'Bearer wrong-unauthorized-bearer-token',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ jobName: 'cleanup-expired-tokens' }),
-      });
-
-      const res = await cronPostHandler(req);
-      expect(res.status).toBe(401);
-
-      const json = await res.json();
-      expect(json.success).toBe(false);
-      expect(mockJobRunner.runJob).not.toHaveBeenCalled();
+      await expectDenied(request(validBody, 'Bearer wrong-unauthorized-bearer-token'), 401);
     });
 
-    it('2.4 Authenticated admin flow remains functional without cron bearer (200 OK)', async () => {
-      process.env.CRON_SECRET = VALID_CRON_SECRET;
-      // Simulated admin session
-      mockSessionModule.getSession.mockResolvedValue({
-        userId: 'usr-admin-01',
-        organizationId: 'org-test-01',
-        roles: ['admin'],
-        email: 'admin@antigravity.internal',
-        fullName: 'Admin User',
-      });
+    it.each<UserSession['roles'][number]>(['admin', 'hr', 'super_admin', 'manager', 'employee'])(
+      '2.4/2.5 Authenticated %s with wildcard permissions cannot substitute JWT for cron bearer', async (role) => {
+        process.env.AUTH_SECRET = 'isolated-cron-auth-secret-minimum-32-characters';
+        const session: UserSession = {
+          ...sampleSession, roles: [role], permissions: ['*'],
+          organizationId: role === 'super_admin' ? null : sampleSession.organizationId,
+        };
+        mockSessionModule.getSession.mockResolvedValue(session);
+        const token = await signSessionToken(session);
+        expect((await verifySessionToken(token))?.roles).toEqual([role]);
+        const req = request(validBody, '');
+        req.headers.delete('authorization');
+        req.headers.set('cookie', `antigravity_session=${token}`);
+        await expectDenied(req, 401);
+      }
+    );
 
-      const req = new NextRequest('http://localhost:3000/api/v1/jobs/run', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ jobName: 'recalculate-leave-balances' }),
-      });
+    it.each(['', '   ', 'invalid secret', 'invalid:secret', 'secret\nnewline', `${VALID_CRON_SECRET}\n`])(
+      'rejects empty or malformed configured CRON_SECRET (%j)', async (secret) => {
+        process.env.CRON_SECRET = secret;
+        await expectDenied(request(), 401);
+      }
+    );
 
-      const res = await cronPostHandler(req);
+    it.each([
+      '', VALID_CRON_SECRET, `Basic ${VALID_CRON_SECRET}`, `bearer ${VALID_CRON_SECRET}`,
+      'Bearer', 'Bearer ', `Bearer  ${VALID_CRON_SECRET}`, `Bearer ${VALID_CRON_SECRET},other`,
+      `Bearer ${VALID_CRON_SECRET} extra`,
+    ])('rejects missing or malformed authorization (%j)', async (authorization) => {
+      await expectDenied(request(validBody, authorization), 401);
+    });
+
+    it('does not authenticate from body/query/organizationId or parse an unauthorized body', async () => {
+      const req = new NextRequest(`${endpoint}?CRON_SECRET=${VALID_CRON_SECRET}`, {
+        method: 'POST', body: JSON.stringify({
+          ...validBody, CRON_SECRET: VALID_CRON_SECRET,
+          organizationId: '00b0afd8-1e9e-43da-8514-e2aa3483c4f2',
+        }),
+      });
+      const json = vi.spyOn(req, 'json');
+      await expectDenied(req, 401);
+      expect(json).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      null, [], 'CACHE_WARMUP', {}, { jobName: 'UNKNOWN' },
+      { name: 'CACHE_WARMUP' }, { ...validBody, name: 'NOTIFICATION_PRUNING' },
+      { ...validBody, unknown: true }, { ...validBody, params: null },
+      { ...validBody, params: [] }, { ...validBody, params: 'invalid' },
+      { ...validBody, params: { organizationId: '00b0afd8-1e9e-43da-8514-e2aa3483c4f2' } },
+      ...['2026-02-29', '2026-02-30', '2026-13-01', '2026-2-01', '2026-10-10\n', 'not-a-date', null, 123].map(
+        (targetDate) => ({ jobName: 'DAILY_ATTENDANCE_RECONCILIATION', params: { targetDate } })
+      ),
+      ...['', 'org-other', null, 123].map(
+        (organizationId) => ({ jobName: 'DAILY_ATTENDANCE_RECONCILIATION', params: { organizationId } })
+      ),
+      { jobName: 'DAILY_ATTENDANCE_RECONCILIATION', params: { extra: true } },
+      ...[0, -1, 1, 89, 1.5, '90', null, Number.MAX_SAFE_INTEGER, 200000000].map(
+        (retentionDays) => ({ jobName: 'NOTIFICATION_PRUNING', params: { retentionDays } })
+      ),
+      { jobName: 'NOTIFICATION_PRUNING', params: { extra: true } },
+    ])('rejects invalid job-specific payload before dispatch: %j', async (body) => {
+      await expectDenied(request(body), 400);
+    });
+
+    it('rejects malformed JSON before dispatch', async () => {
+      const req = new NextRequest(endpoint, {
+        method: 'POST', headers: { authorization: `Bearer ${VALID_CRON_SECRET}` }, body: '{',
+      });
+      await expectDenied(req, 400);
+    });
+
+    it('GET returns 405 without exposing a registry or executing jobs', async () => {
+      const res = await cronGetHandler();
+      expect(res.status).toBe(405);
+      expect(res.headers.get('allow')).toBe('POST');
+      expect(await res.json()).toMatchObject({ success: false, error: { code: 'METHOD_NOT_ALLOWED' } });
+      expect(mockJobRunner.listJobs).not.toHaveBeenCalled();
+      expect(mockJobRunner.runJob).not.toHaveBeenCalled();
+      expect(mockSessionModule.getSession).not.toHaveBeenCalled();
+    });
+
+    it('only exact POST skips cookies; bearer authorization is still required by the route', async () => {
+      delete process.env.AUTH_SECRET;
+      const req = request(validBody, '');
+      const res = await middleware(req);
       expect(res.status).toBe(200);
-
-      const json = await res.json();
-      expect(json.success).toBe(true);
-      expect(mockJobRunner.runJob).toHaveBeenCalledWith('recalculate-leave-balances', {});
+      expect(res.headers.get('x-middleware-next')).toBe('1');
+      expect(res.headers.get('x-frame-options')).toBe('DENY');
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('content-security-policy')).toContain("default-src 'self'");
+      await expectDenied(req, 401);
     });
 
-    it('2.5 Authenticated non-admin employee flow without cron bearer => rejected (401 Unauthorized)', async () => {
-      process.env.CRON_SECRET = VALID_CRON_SECRET;
-      mockSessionModule.getSession.mockResolvedValue({
-        userId: 'usr-emp-01',
-        organizationId: 'org-test-01',
-        roles: ['employee'],
-        email: 'employee@antigravity.internal',
-        fullName: 'Employee User',
-      });
+    it.each(['GET', 'HEAD', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])(
+      'middleware retains cookie authentication for %s on the same path', async (method) => {
+        const res = await middleware(new NextRequest(endpoint, { method }));
+        expect(res.status).toBe(401);
+        expect(mockJobRunner.runJob).not.toHaveBeenCalled();
+      }
+    );
 
-      const req = new NextRequest('http://localhost:3000/api/v1/jobs/run', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ jobName: 'recalculate-leave-balances' }),
-      });
-
-      const res = await cronPostHandler(req);
+    it.each([
+      '/api/v1/jobs', '/api/v1/jobs/run/', '/api/v1/jobs/run/extra', '/api/v1/jobs/runner',
+      '/api/v1/jobs/run-other', '/api/v1/jobs/RUN', '/api/v1/employees', '/api/v1/notifications',
+      '/api/v1/payroll',
+    ])('middleware retains cookie authentication outside the exact POST path: %s', async (path) => {
+      const res = await middleware(new NextRequest(`http://localhost:3000${path}`, { method: 'POST' }));
       expect(res.status).toBe(401);
-
-      const json = await res.json();
-      expect(json.success).toBe(false);
       expect(mockJobRunner.runJob).not.toHaveBeenCalled();
+    });
+
+    it('keeps CSRF protection ahead of the exact POST exemption', async () => {
+      const req = request();
+      req.headers.set('host', 'localhost:3000');
+      req.headers.set('origin', 'https://untrusted.invalid');
+      const res = await middleware(req);
+      expect(res.status).toBe(403);
+      expect(res.headers.get('x-frame-options')).toBe('DENY');
+      expect(mockJobRunner.runJob).not.toHaveBeenCalled();
+    });
+
+    it('preserves authenticated access to other APIs and still denies authenticated GET job execution', async () => {
+      process.env.AUTH_SECRET = 'isolated-cron-auth-secret-minimum-32-characters';
+      const token = await signSessionToken(sampleSession);
+      for (const path of ['/api/v1/employees', '/api/v1/jobs/run']) {
+        const res = await middleware(new NextRequest(`http://localhost:3000${path}`, {
+          headers: { cookie: `antigravity_session=${token}` },
+        }));
+        expect(res.status).toBe(200);
+        expect(res.headers.get('x-middleware-next')).toBe('1');
+      }
+      expect((await cronGetHandler()).status).toBe(405);
+      expect(mockJobRunner.runJob).not.toHaveBeenCalled();
+    });
+
+    it('preserves the existing failed-job response mapping', async () => {
+      mockJobRunner.runJob.mockResolvedValueOnce({
+        status: 'FAILED', jobName: 'CACHE_WARMUP', params: {}, durationMs: 15,
+      });
+      const res = await cronPostHandler(request());
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ success: false, data: { status: 'FAILED' } });
+      expect(mockJobRunner.runJob).toHaveBeenCalledTimes(1);
     });
   });
 

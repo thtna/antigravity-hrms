@@ -24,6 +24,14 @@ vi.mock('@/lib/db/prisma', () => ({
     user: {
       findUnique: vi.fn(),
     },
+    organization: {
+      findUnique: vi.fn(),
+    },
+    organizationMember: {
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      updateMany: vi.fn(),
+    },
     role: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -40,6 +48,7 @@ vi.mock('@/lib/db/prisma', () => ({
     permission: {
       findMany: vi.fn(),
     },
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(async (cb) => cb(prisma)),
   },
 }));
@@ -233,23 +242,71 @@ describe('PHASE 21 — AUDIT & SECURITY HARDENING TEST SUITE', () => {
       (prisma.auditLog.create as unknown as Mock).mockResolvedValue({ id: 'log-perm-1' });
 
       await AuditService.logPermissionChange({
+        scope: 'tenant',
+        organizationId: 'org-audit-01',
+        membershipId: 'membership-target-01',
         targetUserId: 'usr-target-01',
         targetEmail: 'target@antigravity.internal',
         actorId: 'usr-admin-01',
         actionType: 'ASSIGN_ROLES',
-        oldRoles: ['employee'],
-        newRoles: ['employee', 'manager'],
+        oldRoles: ['EMPLOYEE'],
+        newRoles: ['MANAGER'],
+        tx: prisma,
       });
 
       expect(prisma.auditLog.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           action: AUDIT_ACTIONS.PERMISSION_CHANGE,
-          entity: 'users',
-          entityId: 'usr-target-01',
-          oldValues: expect.objectContaining({ roles: ['employee'] }),
-          newValues: expect.objectContaining({ roles: ['employee', 'manager'] }),
+          organizationId: 'org-audit-01',
+          entity: 'organization_members',
+          entityId: 'membership-target-01',
+          actorId: 'usr-admin-01',
+          oldValues: expect.objectContaining({ targetUserId: 'usr-target-01', roles: ['EMPLOYEE'] }),
+          newValues: expect.objectContaining({ targetUserId: 'usr-target-01', roles: ['MANAGER'] }),
         }),
       });
+    });
+
+    it('distinguishes platform role-template audit from tenant membership audit', async () => {
+      await AuditService.logPermissionChange({
+        scope: 'platform',
+        organizationId: null,
+        roleId: 'role-hr',
+        roleCode: 'hr',
+        actorId: 'usr-platform',
+        actionType: 'UPDATE_PERMISSIONS',
+        oldPermissions: ['employee:read'],
+        newPermissions: ['attendance:kiosk'],
+        tx: prisma,
+      });
+
+      expect(prisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          action: AUDIT_ACTIONS.PERMISSION_CHANGE,
+          organizationId: null,
+          entity: 'roles',
+          entityId: 'role-hr',
+          oldValues: expect.objectContaining({ roleCode: 'hr', permissions: ['employee:read'] }),
+          newValues: expect.objectContaining({ permissions: ['attendance:kiosk'] }),
+        }),
+      });
+    });
+
+    it('propagates transactional permission audit failure instead of suppressing it', async () => {
+      const failure = new Error('audit insert rejected');
+      (prisma.auditLog.create as unknown as Mock).mockRejectedValueOnce(failure);
+
+      await expect(AuditService.logPermissionChange({
+        scope: 'tenant',
+        organizationId: 'org-audit-01',
+        membershipId: 'membership-target-01',
+        targetUserId: 'usr-target-01',
+        actorId: 'usr-admin-01',
+        actionType: 'ASSIGN_ROLES',
+        oldRoles: ['EMPLOYEE'],
+        newRoles: ['MANAGER'],
+        tx: prisma,
+      })).rejects.toBe(failure);
     });
   });
 
@@ -307,52 +364,92 @@ describe('PHASE 21 — AUDIT & SECURITY HARDENING TEST SUITE', () => {
 
   // ── 3. PERMISSION SERVICE & PRIVILEGE ESCALATION ────────────────────────────
   describe('3. PermissionService & Anti-Privilege Escalation', () => {
-    it('should block non-admin users from assigning roles', async () => {
+    const tenantSession = { ...adminSession, organizationId: 'org-audit-01' };
+    const target = {
+      id: 'membership-target-02', organizationId: 'org-audit-01', userId: 'usr-target-02',
+      isActive: true, role: 'EMPLOYEE', updatedAt: new Date('2026-10-01T00:00:00Z'),
+      user: { id: 'usr-target-02', email: 'staff@antigravity.internal',
+        isActive: true, deletedAt: null, userRoles: [{ role: { code: 'employee' } }] },
+    };
+
+    beforeEach(() => {
+      (prisma.$queryRaw as unknown as Mock).mockResolvedValue([]);
+      (prisma.organization.findUnique as unknown as Mock).mockResolvedValue({
+        id: 'org-audit-01', status: 'ACTIVE', deletedAt: null,
+      });
+      (prisma.user.findUnique as unknown as Mock).mockResolvedValue({
+        id: adminSession.userId, isActive: true, deletedAt: null,
+        userRoles: [{ role: { code: 'admin' } }],
+      });
+      (prisma.organizationMember.findMany as unknown as Mock).mockResolvedValue([
+        { id: 'membership-actor', organizationId: 'org-audit-01',
+          userId: adminSession.userId, role: 'ADMIN', isActive: true },
+      ]);
+      (prisma.organizationMember.findFirst as unknown as Mock).mockResolvedValue(target);
+      (prisma.organizationMember.updateMany as unknown as Mock).mockResolvedValue({ count: 1 });
+      (prisma.auditLog.create as unknown as Mock).mockResolvedValue({ id: 'log-perm-assign' });
+    });
+
+    it('should block live HR authority even with an admin JWT', async () => {
+      const staleSession: UserSession = { ...hrSession, organizationId: 'org-audit-01',
+        roles: ['admin'], permissions: ['*'] };
+      (prisma.user.findUnique as unknown as Mock).mockResolvedValue({
+        id: hrSession.userId, isActive: true, deletedAt: null,
+        userRoles: [{ role: { code: 'hr' } }],
+      });
+      (prisma.organizationMember.findMany as unknown as Mock).mockResolvedValue([
+        { organizationId: 'org-audit-01', userId: hrSession.userId,
+          role: 'HR_MANAGER', isActive: true },
+      ]);
       await expect(
         PermissionService.assignUserRoles(
           { targetUserId: 'usr-02', roleCodes: ['admin'] },
-          hrSession
+          staleSession
         )
       ).rejects.toThrow(ApiError);
+      expect(prisma.organizationMember.updateMany).not.toHaveBeenCalled();
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
 
-    it('should block admin from removing admin role from themselves if sole active admin', async () => {
-      (prisma.user.findUnique as unknown as Mock).mockResolvedValue({
-        id: 'usr-admin-01',
-        email: 'admin@antigravity.internal',
-        userRoles: [{ role: { code: 'admin' } }],
+    it('should block OWNER self-demotion without relying on global admin counts', async () => {
+      (prisma.organizationMember.findMany as unknown as Mock).mockResolvedValue([
+        { organizationId: 'org-audit-01', userId: adminSession.userId,
+          role: 'OWNER', isActive: true },
+      ]);
+      (prisma.organizationMember.findFirst as unknown as Mock).mockResolvedValue({
+        ...target, userId: adminSession.userId, role: 'OWNER',
       });
-      (prisma.userRole.count as unknown as Mock).mockResolvedValue(1); // Sole admin
 
       await expect(
         PermissionService.assignUserRoles(
-          { targetUserId: 'usr-admin-01', roleCodes: ['employee'] }, // Attempting self-demotion
-          adminSession
+          { targetUserId: adminSession.userId, roleCodes: ['employee'] },
+          tenantSession
         )
       ).rejects.toThrow(ApiError);
+      expect(prisma.userRole.count).not.toHaveBeenCalled();
+      expect(prisma.organizationMember.updateMany).not.toHaveBeenCalled();
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
 
-    it('should allow admin to assign roles to user and generate audit log', async () => {
-      (prisma.user.findUnique as unknown as Mock).mockResolvedValue({
-        id: 'usr-target-02',
-        email: 'staff@antigravity.internal',
-        userRoles: [{ role: { code: 'employee' } }],
-      });
-      (prisma.role.findMany as unknown as Mock).mockResolvedValue([
-        { id: 'r-hr', code: 'hr' },
-      ]);
-      (prisma.userRole.deleteMany as unknown as Mock).mockResolvedValue({ count: 1 });
-      (prisma.userRole.createMany as unknown as Mock).mockResolvedValue({ count: 1 });
-      (prisma.auditLog.create as unknown as Mock).mockResolvedValue({ id: 'log-perm-assign' });
-
+    it('should update only the tenant membership and generate scoped audit', async () => {
       const res = await PermissionService.assignUserRoles(
         { targetUserId: 'usr-target-02', roleCodes: ['hr'] },
-        adminSession
+        tenantSession
       );
 
       expect(res.userId).toBe('usr-target-02');
       expect(res.roles).toEqual(['hr']);
-      expect(prisma.auditLog.create).toHaveBeenCalled();
+      expect(prisma.organizationMember.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: target.id, organizationId: 'org-audit-01',
+          userId: target.userId, role: 'EMPLOYEE', isActive: true }),
+        data: { role: 'HR_MANAGER' },
+      });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ organizationId: 'org-audit-01',
+          entity: 'organization_members', entityId: target.id }),
+      });
+      expect(prisma.userRole.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.userRole.createMany).not.toHaveBeenCalled();
     });
   });
 
