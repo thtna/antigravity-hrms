@@ -214,9 +214,8 @@ describe('authenticated tenant reads never become global reads', () => {
 
   it('fails closed for a session without an organization', async () => {
     const orglessSession = { ...sessionA, organizationId: null };
-    db.employee.findFirst.mockResolvedValue(null);
-    await expect(DashboardService.getEmployeeDashboard(orglessSession)).rejects.toMatchObject({ statusCode: 404 });
-    expect(db.employee.findFirst.mock.calls.every(([arg]) => arg.where.organizationId === '__no_org__')).toBe(true);
+    await expect(DashboardService.getEmployeeDashboard(orglessSession)).rejects.toMatchObject({ statusCode: 403 });
+    expect(db.employee.findFirst).not.toHaveBeenCalled();
   });
 
   it('scopes every affected single-resource query before loading foreign data', async () => {
