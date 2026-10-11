@@ -370,27 +370,58 @@ describe('PHASE 25 — PERFORMANCE & PRODUCTION AUDIT TEST SUITE', () => {
 
     it('should handle unexcused absences during DAILY_ATTENDANCE_RECONCILIATION', async () => {
       const targetDate = '2026-09-02';
-
-      (prisma.employeeSchedule.findMany as any).mockResolvedValue([
-        { id: 'sch-1', employeeId: 'emp-absent', workDate: new Date(targetDate) },
-        { id: 'sch-2', employeeId: 'emp-present', workDate: new Date(targetDate) },
-      ]);
-
-      // emp-present has attendance
-      (prisma.attendance.findMany as any).mockResolvedValue([
-        { employeeId: 'emp-present' },
-      ]);
-
-      // No approved leaves
-      (prisma.leaveRequest.findMany as any).mockResolvedValue([]);
-      (prisma.attendance.upsert as any).mockResolvedValue({});
+      const organizationId = 'org-r2';
+      const workDate = new Date(`${targetDate}T00:00:00.000Z`);
+      const shift = {
+        id: 'shift-day', organizationId, startTime: '08:00', endTime: '17:00',
+        isOvernight: false, isActive: true, deletedAt: null,
+      };
+      const schedules = ['emp-absent', 'emp-present'].map((employeeId, index) => ({
+        id: `sch-${index + 1}`, employeeId, organizationId, workDate, status: 'SCHEDULED', shift,
+      }));
+      const validAttendance = {
+        id: 'present-1', organizationId, employeeId: 'emp-present', workDate,
+        status: 'ON_TIME', checkInTime: new Date(`${targetDate}T08:00:00+07:00`),
+      };
+      const originalAttendance = { ...validAttendance };
+      const created: Record<string, unknown>[] = [];
+      const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{ id: 'locked-schedule' }]),
+        employeeSchedule: { findFirst: vi.fn(async ({ where }) => schedules.find((item) =>
+          item.id === where.id && item.organizationId === where.organizationId
+        ) ?? null) },
+        attendance: {
+          findUnique: vi.fn(async ({ where }) => where.organizationId === organizationId &&
+            where.employeeId_workDate.employeeId === 'emp-present' ? validAttendance : null),
+          create: vi.fn(async ({ data }) => {
+            const record = { id: 'absent-1', ...data };
+            created.push(record);
+            return record;
+          }),
+        },
+        leaveRequest: { findFirst: vi.fn().mockResolvedValue(null) },
+        auditLog: { create: vi.fn().mockResolvedValue({ id: 'absent-receipt' }) },
+      };
+      (prisma.employeeSchedule.findMany as any).mockResolvedValue(schedules);
+      (prisma.$transaction as any).mockImplementation(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx));
 
       const result = await JobRunner.runJob('DAILY_ATTENDANCE_RECONCILIATION', { targetDate });
 
       expect(result.status).toBe('SUCCESS');
       expect(result.details?.totalScheduled).toBe(2);
       expect(result.details?.markedAbsent).toBe(1);
-      expect(prisma.attendance.upsert).toHaveBeenCalledTimes(1);
+      expect(result.details?.alreadyAttended).toBe(1);
+      expect(tx.attendance.create).toHaveBeenCalledTimes(1);
+      expect(created).toEqual([expect.objectContaining({
+        organizationId, employeeId: 'emp-absent', workDate, scheduleId: 'sch-1', status: 'ABSENT',
+      })]);
+      expect(validAttendance).toEqual(originalAttendance);
+      expect(tx.attendance.create).not.toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ employeeId: 'emp-present' }),
+      }));
+      expect(tx.auditLog.create).toHaveBeenCalledTimes(1);
+      expect(tx.auditLog.create.mock.calls[0][0].data.entityId).toBe('absent-1');
+      expect(prisma.attendance.upsert).not.toHaveBeenCalled();
     });
   });
 });

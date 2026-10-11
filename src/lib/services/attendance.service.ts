@@ -43,6 +43,41 @@ export interface AttendanceMetrics {
 
 export type TrustedAttendanceMethod = 'WEB' | 'QR' | 'GPS' | 'BIOMETRIC';
 
+export const RECONCILIATION_ABSENT_ACTION = 'ATTENDANCE_RECONCILIATION_ABSENT_V1';
+export const RECONCILIATION_ABSENT_NOTES =
+  'Hệ thống tự động ghi nhận vắng mặt không phép (Attendance Reconciliation Job)';
+
+export function getScheduledShiftWindow(
+  workDate: string,
+  shift: Pick<ShiftTimeWindow, 'startTime' | 'endTime' | 'isOvernight'>
+) {
+  const clock = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/;
+  if (!clock.test(shift.startTime) || !clock.test(shift.endTime) || typeof shift.isOvernight !== 'boolean') {
+    throw ApiError.badRequest('Invalid scheduled shift time.');
+  }
+  const start = parseBusinessLocalDateTime(workDate, shift.startTime);
+  const end = parseBusinessLocalDateTime(
+    shift.isOvernight ? addBusinessDays(workDate, 1) : workDate,
+    shift.endTime
+  );
+  const duration = end.getTime() - start.getTime();
+  if (duration <= 0 || duration > 24 * 60 * 60 * 1000) {
+    throw ApiError.badRequest('Invalid scheduled shift duration.');
+  }
+  return { start, end };
+}
+
+export function getAttendanceUniqueConflict(error: unknown): 'employeeDate' | 'schedule' | null {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return null;
+  if (error.meta?.modelName && error.meta.modelName !== 'Attendance') return null;
+  const target = error.meta?.target;
+  if (!Array.isArray(target)) return null;
+  const fields = target.map(String).sort().join(',');
+  if (fields === 'employee_id,work_date' || fields === 'employeeId,workDate') return 'employeeDate';
+  if (fields === 'schedule_id' || fields === 'scheduleId') return 'schedule';
+  return null;
+}
+
 export class AttendanceService {
   /**
    * Pure calculation function for working hours, late minutes, early minutes and overtime.
@@ -142,13 +177,16 @@ export class AttendanceService {
     // Default: current user's employee record
     const emp = await db.employee.findUnique({
       where: { userId: session.userId },
-      select: { id: true, status: true, deletedAt: true },
+      select: { id: true, status: true, deletedAt: true, organizationId: true },
     });
     if (!emp || emp.deletedAt) {
       throw ApiError.notFound('Hồ sơ nhân viên của bạn không tồn tại trong hệ thống.');
     }
     if (emp.status === 'TERMINATED') {
       throw ApiError.forbidden('Tài khoản nhân viên của bạn đã bị ngưng hoạt động.');
+    }
+    if (!session.organizationId || emp.organizationId !== session.organizationId) {
+      throw ApiError.forbidden('Employee does not belong to the authenticated tenant.');
     }
     return emp.id;
   }
@@ -348,37 +386,77 @@ export class AttendanceService {
     const checkInTime = input.checkInTime
       ? parseBusinessLocalDateTime(input.checkInTime)
       : now;
-    const workDateStr = input.workDate
+    let workDateStr = input.workDate
       ? formatBusinessDate(parseBusinessDate(input.workDate))
       : getBusinessDateString(checkInTime);
-    const workDate = parseBusinessDate(workDateStr);
+    let workDate = parseBusinessDate(workDateStr);
 
     // Prevent invalid future timestamp (allow max 5 min clock drift)
     if (checkInTime.getTime() > now.getTime() + 5 * 60 * 1000) {
       throw ApiError.badRequest('Thời gian check-in không được ở tương lai.');
     }
 
+    let createConflictScope: Prisma.AttendanceWhereInput | undefined;
     const executeCheckIn = async (db: Prisma.TransactionClient) => {
       const employeeId = await this.resolveEmployeeId(session, input.employeeId, db);
+      if (!input.workDate) {
+        const priorDate = addBusinessDays(workDateStr, -1);
+        const prior = await db.employeeSchedule.findUnique({
+          where: {
+            employeeId_workDate: { employeeId, workDate: parseBusinessDate(priorDate) },
+            organizationId: session.organizationId!, status: 'SCHEDULED',
+            shift: { organizationId: session.organizationId!, isOvernight: true, isActive: true, deletedAt: null },
+          },
+          include: { shift: true },
+        });
+        if (prior?.shift.isOvernight) {
+          const window = getScheduledShiftWindow(priorDate, prior.shift);
+          if (checkInTime >= window.start && checkInTime <= window.end) {
+            workDateStr = priorDate;
+            workDate = parseBusinessDate(priorDate);
+          }
+        }
+      }
 
       // 1. PREVENT DUPLICATE ATTENDANCE
-      const existing = await db.attendance.findUnique({
-        where: { employeeId_workDate: { employeeId, workDate } },
+      let existing = await db.attendance.findUnique({
+        where: { employeeId_workDate: { employeeId, workDate }, organizationId: session.organizationId! },
       });
 
-      if (existing) {
+      if (existing && existing.status !== 'ABSENT') {
         throw ApiError.conflict(`Nhân viên đã thực hiện check-in cho ngày ${workDateStr} lúc ${existing.checkInTime ? formatBusinessTime(existing.checkInTime) : 'N/A'}.`);
+      }
+
+      if (existing) {
+        if (!session.organizationId || existing.organizationId !== session.organizationId) {
+          throw ApiError.forbidden('Attendance does not belong to the authenticated tenant.');
+        }
+        // Keep HR updates and their transactional audit visible before deciding provenance.
+        const locked = await db.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM attendance
+          WHERE id = ${existing.id} AND organization_id = ${session.organizationId}
+          FOR UPDATE
+        `;
+        if (locked.length !== 1) throw ApiError.conflict('Attendance changed during check-in.');
+        existing = await db.attendance.findUnique({ where: { id: existing.id, organizationId: session.organizationId } });
+        if (!existing || existing.organizationId !== session.organizationId || existing.status !== 'ABSENT') {
+          throw ApiError.conflict('Attendance changed during check-in.');
+        }
       }
 
       // 2. Resolve shift & schedule inside the same transaction client.
       const { shift, scheduleId, organizationId } = await this.resolveShiftForDate(
         employeeId,
         workDate,
-        db
+        db,
+        { createSchedule: !existing }
       );
+      if (organizationId !== session.organizationId) {
+        throw ApiError.forbidden('Employee tenant changed during check-in.');
+      }
 
       // 3. Compute late minutes at check-in
-      const scheduledStart = parseBusinessLocalDateTime(workDateStr, shift.startTime);
+      const { start: scheduledStart, end: scheduledEnd } = getScheduledShiftWindow(workDateStr, shift);
       const lateThreshold = scheduledStart.getTime() + (shift.gracePeriodLate || 0) * 60 * 1000;
 
       let lateMinutes = 0;
@@ -388,41 +466,104 @@ export class AttendanceService {
         initialStatus = 'LATE';
       }
 
-      // 4. Create attendance record and audit using the same transaction client.
-      const created = await db.attendance.create({
-        data: {
-          organizationId,
-          employeeId,
-          scheduleId: scheduleId || null,
-          workDate,
-          checkInTime,
-          checkInMethod: trustedMethod,
-          checkInLat: input.checkInLat ? new Prisma.Decimal(input.checkInLat) : null,
-          checkInLng: input.checkInLng ? new Prisma.Decimal(input.checkInLng) : null,
-          lateMinutes,
-          earlyMinutes: 0,
-          actualWorkHours: new Prisma.Decimal(0),
-          otHours: new Prisma.Decimal(0),
-          status: initialStatus,
-          notes: input.notes?.trim() || null,
+      const data = {
+        organizationId,
+        employeeId,
+        scheduleId: scheduleId || null,
+        workDate,
+        checkInTime,
+        checkInMethod: trustedMethod,
+        checkInLat: input.checkInLat ? new Prisma.Decimal(input.checkInLat) : null,
+        checkInLng: input.checkInLng ? new Prisma.Decimal(input.checkInLng) : null,
+        lateMinutes,
+        earlyMinutes: 0,
+        actualWorkHours: new Prisma.Decimal(0),
+        otHours: new Prisma.Decimal(0),
+        status: initialStatus,
+        notes: input.notes?.trim() || null,
+      };
+      const include = {
+        employee: {
+          select: { id: true, employeeCode: true, firstName: true, lastName: true },
         },
-        include: {
-          employee: {
-            select: { id: true, employeeCode: true, firstName: true, lastName: true },
-          },
-          schedule: {
-            include: { shift: true },
-          },
+        schedule: {
+          include: { shift: true },
         },
-      });
+      } satisfies Prisma.AttendanceInclude;
+
+      let created;
+      if (existing) {
+        const verifiedSchedule = scheduleId ? await db.employeeSchedule.findFirst({
+          where: {
+            id: scheduleId, organizationId, employeeId, workDate, status: 'SCHEDULED',
+            shift: { organizationId, isActive: true, deletedAt: null },
+          },
+          select: { id: true },
+        }) : null;
+        const receipts = await db.auditLog.findMany({
+          where: { organizationId, entity: 'attendance', entityId: existing.id },
+          take: 2,
+        });
+        const adjustment = await db.attendanceAdjustment.findFirst({
+          where: {
+            organizationId,
+            OR: [
+              { attendanceId: existing.id },
+              { employeeId, workDate },
+            ],
+          },
+          select: { id: true },
+        });
+        const receipt = receipts.length === 1 ? receipts[0] : null;
+        const values = receipt?.newValues;
+        const proof = values && typeof values === 'object' && !Array.isArray(values) ? values : null;
+        if (!verifiedSchedule || !scheduleId || existing.scheduleId !== scheduleId ||
+            adjustment || !receipt || receipt.action !== RECONCILIATION_ABSENT_ACTION ||
+            receipt.actorId !== null || receipt.organizationId !== organizationId || receipt.oldValues !== null ||
+            proof?.version !== 1 || proof.employeeId !== employeeId || proof.scheduleId !== scheduleId ||
+            proof.workDate !== workDateStr || proof.shiftEnd !== scheduledEnd.toISOString() ||
+            receipt.createdAt.getTime() < scheduledEnd.getTime()) {
+          throw ApiError.conflict('ABSENT origin or untouched state cannot be verified.');
+        }
+
+        const changed = await db.attendance.updateMany({
+          where: {
+            id: existing.id, organizationId, employeeId, workDate, scheduleId,
+            status: 'ABSENT', branchId: null,
+            checkInTime: null, checkOutTime: null, checkInMethod: null, checkOutMethod: null,
+            checkInLat: null, checkInLng: null, checkOutLat: null, checkOutLng: null,
+            lateMinutes: 0, earlyMinutes: 0, actualWorkHours: 0, otHours: 0,
+            notes: RECONCILIATION_ABSENT_NOTES,
+            adjustments: { none: {} },
+          },
+          data,
+        });
+        if (changed.count !== 1) throw ApiError.conflict('ABSENT is no longer untouched.');
+        created = await db.attendance.findUnique({ where: { id: existing.id, organizationId }, include });
+        if (!created) throw ApiError.conflict('Attendance changed during check-in.');
+      } else {
+        try {
+          created = await db.attendance.create({ data, include });
+        } catch (error) {
+          const conflict = getAttendanceUniqueConflict(error);
+          if (conflict) {
+            createConflictScope = {
+              organizationId, employeeId, workDate,
+              ...(conflict === 'schedule' ? { scheduleId: scheduleId || null } : {}),
+            };
+          }
+          throw error;
+        }
+      }
 
       await db.auditLog.create({
         data: {
           actorId: session.userId,
-          action: 'ATTENDANCE_CHECK_IN',
+          action: existing ? 'ATTENDANCE_CHECK_IN_RECOVER_ABSENT' : 'ATTENDANCE_CHECK_IN',
           entity: 'attendance',
           entityId: created.id,
           organizationId,
+          ...(existing ? { oldValues: { status: 'ABSENT', receiptAction: RECONCILIATION_ABSENT_ACTION } } : {}),
           newValues: {
             employeeId,
             workDate: workDateStr,
@@ -437,9 +578,19 @@ export class AttendanceService {
       return created;
     };
 
-    const attendance = tx
-      ? await executeCheckIn(tx)
-      : await prisma.$transaction(executeCheckIn);
+    const attendance = await (async () => {
+      // A supplied transaction belongs to the caller; never query it after a failed INSERT.
+      if (tx) return executeCheckIn(tx);
+      try {
+        return await prisma.$transaction(executeCheckIn);
+      } catch (error) {
+        if (createConflictScope && getAttendanceUniqueConflict(error)) {
+          const winner = await prisma.attendance.findFirst({ where: createConflictScope, select: { id: true } });
+          if (winner) throw ApiError.conflict('Attendance was created concurrently; no record was overwritten.');
+        }
+        throw error;
+      }
+    })();
 
     logger.info('Employee checked in', {
       attendanceId: attendance.id,

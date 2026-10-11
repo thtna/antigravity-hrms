@@ -28,7 +28,8 @@
  *    - Admin can successfully log attendance manually
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Prisma, type Attendance } from '@prisma/client';
 
 // ── Use vi.hoisted so mockPrisma is available BEFORE vi.mock factories run ──
 const mockPrisma = vi.hoisted(() => ({
@@ -43,6 +44,7 @@ const mockPrisma = vi.hoisted(() => ({
     count: vi.fn(),
   },
   employeeSchedule: {
+    findFirst: vi.fn(),
     findUnique: vi.fn(),
     findMany: vi.fn(),
     create: vi.fn(),
@@ -62,7 +64,10 @@ const mockPrisma = vi.hoisted(() => ({
   },
   auditLog: {
     create: vi.fn(),
+    findMany: vi.fn(),
   },
+  attendanceAdjustment: { findFirst: vi.fn() },
+  $queryRaw: vi.fn(),
   $transaction: vi.fn(),
 }));
 
@@ -98,7 +103,9 @@ vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { AttendanceService } from '@/lib/services/attendance.service';
+import {
+  AttendanceService, RECONCILIATION_ABSENT_ACTION, RECONCILIATION_ABSENT_NOTES,
+} from '@/lib/services/attendance.service';
 
 // ── Fixture sessions ─────────────────────────────────────────────────────────
 
@@ -1574,6 +1581,294 @@ describe('PHASE 6 — ATTENDANCE ENGINE TEST SUITE', () => {
           }),
         })
       );
+    });
+  });
+});
+
+describe('R2 overnight reconciliation and ABSENT recovery', () => {
+  const workDate = new Date('2026-09-03T00:00:00.000Z');
+  const input = { workDate: PAST_DATE, checkInTime: '2026-09-04T00:05:00+07:00' };
+  const schedule = { id: 'sch-night', organizationId: 'org-001', employeeId: 'emp-001', workDate, shift: overnightShift };
+  const absent = (): Attendance => ({
+    id: 'auto-absent', organizationId: 'org-001', employeeId: 'emp-001', scheduleId: 'sch-night',
+    branchId: null, workDate, status: 'ABSENT', notes: RECONCILIATION_ABSENT_NOTES,
+    checkInTime: null, checkOutTime: null, checkInMethod: null, checkOutMethod: null,
+    checkInLat: null, checkInLng: null, checkOutLat: null, checkOutLng: null,
+    lateMinutes: 0, earlyMinutes: 0, actualWorkHours: new Prisma.Decimal(0), otHours: new Prisma.Decimal(0),
+  });
+  const receipt = () => ({
+    id: 'job-receipt', organizationId: 'org-001', actorId: null as string | null,
+    action: RECONCILIATION_ABSENT_ACTION, entity: 'attendance', entityId: 'auto-absent',
+    oldValues: null,
+    newValues: {
+      version: 1, employeeId: 'emp-001', scheduleId: 'sch-night',
+      workDate: PAST_DATE, shiftEnd: '2026-09-03T23:00:00.000Z',
+    },
+    createdAt: new Date('2026-09-04T06:00:00+07:00'),
+  });
+  let row: Attendance | null;
+  let receipts: ReturnType<typeof receipt>[];
+  let adjustments: Array<{ id: string }>;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-04T06:10:00+07:00'));
+    row = absent();
+    receipts = [receipt()];
+    adjustments = [];
+    mockPrisma.employee.findUnique.mockResolvedValue(activeEmployee);
+    mockPrisma.employeeSchedule.findUnique.mockResolvedValue(schedule);
+    mockPrisma.employeeSchedule.findFirst.mockResolvedValue({ id: schedule.id });
+    mockPrisma.attendance.findUnique.mockImplementation(async () => row);
+    mockPrisma.$queryRaw.mockResolvedValue([{ id: 'auto-absent' }]);
+    mockPrisma.auditLog.findMany.mockImplementation(async () => receipts.slice(0, 2));
+    mockPrisma.attendanceAdjustment.findFirst.mockImplementation(async () => adjustments[0] ?? null);
+    mockPrisma.auditLog.create.mockResolvedValue({ id: 'recovery-audit' });
+    mockPrisma.attendance.updateMany.mockImplementation(async ({ where, data }) => {
+      if (!row || adjustments.length > 0) return { count: 0 };
+      const matches = Object.entries(where).every(([key, expected]) => {
+        if (key === 'adjustments') return true;
+        const actual = row![key as keyof Attendance];
+        if (expected === null) return actual === null;
+        if (expected instanceof Date) return actual instanceof Date && actual.getTime() === expected.getTime();
+        return String(actual) === String(expected);
+      });
+      if (!matches) return { count: 0 };
+      row = { ...row, ...data };
+      return { count: 1 };
+    });
+    mockPrisma.$transaction.mockImplementation(async (callback) => {
+      const before = row ? { ...row } : null;
+      try { return await callback(mockPrisma); }
+      catch (error) { row = before; throw error; }
+    });
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('recovers only the pristine job record, under a tenant row lock and exact database predicate', async () => {
+    const result = await AttendanceService.checkIn(input, employeeSession);
+    expect(result).toMatchObject({ id: 'auto-absent', workDate: PAST_DATE, status: 'LATE', checkInMethod: 'WEB' });
+    expect(result.checkInTime).toEqual(new Date(input.checkInTime));
+    expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
+    expect(mockPrisma.attendance.upsert).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    const [sql, id, organizationId] = mockPrisma.$queryRaw.mock.calls[0];
+    expect(sql.join('?')).toMatch(/WHERE id = \? AND organization_id = \?[\s\S]*FOR UPDATE/);
+    expect([id, organizationId]).toEqual(['auto-absent', 'org-001']);
+    expect(mockPrisma.attendance.updateMany.mock.calls[0][0].where).toEqual({
+      id: 'auto-absent', organizationId: 'org-001', employeeId: 'emp-001', workDate, scheduleId: 'sch-night',
+      status: 'ABSENT', branchId: null, checkInTime: null, checkOutTime: null,
+      checkInMethod: null, checkOutMethod: null, checkInLat: null, checkInLng: null, checkOutLat: null, checkOutLng: null,
+      lateMinutes: 0, earlyMinutes: 0, actualWorkHours: 0, otHours: 0,
+      notes: RECONCILIATION_ABSENT_NOTES, adjustments: { none: {} },
+    });
+    expect(mockPrisma.auditLog.findMany).toHaveBeenCalledWith({
+      where: { organizationId: 'org-001', entity: 'attendance', entityId: 'auto-absent' }, take: 2,
+    });
+    expect(mockPrisma.auditLog.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      actorId: employeeSession.userId, organizationId: 'org-001', entityId: 'auto-absent',
+      action: 'ATTENDANCE_CHECK_IN_RECOVER_ABSENT',
+      oldValues: { status: 'ABSENT', receiptAction: RECONCILIATION_ABSENT_ACTION },
+    }) });
+    expect(mockPrisma.employeeSchedule.findFirst.mock.calls[0][0].where).toMatchObject({
+      organizationId: 'org-001', employeeId: 'emp-001', workDate,
+      shift: { organizationId: 'org-001', isActive: true, deletedAt: null },
+    });
+  });
+
+  it('uses a supplied transaction for recovery and audit without opening a nested transaction', async () => {
+    const result = await AttendanceService.checkIn(input, employeeSession, mockPrisma as unknown as Prisma.TransactionClient, 'QR');
+    expect(result.checkInMethod).toBe('QR');
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['legacy', 'manual', 'HR-edited', 'correction'])('rejects %s ABSENT provenance', async (origin) => {
+    if (origin === 'legacy') receipts = [];
+    if (origin === 'manual') receipts[0].actorId = 'hr-actor';
+    if (origin === 'HR-edited') receipts.push({ ...receipt(), action: 'MANUAL_ATTENDANCE_LOG' });
+    if (origin === 'correction') adjustments = [{ id: 'approved-correction' }];
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toMatchObject({ statusCode: 409 });
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  const edits: Array<[string, Partial<Attendance>]> = [
+    ['HR note', { notes: 'HR changed this record' }],
+    ['manual method', { checkInMethod: 'MANUAL' }],
+    ['check-in', { checkInTime: new Date('2026-09-03T15:00:00Z') }],
+    ['check-out', { checkOutTime: new Date('2026-09-03T23:00:00Z') }],
+    ['GPS', { checkInLat: new Prisma.Decimal(0) }],
+    ['late minutes', { lateMinutes: 1 }],
+    ['early minutes', { earlyMinutes: 1 }],
+    ['hours', { actualWorkHours: new Prisma.Decimal(1) }],
+    ['overtime', { otHours: new Prisma.Decimal(1) }],
+    ['branch', { branchId: 'branch-hr' }],
+  ];
+  it.each(edits)('database guard rejects an ABSENT with changed %s', async (_label, edit) => {
+    row = { ...row!, ...edit };
+    const before = { ...row };
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toMatchObject({ statusCode: 409 });
+    expect(row).toEqual(before);
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['workDate', 'employeeId', 'scheduleId', 'shiftEnd', 'version'])('rejects a mismatched receipt %s', async (field) => {
+    Object.assign(receipts[0].newValues, { [field]: field === 'version' ? 2 : 'incorrect' });
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toMatchObject({ statusCode: 409 });
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a receipt written before the shift end', async () => {
+    receipts[0].createdAt = new Date('2026-09-04T05:59:59+07:00');
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toMatchObject({ statusCode: 409 });
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects tenant B before touching tenant A attendance', async () => {
+    await expect(AttendanceService.checkIn(input, { ...employeeSession, organizationId: 'org-B' }))
+      .rejects.toMatchObject({ statusCode: 403 });
+    expect(mockPrisma.attendance.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing session tenant and foreign attendance returned by a stale read', async () => {
+    await expect(AttendanceService.checkIn(input, { ...employeeSession, organizationId: null }))
+      .rejects.toMatchObject({ statusCode: 403 });
+    row!.organizationId = 'org-B';
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toMatchObject({ statusCode: 403 });
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a schedule outside the tenant or no longer SCHEDULED', async () => {
+    mockPrisma.employeeSchedule.findFirst.mockResolvedValue(null);
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toMatchObject({ statusCode: 409 });
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('reads again after waiting for the row lock and respects a concurrent HR update', async () => {
+    mockPrisma.$transaction.mockImplementation(async (callback) => callback(mockPrisma));
+    mockPrisma.$queryRaw.mockImplementation(async () => {
+      row = { ...row!, status: 'ON_TIME', checkInMethod: 'MANUAL' };
+      return [{ id: 'auto-absent' }];
+    });
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toMatchObject({ statusCode: 409 });
+    expect(mockPrisma.attendance.findUnique).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+    expect(row).toMatchObject({ status: 'ON_TIME', checkInMethod: 'MANUAL' });
+  });
+
+  it('allows only one recovery when two check-ins read ABSENT before acquiring the lock', async () => {
+    let complete!: () => void;
+    const firstCommitted = new Promise<void>((resolve) => { complete = resolve; });
+    let locks = 0;
+    mockPrisma.$queryRaw.mockImplementation(async () => {
+      locks++;
+      if (locks === 2) await firstCommitted;
+      return [{ id: 'auto-absent' }];
+    });
+    mockPrisma.$transaction.mockImplementation(async (callback) => {
+      const result = await callback(mockPrisma);
+      complete();
+      return result;
+    });
+    const results = await Promise.allSettled([
+      AttendanceService.checkIn(input, employeeSession), AttendanceService.checkIn(input, employeeSession),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(mockPrisma.attendance.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a correction arriving between the provenance read and the conditional update', async () => {
+    mockPrisma.attendanceAdjustment.findFirst.mockImplementation(async () => {
+      adjustments.push({ id: 'racing-correction' });
+      return null;
+    });
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toMatchObject({ statusCode: 409 });
+    expect(row?.status).toBe('ABSENT');
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('rolls recovery back if the transactional audit fails', async () => {
+    mockPrisma.auditLog.create.mockRejectedValue(new Error('audit unavailable'));
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toThrow('audit unavailable');
+    expect(mockPrisma.attendance.updateMany).toHaveBeenCalledTimes(1);
+    expect(row).toEqual(absent());
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['P2002', 'P2024'])('propagates recovery update %s without retry or audit', async (code) => {
+    const error = new Prisma.PrismaClientKnownRequestError('update failed', {
+      code, clientVersion: '6.19.3', meta: { target: ['employee_id', 'work_date'], modelName: 'Attendance' },
+    });
+    mockPrisma.attendance.updateMany.mockRejectedValue(error);
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toBe(error);
+    expect(mockPrisma.attendance.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('confirms the persisted winner after a create P2002 (present=%s)', async (present) => {
+    row = null;
+    const error = new Prisma.PrismaClientKnownRequestError('job won the insert', {
+      code: 'P2002', clientVersion: '6.19.3', meta: { modelName: 'Attendance', target: ['employee_id', 'work_date'] },
+    });
+    mockPrisma.attendance.create.mockRejectedValue(error);
+    mockPrisma.attendance.findFirst.mockResolvedValue(present ? { id: 'committed-job-row' } : null);
+    const attempt = AttendanceService.checkIn(input, employeeSession);
+    if (present) await expect(attempt).rejects.toMatchObject({ statusCode: 409 });
+    else await expect(attempt).rejects.toBe(error);
+    expect(mockPrisma.attendance.findFirst).toHaveBeenCalledWith({
+      where: { organizationId: 'org-001', employeeId: 'emp-001', workDate }, select: { id: true },
+    });
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not query an externally owned transaction after a create P2002', async () => {
+    row = null;
+    const error = new Prisma.PrismaClientKnownRequestError('unique conflict', {
+      code: 'P2002', clientVersion: '6.19.3', meta: { target: ['schedule_id'] },
+    });
+    mockPrisma.attendance.create.mockRejectedValue(error);
+    await expect(AttendanceService.checkIn(input, employeeSession, mockPrisma as unknown as Prisma.TransactionClient)).rejects.toBe(error);
+    expect(mockPrisma.attendance.findFirst).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid shift configuration before recovery or creation', async () => {
+    mockPrisma.employeeSchedule.findUnique.mockResolvedValue({ ...schedule, shift: { ...overnightShift, endTime: '25:00' } });
+    await expect(AttendanceService.checkIn(input, employeeSession)).rejects.toMatchObject({ statusCode: 400 });
+    expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['2026-09-03', '2026-09-04T00:05:00+07:00'],
+    ['2026-09-03', '2026-09-04T05:59:00+07:00'],
+    ['2026-09-03', '2026-09-04T06:00:00+07:00'],
+    ['2026-09-30', '2026-10-01T00:05:00+07:00'],
+    ['2026-12-31', '2027-01-01T00:05:00+07:00'],
+  ])('infers the scheduled overnight start date %s for check-in at %s', async (date, instant) => {
+    vi.setSystemTime(new Date(instant));
+    row = null;
+    const dateCarrier = new Date(`${date}T00:00:00.000Z`);
+    mockPrisma.employeeSchedule.findUnique.mockResolvedValue({ ...schedule, workDate: dateCarrier });
+    mockPrisma.attendance.create.mockImplementation(async ({ data }) => ({ id: 'new-night', ...data }));
+    const result = await AttendanceService.checkIn({}, employeeSession);
+    expect(result.workDate).toBe(date);
+    expect(mockPrisma.attendance.create.mock.calls[0][0].data.workDate).toEqual(dateCarrier);
+    expect(mockPrisma.attendance.create.mock.calls[0][0].data.checkInTime).toEqual(new Date(instant));
+    expect(mockPrisma.auditLog.create.mock.calls[0][0].data.newValues.workDate).toBe(date);
+    expect(mockPrisma.employeeSchedule.findUnique.mock.calls[0][0].where).toMatchObject({
+      organizationId: 'org-001', shift: { organizationId: 'org-001', isOvernight: true },
     });
   });
 });
