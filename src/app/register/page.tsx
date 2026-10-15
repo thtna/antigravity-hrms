@@ -3,8 +3,9 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Building2, Mail, Lock, User, Phone, MapPin, FileText, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { Building2, Mail, Lock, User, Phone, MapPin, FileText, CheckCircle2, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 
 export default function RegisterBusinessPage() {
   const [companyName, setCompanyName] = useState('');
@@ -15,6 +16,8 @@ export default function RegisterBusinessPage() {
   const [address, setAddress] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -69,7 +72,7 @@ export default function RegisterBusinessPage() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-[#070b14] px-4 py-12">
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 h-96 w-96 rounded-full bg-blue-600/10 blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[min(24rem,calc(100vw-2rem))] w-[min(24rem,calc(100vw-2rem))] rounded-full bg-blue-600/10 blur-[140px] pointer-events-none" />
 
       <Card className="relative z-10 w-full max-w-xl border-slate-800/80 bg-slate-900/70 backdrop-blur-xl shadow-2xl">
         <CardHeader className="space-y-2 text-center pb-4">
@@ -106,9 +109,12 @@ export default function RegisterBusinessPage() {
               </div>
 
               <div className="pt-4">
-                <Button asChild className="w-full bg-blue-600 hover:bg-blue-500">
-                  <Link href="/login">Trở Về Màn Hình Đăng Nhập</Link>
-                </Button>
+                <Link
+                  href="/login"
+                  className={cn(buttonVariants(), 'w-full bg-blue-600 hover:bg-blue-500')}
+                >
+                  Trở Về Màn Hình Đăng Nhập
+                </Link>
               </div>
             </div>
           ) : (
@@ -209,32 +215,60 @@ export default function RegisterBusinessPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-300">Mật Khẩu Quản Trị *</label>
+                  <label htmlFor="register-admin-password" className="text-xs font-medium text-slate-300">Mật Khẩu Quản Trị *</label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
                     <input
-                      type="password"
+                      id="register-admin-password"
+                      type={showPassword ? 'text' : 'password'}
                       required
                       placeholder="Tối thiểu 8 ký tự, có HOA và số"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full rounded-lg border border-slate-800 bg-slate-950/60 pl-10 pr-4 py-2 text-sm text-white placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full rounded-lg border border-slate-800 bg-slate-950/60 pl-10 pr-11 py-2 text-sm text-white placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((visible) => !visible)}
+                      aria-label={showPassword ? 'Ẩn mật khẩu quản trị' : 'Hiện mật khẩu quản trị'}
+                      aria-pressed={showPassword}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 transition-colors hover:text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </button>
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-300">Xác Nhận Mật Khẩu *</label>
+                  <label htmlFor="register-confirm-password" className="text-xs font-medium text-slate-300">Xác Nhận Mật Khẩu *</label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
                     <input
-                      type="password"
+                      id="register-confirm-password"
+                      type={showConfirmPassword ? 'text' : 'password'}
                       required
                       placeholder="Nhập lại mật khẩu"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full rounded-lg border border-slate-800 bg-slate-950/60 pl-10 pr-4 py-2 text-sm text-white placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="w-full rounded-lg border border-slate-800 bg-slate-950/60 pl-10 pr-11 py-2 text-sm text-white placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword((visible) => !visible)}
+                      aria-label={showConfirmPassword ? 'Ẩn mật khẩu xác nhận' : 'Hiện mật khẩu xác nhận'}
+                      aria-pressed={showConfirmPassword}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 transition-colors hover:text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </button>
                   </div>
                 </div>
               </div>
