@@ -1083,32 +1083,40 @@ describe('🌐 Phase 27 — Real World End-to-End Enterprise Simulation', () => 
   // STAGE 5: LEAVE REQUEST & APPROVAL
   // --------------------------------------------------------------------------
   it('Stage 5 — Should submit and approve annual leave request for 2 working days', async () => {
-    // 1. Submit Annual Leave Request
-    hrCbSession.employeeId = hrCbEmpId;
-    const leave = await LeaveService.createLeaveRequest(
-      {
-        leaveTypeId: 'lt-annual',
-        requestType: 'LEAVE',
-        startDate: '2026-09-10',
-        endDate: '2026-09-11',
-        durationDays: 2.0,
-        reason: 'Giải quyết việc gia đình',
-      },
-      hrCbSession
-    );
-    expect(leave.status).toBe('PENDING');
-    expect(Number(leave.durationDays)).toBe(2.0);
+    vi.useFakeTimers({ toFake: ['Date'] });
 
-    // 2. HR Manager processes and approves
-    const processed = await LeaveService.processLeaveRequest(
-      leave.id,
-      {
-        decision: 'APPROVED',
-        approvalNotes: 'Đã duyệt 2 ngày phép năm theo đúng quy chế',
-      },
-      hrSession
-    );
-    expect(processed.status).toBe('APPROVED');
+    try {
+      vi.setSystemTime(new Date('2026-09-10T12:00:00+07:00'));
+
+      // 1. Submit Annual Leave Request
+      hrCbSession.employeeId = hrCbEmpId;
+      const leave = await LeaveService.createLeaveRequest(
+        {
+          leaveTypeId: 'lt-annual',
+          requestType: 'LEAVE',
+          startDate: '2026-09-10',
+          endDate: '2026-09-11',
+          durationDays: 2.0,
+          reason: 'Giải quyết việc gia đình',
+        },
+        hrCbSession
+      );
+      expect(leave.status).toBe('PENDING');
+      expect(Number(leave.durationDays)).toBe(2.0);
+
+      // 2. HR Manager processes and approves
+      const processed = await LeaveService.processLeaveRequest(
+        leave.id,
+        {
+          decision: 'APPROVED',
+          approvalNotes: 'Đã duyệt 2 ngày phép năm theo đúng quy chế',
+        },
+        hrSession
+      );
+      expect(processed.status).toBe('APPROVED');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // --------------------------------------------------------------------------

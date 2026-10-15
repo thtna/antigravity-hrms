@@ -1336,11 +1336,13 @@ async function main() {
   await seedDevelopmentDemo();
 }
 
-main()
-  .catch((e) => {
-    console.error('❌ Lỗi nạp dữ liệu mẫu:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (typeof require !== 'undefined' && require.main === module) {
+  main()
+    .catch((e) => {
+      console.error('❌ Lỗi nạp dữ liệu mẫu:', e);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}
