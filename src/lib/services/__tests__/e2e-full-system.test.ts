@@ -24,7 +24,7 @@
  * 20. Employee Self-Service Payslip View & Anti-IDOR Security
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { hashPassword, verifyPassword } from '@/lib/auth/password';
 import { signSessionToken, verifySessionToken } from '@/lib/auth/session';
 import { UserSession } from '@/types';
@@ -1206,6 +1206,15 @@ describe('PHASE 24 — FULL SYSTEM E2E TESTING (20 STAGES)', () => {
   // ─── STAGE 11: LEAVE REQUEST ─────────────────────────────────────────────
   describe('Stage 11 — Leave Request', () => {
     let leaveRequestId: string;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-09-14T12:00:00+07:00'));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
     it('11.1 should allow employee to submit leave request for upcoming period', async () => {
       const leave = await LeaveService.createLeaveRequest(
