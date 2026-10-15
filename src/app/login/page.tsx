@@ -4,8 +4,9 @@ import React, { useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { ShieldCheck, Lock, Mail, AlertCircle, Loader2, Building2 } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { ShieldCheck, Lock, Mail, AlertCircle, Loader2, Building2, Eye, EyeOff } from 'lucide-react';
 import { resolvePostLoginRedirect } from '@/lib/auth/super-admin-landing';
 
 function LoginForm() {
@@ -16,6 +17,7 @@ function LoginForm() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState(
     errorParam === 'account_inactive'
@@ -97,7 +99,7 @@ function LoginForm() {
           {/* Password input & Forgot password link */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-slate-300">Mật Khẩu</label>
+              <label htmlFor="login-password" className="text-xs font-medium text-slate-300">Mật Khẩu</label>
               <Link
                 href="/forgot-password"
                 className="text-xs font-medium text-blue-400 hover:text-blue-300 transition-colors hover:underline"
@@ -108,13 +110,27 @@ function LoginForm() {
             <div className="relative">
               <Lock className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
               <input
-                type="password"
+                id="login-password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-slate-800 bg-slate-950/60 pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border border-slate-800 bg-slate-950/60 pl-10 pr-11 py-2.5 text-sm text-white placeholder-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                aria-pressed={showPassword}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-500 transition-colors hover:text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Eye className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
             </div>
           </div>
 
@@ -137,16 +153,16 @@ function LoginForm() {
         {/* REGISTER BUSINESS section */}
         <div className="mt-6 pt-5 border-t border-slate-800/80 text-center space-y-3">
           <p className="text-xs text-slate-400">Doanh nghiệp của bạn chưa tham gia hệ thống?</p>
-          <Button
-            asChild
-            variant="outline"
-            className="w-full border-slate-700 bg-slate-800/50 hover:bg-slate-800 hover:border-blue-500 text-slate-200 text-xs font-medium h-9"
+          <Link
+            href="/register"
+            className={cn(
+              buttonVariants({ variant: 'outline' }),
+              'w-full border-slate-700 bg-slate-800/50 hover:bg-slate-800 hover:border-blue-500 text-slate-200 text-xs font-medium h-9 gap-2'
+            )}
           >
-            <Link href="/register" className="flex items-center justify-center gap-2">
-              <Building2 className="h-4 w-4 text-blue-400" />
-              Đăng Ký Doanh Nghiệp Mới
-            </Link>
-          </Button>
+            <Building2 className="h-4 w-4 text-blue-400" />
+            Đăng Ký Doanh Nghiệp Mới
+          </Link>
         </div>
       </CardContent>
 
@@ -160,7 +176,7 @@ function LoginForm() {
 export default function LoginPage() {
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-[#070b14] px-4 py-12">
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 h-96 w-96 rounded-full bg-blue-600/10 blur-[120px] pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 h-[min(24rem,calc(100vw-2rem))] w-[min(24rem,calc(100vw-2rem))] rounded-full bg-blue-600/10 blur-[120px] pointer-events-none" />
       <Suspense fallback={<div className="text-slate-400 text-sm">Đang tải biểu mẫu...</div>}>
         <LoginForm />
       </Suspense>
