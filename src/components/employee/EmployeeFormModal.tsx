@@ -279,6 +279,7 @@ export function EmployeeFormModal({
         return;
       }
 
+      setLoading(false);
       onSuccess();
       onClose();
     } catch {
@@ -581,7 +582,7 @@ export function EmployeeFormModal({
                 <input
                   type="number"
                   min="0"
-                  step="1000"
+                  step="1"
                   value={hourlyRate}
                   onChange={(e) => setHourlyRate(Number(e.target.value))}
                   className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white font-mono focus:border-blue-500 focus:outline-none"
