@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { EmployeeTable } from '@/components/employee/EmployeeTable';
@@ -37,10 +37,14 @@ export default function EmployeesPage() {
   const [totalCount, setTotalCount] = useState(0);
 
   // Search & Filter states
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [selectedDept, setSelectedDept] = useState('');
   const [selectedPosition, setSelectedPosition] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const employeeRequestSequence = useRef(0);
+  const employeeAbortController = useRef<AbortController | null>(null);
 
   // Metadata for filters & form
   const [meta, setMeta] = useState<{
@@ -67,62 +71,93 @@ export default function EmployeesPage() {
       .catch(() => {});
   }, []);
 
-  // Fetch employees with filters & pagination
-  const fetchEmployees = useCallback(async () => {
+  const refreshEmployees = useCallback(() => {
+    // Invalidate immediately, before the next effect starts or a stale callback settles.
+    employeeRequestSequence.current += 1;
+    employeeAbortController.current?.abort();
     setLoading(true);
     setErrorMessage('');
+    setRefreshVersion((version) => version + 1);
+  }, []);
 
-    try {
-      const params = new URLSearchParams({
-        page: page.toString(),
-        limit: limit.toString(),
-        sortBy: 'createdAt',
-        sortOrder: 'desc',
-      });
-
-      if (searchTerm.trim()) params.set('search', searchTerm.trim());
-      if (selectedDept) params.set('departmentId', selectedDept);
-      if (selectedPosition) params.set('positionId', selectedPosition);
-      if (selectedStatus && selectedStatus !== 'ALL') params.set('status', selectedStatus);
-
-      const res = await fetch(`/api/v1/employees?${params.toString()}`);
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        setErrorMessage(data.error?.message || 'Không thể tải danh sách nhân viên.');
-        setLoading(false);
-        return;
-      }
-
-      setEmployees(data.data || []);
-      if (data.meta) {
-        setTotalPages(data.meta.totalPages || 1);
-        setTotalCount(data.meta.total || 0);
-      }
-    } catch {
-      setErrorMessage('Lỗi kết nối máy chủ khi tải danh sách nhân viên.');
-    } finally {
-      setLoading(false);
-    }
-  }, [page, limit, searchTerm, selectedDept, selectedPosition, selectedStatus]);
-
+  // Only applied query state or an explicit refresh can start a list request.
   useEffect(() => {
-    fetchEmployees();
-  }, [fetchEmployees]);
+    const controller = new AbortController();
+    const requestId = ++employeeRequestSequence.current;
+    employeeAbortController.current = controller;
+    const isCurrentRequest = () =>
+      employeeRequestSequence.current === requestId && !controller.signal.aborted;
 
-  // Handle Search Input with Enter / debounce
+    const loadEmployees = async () => {
+      setLoading(true);
+      setErrorMessage('');
+
+      try {
+        const params = new URLSearchParams({
+          page: page.toString(),
+          limit: limit.toString(),
+          sortBy: 'createdAt',
+          sortOrder: 'desc',
+        });
+
+        if (appliedSearch) params.set('search', appliedSearch);
+        if (selectedDept) params.set('departmentId', selectedDept);
+        if (selectedPosition) params.set('positionId', selectedPosition);
+        if (selectedStatus && selectedStatus !== 'ALL') params.set('status', selectedStatus);
+
+        const res = await fetch(`/api/v1/employees?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        if (!isCurrentRequest()) return;
+        const data = await res.json();
+        if (!isCurrentRequest()) return;
+
+        if (!res.ok || !data.success) {
+          setErrorMessage(data.error?.message || 'Không thể tải danh sách nhân viên.');
+          return;
+        }
+
+        setEmployees(data.data || []);
+        if (data.meta) {
+          setTotalPages(data.meta.totalPages || 1);
+          setTotalCount(data.meta.total || 0);
+        }
+      } catch {
+        if (isCurrentRequest()) {
+          setErrorMessage('Lỗi kết nối máy chủ khi tải danh sách nhân viên.');
+        }
+      } finally {
+        if (isCurrentRequest()) setLoading(false);
+      }
+    };
+
+    void loadEmployees();
+    return () => {
+      controller.abort();
+      if (employeeAbortController.current === controller) {
+        employeeAbortController.current = null;
+      }
+      if (employeeRequestSequence.current === requestId) {
+        employeeRequestSequence.current += 1;
+      }
+    };
+  }, [page, limit, appliedSearch, selectedDept, selectedPosition, selectedStatus, refreshVersion]);
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setAppliedSearch(searchInput.trim());
     setPage(1);
-    fetchEmployees();
+    refreshEmployees();
   };
 
   const handleResetFilters = () => {
-    setSearchTerm('');
+    setSearchInput('');
+    setAppliedSearch('');
     setSelectedDept('');
     setSelectedPosition('');
     setSelectedStatus('ALL');
     setPage(1);
+    refreshEmployees();
   };
 
   const handleOpenDetail = (emp: any) => {
@@ -167,7 +202,7 @@ export default function EmployeesPage() {
         return;
       }
       success(isTerminated ? 'Đã kích hoạt lại' : 'Đã đình chỉ nhân viên');
-      fetchEmployees();
+      refreshEmployees();
     } catch {
       toastError('Lỗi kết nối', 'Không thể kết nối máy chủ.');
     }
@@ -192,7 +227,7 @@ export default function EmployeesPage() {
         return;
       }
       success('Đã xoá mềm nhân viên', 'Hồ sơ đã được lưu trữ an toàn.');
-      fetchEmployees();
+      refreshEmployees();
     } catch {
       toastError('Lỗi kết nối', 'Không thể kết nối máy chủ.');
     }
@@ -232,7 +267,7 @@ export default function EmployeesPage() {
       {errorMessage && (
         <ErrorBanner
           description={errorMessage}
-          onRetry={fetchEmployees}
+          onRetry={refreshEmployees}
         />
       )}
 
@@ -245,8 +280,8 @@ export default function EmployeesPage() {
             <input
               type="text"
               placeholder="Tìm theo mã NV, họ tên, email hoặc số điện thoại..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="w-full rounded-xl border border-slate-800 bg-slate-950/80 pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
             />
           </div>
@@ -258,6 +293,7 @@ export default function EmployeesPage() {
               onChange={(e) => {
                 setSelectedDept(e.target.value);
                 setPage(1);
+                refreshEmployees();
               }}
               className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-200 focus:border-blue-500 focus:outline-none"
             >
@@ -277,6 +313,7 @@ export default function EmployeesPage() {
               onChange={(e) => {
                 setSelectedStatus(e.target.value);
                 setPage(1);
+                refreshEmployees();
               }}
               className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2.5 text-sm text-slate-200 focus:border-blue-500 focus:outline-none"
             >
@@ -337,6 +374,7 @@ export default function EmployeesPage() {
             onChange={(e) => {
               setLimit(Number(e.target.value));
               setPage(1);
+              refreshEmployees();
             }}
             className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1 text-xs text-white focus:outline-none"
           >
@@ -357,7 +395,10 @@ export default function EmployeesPage() {
               variant="outline"
               size="sm"
               disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => {
+                setPage((p) => Math.max(1, p - 1));
+                refreshEmployees();
+              }}
               className="h-8 w-8 p-0 border-slate-800 disabled:opacity-30"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -366,7 +407,10 @@ export default function EmployeesPage() {
               variant="outline"
               size="sm"
               disabled={page >= totalPages || loading}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => {
+                setPage((p) => Math.min(totalPages, p + 1));
+                refreshEmployees();
+              }}
               className="h-8 w-8 p-0 border-slate-800 disabled:opacity-30"
             >
               <ChevronRight className="h-4 w-4" />
@@ -387,7 +431,7 @@ export default function EmployeesPage() {
         isOpen={isFormOpen}
         onClose={() => setIsFormOpen(false)}
         onSuccess={() => {
-          fetchEmployees();
+          refreshEmployees();
         }}
         initialData={editEmployee}
         meta={meta}
