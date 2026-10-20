@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrencyVND } from '@/lib/utils';
@@ -32,6 +32,179 @@ import {
   ExternalLink
 } from 'lucide-react';
 
+type ResourceStatus = 'idle' | 'loading' | 'loaded' | 'error';
+type ResourceState = { status: ResourceStatus; error: string };
+type JsonRecord = Record<string, unknown>;
+
+class OrganizationReadError extends Error {
+  constructor(message: string, readonly status = 0) {
+    super(message);
+  }
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function readOrganizationJson(url: string, signal: AbortSignal) {
+  const response = await fetch(url, { signal });
+  if (response.status === 401 || response.status === 403) {
+    throw new OrganizationReadError('Quyen truy cap khong con hop le. Vui long tai lai trang sau khi xac thuc.', response.status);
+  }
+  const body: unknown = await response.json();
+  if (!isRecord(body) || !response.ok || body.success !== true) {
+    const detail = isRecord(body) && isRecord(body.error) ? body.error.message : null;
+    throw new OrganizationReadError(typeof detail === 'string' ? detail : 'Khong the tai du lieu.', response.status);
+  }
+  return body;
+}
+
+function readItems(body: JsonRecord) {
+  if (!Array.isArray(body.data) || !body.data.every((item: unknown) => isRecord(item) && typeof item.id === 'string')) {
+    throw new OrganizationReadError('Danh sach tra ve khong hop le.');
+  }
+  return body.data as JsonRecord[];
+}
+
+const loadBranches = async (signal: AbortSignal) => readItems(await readOrganizationJson('/api/v1/branches?includeInactive=true', signal));
+const loadDepartments = async (signal: AbortSignal) => readItems(await readOrganizationJson('/api/v1/departments?includeInactive=true', signal));
+const loadPositions = async (signal: AbortSignal) => readItems(await readOrganizationJson('/api/v1/positions?includeInactive=true', signal));
+const loadCurrentUser = async (signal: AbortSignal) => {
+  const body = await readOrganizationJson('/api/v1/auth/me', signal);
+  if (!isRecord(body.data) || !Array.isArray(body.data.roles)) {
+    throw new OrganizationReadError('Thong tin quyen truy cap khong hop le.');
+  }
+  return body.data;
+};
+const loadWorksites = async (signal: AbortSignal) => {
+  const body = await readOrganizationJson('/api/v1/worksites?isActive=ALL&limit=100', signal);
+  const items = readItems(body);
+  const pagination = isRecord(body.meta) && isRecord(body.meta.pagination) ? body.meta.pagination : null;
+  const total = pagination?.total;
+  if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < items.length) {
+    throw new OrganizationReadError('Tong so dia diem tra ve khong hop le.');
+  }
+  return { items, total };
+};
+
+async function loadAllEmployees(signal: AbortSignal) {
+  const items: JsonRecord[] = [];
+  const ids = new Set<string>();
+  let expectedTotal: number | undefined;
+  let expectedPages = 1;
+  // Bound the existing paginated API; never offer a silently truncated selector.
+  for (let page = 1; page <= expectedPages; page += 1) {
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    const url = page === 1 ? '/api/v1/employees?limit=100' : `/api/v1/employees?limit=100&page=${page}`;
+    const body = await readOrganizationJson(url, signal);
+    const rows = readItems(body);
+    const meta = isRecord(body.meta) ? body.meta : null;
+    const total = meta?.total;
+    const pages = meta?.totalPages;
+    if (!meta || meta.page !== page || meta.limit !== 100 || typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0 ||
+        typeof pages !== 'number' || !Number.isSafeInteger(pages) || pages !== Math.max(1, Math.ceil(total / 100)) || pages > 20 ||
+        (expectedTotal !== undefined && (total !== expectedTotal || pages !== expectedPages))) {
+      throw new OrganizationReadError('Chua xac minh du danh sach nhan vien: metadata phan trang khong nhat quan hoac vuot gioi han 2000.');
+    }
+    expectedTotal = total;
+    expectedPages = pages;
+    if (rows.length !== Math.min(100, Math.max(0, total - (page - 1) * 100))) {
+      throw new OrganizationReadError('Danh sach nhan vien bi thieu. Khong the mo bieu mau.');
+    }
+    for (const item of rows) {
+      const id = item.id as string;
+      if (ids.has(id)) throw new OrganizationReadError('Danh sach nhan vien bi trung. Vui long thu lai.');
+      ids.add(id);
+      items.push(item);
+    }
+  }
+  if (items.length !== expectedTotal) throw new OrganizationReadError('Chua tai du danh sach nhan vien.');
+  return items;
+}
+
+function useOrganizationResource<T>(
+  fetchValue: (signal: AbortSignal) => Promise<T>,
+  applyValue: (value: T) => void,
+  clearValue: () => void,
+  denied: React.RefObject<boolean>,
+  registry: React.RefObject<Set<() => void>>,
+  onDenied: () => void,
+) {
+  const [state, setState] = useState<ResourceState>({ status: 'idle', error: '' });
+  const handlers = useRef({ fetchValue, applyValue, clearValue });
+  const mounted = useRef(false);
+  const generation = useRef(0);
+  const controller = useRef<AbortController | null>(null);
+  const inFlight = useRef<Promise<boolean> | null>(null);
+  const loaded = useRef(false);
+  const lastValue = useRef<T | undefined>(undefined);
+  useEffect(() => {
+    handlers.current = { fetchValue, applyValue, clearValue };
+  }, [fetchValue, applyValue, clearValue]);
+
+  const clear = useCallback(() => {
+    generation.current += 1;
+    controller.current?.abort();
+    controller.current = null;
+    inFlight.current = null;
+    loaded.current = false;
+    lastValue.current = undefined;
+    if (mounted.current) {
+      handlers.current.clearValue();
+      setState({ status: 'idle', error: '' });
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    const registered = registry.current;
+    registered.add(clear);
+    return () => {
+      mounted.current = false;
+      clear();
+      registered.delete(clear);
+    };
+  }, [registry, clear]);
+
+  const load = useCallback((refresh = false): Promise<boolean> => {
+    if (!mounted.current || denied.current) return Promise.resolve(false);
+    if (!refresh && inFlight.current) return inFlight.current;
+    if (!refresh && loaded.current) return Promise.resolve(true);
+    const request = ++generation.current;
+    controller.current?.abort();
+    const active = new AbortController();
+    controller.current = active;
+    const current = () => mounted.current && !denied.current && !active.signal.aborted && request === generation.current;
+    loaded.current = false;
+    setState({ status: 'loading', error: '' });
+    const pending = Promise.resolve().then(() => handlers.current.fetchValue(active.signal)).then((value) => {
+      if (!current()) return false;
+      handlers.current.applyValue(value);
+      lastValue.current = value;
+      loaded.current = true;
+      setState({ status: 'loaded', error: '' });
+      return true;
+    }).catch((error: unknown) => {
+      if (!current()) return false;
+      lastValue.current = undefined;
+      handlers.current.clearValue();
+      setState({ status: 'error', error: error instanceof Error ? error.message : 'Khong the tai du lieu.' });
+      if (error instanceof OrganizationReadError && (error.status === 401 || error.status === 403)) onDenied();
+      return false;
+    }).finally(() => {
+      if (request === generation.current) {
+        inFlight.current = null;
+        controller.current = null;
+      }
+    });
+    inFlight.current = pending;
+    return pending;
+  }, [denied, onDenied]);
+
+  const read = useCallback(() => lastValue.current, []);
+  return { ...state, load, read };
+}
+
 export default function OrganizationPage() {
   const { success: toastSuccess, error: toastError } = useToastHelpers();
   const confirm = useConfirm();
@@ -44,8 +217,14 @@ export default function OrganizationPage() {
   const [worksites, setWorksites] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState<any | null>(null);
-  const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [worksiteTotal, setWorksiteTotal] = useState<number | null>(null);
+  const [accessError, setAccessError] = useState('');
+  const [preparingDepartment, setPreparingDepartment] = useState(false);
+  const [departmentPreparationError, setDepartmentPreparationError] = useState('');
+  const denied = useRef(false);
+  const resources = useRef(new Set<() => void>());
+  const departmentIntent = useRef(0);
 
   // Modals state
   const [isBranchModalOpen, setIsBranchModalOpen] = useState(false);
@@ -67,92 +246,81 @@ export default function OrganizationPage() {
     currentUser?.roles?.includes('admin') || currentUser?.roles?.includes('hr');
   const canDeleteBranches = currentUser?.roles?.includes('admin');
 
-  // Fetch current user for UI-level RBAC hints
-  const fetchCurrentUser = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v1/auth/me');
-      const data = await res.json();
-      if (data.success) {
-        setCurrentUser(data.data || null);
-      }
-    } catch {
-      // Server-side authorization remains authoritative.
-    }
+  const onDenied = useCallback(() => {
+    denied.current = true;
+    departmentIntent.current += 1;
+    resources.current.forEach((clear) => clear());
+    setPreparingDepartment(false);
+    setIsBranchModalOpen(false);
+    setIsDeptModalOpen(false);
+    setIsPosModalOpen(false);
+    setIsWorksiteModalOpen(false);
+    setIsDeptEmpModalOpen(false);
+    setEditBranch(null);
+    setEditDept(null);
+    setEditPos(null);
+    setEditWorksite(null);
+    setSelectedDeptForEmployees(null);
+    setAccessError('Quyen truy cap khong con hop le. Vui long tai lai trang sau khi xac thuc.');
   }, []);
-
-  // Fetch branches
-  const fetchBranches = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v1/branches?includeInactive=true');
-      const data = await res.json();
-      if (data.success) {
-        setBranches(data.data || []);
-      } else if (res.status !== 403) {
-        setErrorMessage(data.error?.message || 'Khong the tai danh sach chi nhanh.');
-      }
-    } catch {
-      setErrorMessage('Khong the tai danh sach chi nhanh.');
-    }
-  }, []);
-
-  // Fetch departments
-  const fetchDepartments = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v1/departments?includeInactive=true');
-      const data = await res.json();
-      if (data.success) {
-        setDepartments(data.data || []);
-      }
-    } catch {
-      setErrorMessage('Không thể tải danh sách phòng ban.');
-    }
-  }, []);
-
-  // Fetch positions
-  const fetchPositions = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v1/positions?includeInactive=true');
-      const data = await res.json();
-      if (data.success) {
-        setPositions(data.data || []);
-      }
-    } catch {
-      setErrorMessage('Không thể tải danh sách chức vụ.');
-    }
-  }, []);
-
-  // Fetch worksites
-  const fetchWorksites = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v1/worksites?isActive=ALL&limit=100');
-      const data = await res.json();
-      if (data.success) {
-        setWorksites(data.data || []);
-      }
-    } catch {
-      setErrorMessage('Không thể tải danh sách địa điểm làm việc.');
-    }
-  }, []);
-
-  // Fetch employees for manager selector
-  const fetchEmployees = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v1/employees?limit=100');
-      const data = await res.json();
-      if (data.success) {
-        setEmployees(data.data || []);
-      }
-    } catch {
-      // optional
-    }
-  }, []);
-
+  const authResource = useOrganizationResource(loadCurrentUser, setCurrentUser, () => setCurrentUser(null), denied, resources, onDenied);
+  const branchResource = useOrganizationResource(loadBranches, setBranches, () => setBranches([]), denied, resources, onDenied);
+  const departmentResource = useOrganizationResource(loadDepartments, setDepartments, () => setDepartments([]), denied, resources, onDenied);
+  const positionResource = useOrganizationResource(loadPositions, setPositions, () => setPositions([]), denied, resources, onDenied);
+  const worksiteResource = useOrganizationResource(loadWorksites, (value) => {
+    setWorksites(value.items);
+    setWorksiteTotal(value.total);
+  }, () => { setWorksites([]); setWorksiteTotal(null); }, denied, resources, onDenied);
+  const employeeResource = useOrganizationResource(loadAllEmployees, setEmployees, () => setEmployees([]), denied, resources, onDenied);
+  const loadAuth = authResource.load;
+  const loadBranchData = branchResource.load;
+  const loadDepartmentData = departmentResource.load;
+  const loadPositionData = positionResource.load;
+  const loadWorksiteData = worksiteResource.load;
+  const loadEmployeeData = employeeResource.load;
+  const fetchBranches = () => loadBranchData(true);
+  const fetchDepartments = () => loadDepartmentData(true);
+  const fetchPositions = () => loadPositionData(true);
+  const fetchWorksites = () => loadWorksiteData(true);
   useEffect(() => {
-    setLoading(true);
-    Promise.all([fetchCurrentUser(), fetchBranches(), fetchDepartments(), fetchPositions(), fetchWorksites(), fetchEmployees()]).finally(() => {
-      setLoading(false);
-    });
-  }, [fetchCurrentUser, fetchBranches, fetchDepartments, fetchPositions, fetchWorksites, fetchEmployees]);
+    void loadAuth();
+    void loadBranchData();
+    return () => { departmentIntent.current += 1; };
+  }, [loadAuth, loadBranchData]);
+  useEffect(() => {
+    if (activeTab === 'DEPARTMENTS') void loadDepartmentData();
+    if (activeTab === 'POSITIONS') void loadPositionData();
+    if (activeTab === 'WORKSITES') void loadWorksiteData();
+  }, [activeTab, loadDepartmentData, loadPositionData, loadWorksiteData]);
+
+  const activeResource = activeTab === 'BRANCHES' ? branchResource : activeTab === 'DEPARTMENTS' ? departmentResource : activeTab === 'POSITIONS' ? positionResource : worksiteResource;
+  const loading = activeResource.status === 'idle' || activeResource.status === 'loading';
+  const readError = activeResource.error || authResource.error;
+  const count = (status: ResourceStatus, value: number | null) => status === 'loaded' && value !== null ? value : '--';
+
+  const openDepartment = async (department: typeof editDept) => {
+    const intent = ++departmentIntent.current;
+    setEditDept(department);
+    setDepartmentPreparationError('');
+    setPreparingDepartment(true);
+    // Reuse only complete page-local lists and deduplicate pending pagination.
+    const ready = await Promise.all([loadDepartmentData(), loadEmployeeData()]);
+    if (intent !== departmentIntent.current || denied.current) return;
+    setPreparingDepartment(false);
+    if (!ready.every(Boolean)) {
+      setDepartmentPreparationError('Chua tai du lua chon phong ban va nhan vien. Khong the mo bieu mau.');
+      return;
+    }
+    const availableEmployees = employeeResource.read();
+    const availableDepartments = departmentResource.read();
+    if (!availableEmployees || !availableDepartments ||
+        (department?.managerId && !availableEmployees.some((item) => item.id === department.managerId)) ||
+        (department?.parentId && !availableDepartments.some((item) => item.id === department.parentId))) {
+      setDepartmentPreparationError('Khong xac minh duoc truong phong hoac phong ban cha hien tai. Khong the mo bieu mau.');
+      return;
+    }
+    setIsDeptModalOpen(true);
+  };
 
   // Handle Toggle Branch Status
   const handleToggleBranchStatus = async (id: string, currentActive: boolean) => {
@@ -342,6 +510,10 @@ export default function OrganizationPage() {
     setIsDeptEmpModalOpen(true);
   };
 
+  if (accessError) {
+    return <AppShell><div role="alert" className="p-4 text-red-400">{accessError}</div></AppShell>;
+  }
+
   return (
     <AppShell>
       <div className="space-y-8">
@@ -356,7 +528,7 @@ export default function OrganizationPage() {
               Cơ Cấu Tổ Chức & Chức Danh (Org Master)
             </h1>
             <Badge variant="outline" className="border-blue-500/30 text-blue-400 font-mono">
-              {branches.length} Chi Nhanh • {departments.length} Phòng Ban • {positions.length} Chức Vụ • {worksites.length} Địa Điểm GPS
+              {count(branchResource.status, branches.length)} Chi Nhanh • {count(departmentResource.status, departments.length)} Phòng Ban • {count(positionResource.status, positions.length)} Chức Vụ • {count(worksiteResource.status, worksiteTotal)} Địa Điểm GPS
             </Badge>
           </div>
           <p className="text-xs text-slate-400 mt-1">
@@ -379,10 +551,8 @@ export default function OrganizationPage() {
             )
           ) : activeTab === 'DEPARTMENTS' ? (
             <Button
-              onClick={() => {
-                setEditDept(null);
-                setIsDeptModalOpen(true);
-              }}
+              onClick={() => { void openDepartment(null); }}
+              disabled={preparingDepartment}
               className="gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 font-semibold shadow-lg shadow-blue-500/20"
             >
               <Plus className="h-4 w-4" /> Thành Lập Phòng Ban Mới
@@ -412,12 +582,17 @@ export default function OrganizationPage() {
       </div>
 
       {/* Error Alert */}
-      {errorMessage && (
-        <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
+      {(errorMessage || readError || departmentPreparationError) && (
+        <div role="alert" className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
           <AlertCircle className="h-5 w-5 shrink-0" />
-          <span>{errorMessage}</span>
+          <span>{errorMessage || readError || departmentPreparationError}</span>
+          {readError && <Button variant="outline" size="sm" onClick={() => {
+            if (authResource.status === 'error') void loadAuth(true);
+            if (activeResource.status === 'error') void activeResource.load(true);
+          }}>Thu lai</Button>}
         </div>
       )}
+      {preparingDepartment && <div role="status" className="text-sm text-slate-400">Dang tai lua chon phong ban va nhan vien...</div>}
 
       {/* Navigation Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-800">
@@ -430,7 +605,7 @@ export default function OrganizationPage() {
           }`}
         >
           <GitBranch className="h-4 w-4" />
-          <span>Chi Nhanh ({branches.length})</span>
+          <span>Chi Nhanh ({count(branchResource.status, branches.length)})</span>
         </button>
 
         <button
@@ -442,7 +617,7 @@ export default function OrganizationPage() {
           }`}
         >
           <Building2 className="h-4 w-4" />
-          <span>Cơ Cấu Phòng Ban ({departments.length})</span>
+          <span>Cơ Cấu Phòng Ban ({count(departmentResource.status, departments.length)})</span>
         </button>
 
         <button
@@ -454,7 +629,7 @@ export default function OrganizationPage() {
           }`}
         >
           <Briefcase className="h-4 w-4" />
-          <span>Ngạch Bậc & Khung Lương Chức Vụ ({positions.length})</span>
+          <span>Ngạch Bậc & Khung Lương Chức Vụ ({count(positionResource.status, positions.length)})</span>
         </button>
 
         <button
@@ -466,7 +641,7 @@ export default function OrganizationPage() {
           }`}
         >
           <MapPin className="h-4 w-4" />
-          <span>Địa Điểm Chấm Công GPS ({worksites.length})</span>
+          <span>Địa Điểm Chấm Công GPS ({count(worksiteResource.status, worksiteTotal)})</span>
         </button>
       </div>
 
@@ -493,6 +668,8 @@ export default function OrganizationPage() {
                       Dang tai danh muc chi nhanh...
                     </td>
                   </tr>
+                ) : branchResource.status === 'error' ? (
+                  <tr><td colSpan={7} className="py-8 text-center text-red-400">Khong the tai danh sach chi nhanh.</td></tr>
                 ) : branches.length === 0 ? (
                   <tr>
                     <td colSpan={7}>
@@ -656,6 +833,8 @@ export default function OrganizationPage() {
                       Đang tải danh mục phòng ban...
                     </td>
                   </tr>
+                ) : departmentResource.status === 'error' ? (
+                  <tr><td colSpan={7} className="py-8 text-center text-red-400">Khong the tai danh sach phong ban.</td></tr>
                 ) : departments.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-xs text-slate-500">
@@ -743,10 +922,8 @@ export default function OrganizationPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => {
-                              setEditDept(dept);
-                              setIsDeptModalOpen(true);
-                            }}
+                            onClick={() => { void openDepartment(dept); }}
+                            disabled={preparingDepartment}
                             title="Chỉnh sửa thông tin"
                             className="h-8 w-8 p-0 text-slate-400 hover:text-emerald-400"
                           >
@@ -806,6 +983,8 @@ export default function OrganizationPage() {
                       Đang tải danh mục chức vụ...
                     </td>
                   </tr>
+                ) : positionResource.status === 'error' ? (
+                  <tr><td colSpan={7} className="py-8 text-center text-red-400">Khong the tai danh sach chuc vu.</td></tr>
                 ) : positions.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-xs text-slate-500">
@@ -914,7 +1093,11 @@ export default function OrganizationPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-medium">
-                {worksites.length === 0 ? (
+                {loading ? (
+                  <tr><td colSpan={7} className="py-8 text-center text-slate-400">Dang tai danh muc dia diem...</td></tr>
+                ) : worksiteResource.status === 'error' ? (
+                  <tr><td colSpan={7} className="py-8 text-center text-red-400">Khong the tai danh sach dia diem.</td></tr>
+                ) : worksites.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center py-10 text-slate-500">
                       Chưa có địa điểm làm việc nào được thiết lập. Hãy thêm địa điểm đầu tiên để kích hoạt chấm công GPS.
